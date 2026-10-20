@@ -18,3 +18,27 @@ Stage Summary:
 - المرحلة الأولى من الوثائق (4 وثائق + فهرس) جاهزة في /home/z/my-project/download/heseb-docs/ بصيغة Markdown منفصلة كما اختار المالك.
 - قرارات مثبتة: ميزانية صفرية، Flutter+SQLite محلي أولاً، مبادئ Tryton ملزمة، سجل أحداث من اليوم الأول، بنية عملات/ضريبة جاهزة معطلة، PocketBase أساس مزامنة مرشح وSupabase قيد اختبار عميق، المراحل 0-5.
 - الخطوة التالية: ملاحظات المالك على الوثائق الأربع ← تحديثها إلى v1.0 ← إنتاج الوثائق 02, 03, 04, 06, 08, 10 في المرحلة الثانية.
+
+---
+Task ID: 2
+Agent: main agent (Z.ai)
+Task: تحويل الوثائق الأربع (01, 05, 07, 09) إلى صيغتي PDF وWord بمحاذاة يمين RTL كاملة، وفق طلب المالك.
+
+Work Log:
+- تحميل مهارتي pdf وdocx وقراءة ملفاتهما المرجعية (create.md, docx-js-core.md, common-rules.md, fonts.md, creative-flow.md).
+- فحص الخطوط: لا خط عربي احترافي محلياً سوى DejaVu Sans/FreeSerif؛ اعتماد Google Fonts (Cairo للعناوين + Noto Naskh Arabic للمتن) مع fallback محلي.
+- بناء scripts/md2html_docs.js: محلل Markdown مخصص → HTML dir=rtl صفحة A4 (794x1123px)، غلاف ثابت لكل وثيقة، جداول RTL، اقتباسات، code spans باتجاه LTR مدمج.
+- إصلاحات المدقق: إلحاق generic fallback لكل font-family؛ توسيع فراغات cover-rule إلى >=40px؛ حذف border-top من شريط الغلاف؛ حذف فواصل --- الملاصقة للجداول.
+- اكتشاف أن cover_validate أداة للغلاف وحده (كما توثق SKILL.md): استخراج كل غلاف في ملف .cover.html مستقل → نجاح 4/4.
+- pagedjs 0.4.3 يرفض require.resolve (ERR_PACKAGE_PATH_NOT_EXPORTED): symlink إلى cwd/node_modules نجح، لكن Paged.js قصّ المحتوى عند صفحتين → الاعتماد على --nopaged (تقسيم كروميوم الأصلي) → صفحات كاملة (5/6/4/4).
+- فحص بصري للغلاف وصفحة محتوى وأسفل جدول ممتد: التشكيل العربي والمحاذاة واكتمال الصفوف سليمة.
+- pdf_qa --no-tables: كل الفحوص جوهرية ناجحة؛ أصلحت امتلاء الصفحة الأخيرة للوثيقة 01 (16%→25%) بإضافة جملة ختامية للقسم 9 في المصدر md (حدّث المصدر الكانوني أيضاً).
+- الميتاداتا عبر pdf.py meta.set (عبر ملف مؤقت داخل المشروع بسبب منع الكتابة خارج مسار المشروع): Title/Author/Subject/Creator للملفات الأربعة.
+- بناء scripts/md2docx_docs.js: docx-js مع RTL كامل (bidirectional لكل فقرة، rightToLeft لكل نص عربي، sizeComplexScript/boldComplexScript، visuallyRightToLeft للجداول، ترقيم قوائم فريد لكل قائمة، عناوين HeadingLevel حقيقية، خط Arial مع Courier New للأكواد).
+- postcheck.py: نجاح 9/9 لكل ملف بلا أخطاء أو تحذيرات.
+- تحقق بصري لملف Word عبر تحويل LibreOffice → الجداول معكوسة الأعمدة والعناوين يمين بشكل صحيح.
+
+Stage Summary:
+- التسليم: 4 PDF (300-400KB، خطوط مضمّنة، نص متجهي قابل للتحديد) في download/heseb-docs/pdf/ + 4 DOCX في download/heseb-docs/word/ + مصادر HTML قابلة للتحرير في download/heseb-docs/html/ (قاعدة HTML→PDF: تسليم المصدر مع الناتج).
+- سكربتا التحويل محفوظان في scripts/ لإعادة التوليد عند أي تعديل مستقبلي على الوثائق.
+- ملاحظة معمارية: Paged.js لا يُستخدم لهذه الحزمة (قصّ المحتوى) — --nopaged هو المسار المعتمد المعاير لهذه القوالب.

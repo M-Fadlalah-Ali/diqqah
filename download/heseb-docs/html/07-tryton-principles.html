@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8"/>
+<title>المبادئ المعمارية الموروثة من Tryton</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=Noto+Naskh+Arabic:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+@page { size: 794px 1123px; margin: 0; }
+:root{
+  --c-text:#1a2332; --c-muted:#5b6b7c; --c-accent:#14625a; --c-accent-dark:#0d4740;
+  --c-accent-light:#eaf2f0; --c-border:#d7e0dd; --c-bg:#ffffff; --c-code-bg:#f2f5f4;
+  --f-head:'Cairo','DejaVu Sans',sans-serif;
+  --f-body:'Noto Naskh Arabic','Cairo','DejaVu Sans',sans-serif;
+}
+html,body{margin:0;padding:0;width:794px;background:var(--c-bg);color:var(--c-text);
+  font-family:var(--f-body),'Noto Naskh Arabic','Cairo','DejaVu Sans',sans-serif;font-size:15px;line-height:1.95;direction:rtl;}
+@media screen{
+  html{height:auto;display:flex;justify-content:center;background:#e8ecea;}
+  body{margin:16px auto;box-shadow:0 2px 24px rgba(20,40,40,.18);}
+}
+/* ---------- cover ---------- */
+.cover{width:794px;height:1123px;box-sizing:border-box;break-after:page;overflow:hidden;
+  position:relative;display:flex;flex-direction:column;justify-content:center;
+  padding:64px;background:#ffffff;}
+.cover .deco1{position:absolute;top:70px;left:64px;width:120px;height:120px;border-radius:50%;
+  background:var(--c-accent);opacity:.10;}
+.cover .deco2{position:absolute;top:130px;left:130px;width:56px;height:56px;border-radius:50%;
+  background:var(--c-accent);opacity:.16;}
+.cover .deco3{position:absolute;bottom:150px;right:64px;width:180px;height:10px;border-radius:6px;
+  background:var(--c-accent);opacity:.12;}
+.badge{display:inline-block;font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-weight:700;font-size:14px;
+  color:#ffffff;background:var(--c-accent);padding:7px 20px;border-radius:999px;letter-spacing:.4px;}
+.cover-kicker{font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-size:16px;font-weight:600;color:var(--c-muted);
+  margin-top:44px;letter-spacing:.3px;}
+.cover-title{font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-weight:800;font-size:44px;line-height:1.45;
+  color:var(--c-accent-dark);margin:10px 0 0;}
+.cover-rule{width:96px;height:5px;background:var(--c-accent);border-radius:3px;margin:44px 0 48px;}
+.cover-meta{display:flex;flex-wrap:wrap;gap:10px;}
+.chip{font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-size:13px;font-weight:600;color:var(--c-accent-dark);
+  background:var(--c-accent-light);border:1px solid var(--c-border);border-radius:8px;padding:6px 14px;}
+.cover-related{margin-top:18px;font-size:13px;color:var(--c-muted);max-width:520px;}
+.cover-bottom{position:absolute;bottom:64px;right:64px;left:64px;display:flex;
+  justify-content:space-between;align-items:center;
+  font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-size:12.5px;color:var(--c-muted);}
+/* ---------- content ---------- */
+.main-content{padding:54px 58px 46px 58px;}
+h2{font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-size:21.5px;font-weight:800;color:var(--c-accent-dark);
+  border-right:4px solid var(--c-accent);padding-right:12px;margin:26px 0 10px;
+  break-after:avoid;break-inside:avoid;line-height:1.6;}
+h3{font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-size:17px;font-weight:700;color:var(--c-accent-dark);
+  margin:18px 0 8px;break-after:avoid;break-inside:avoid;line-height:1.6;}
+p{margin:0 0 9px;text-align:justify;}
+strong{font-weight:700;color:var(--c-accent-dark);}
+code{font-family:'DejaVu Sans Mono','Liberation Mono',monospace;font-size:12.5px;direction:ltr;
+  unicode-bidi:embed;background:var(--c-code-bg);border:1px solid var(--c-border);
+  border-radius:4px;padding:1px 5px;color:#0d3b36;}
+ul,ol{margin:4px 0 12px;padding-right:26px;}
+li{margin-bottom:5px;text-align:start;break-inside:avoid;}
+blockquote{background:#f4f8f7;border-right:4px solid var(--c-accent);border-radius:6px 0 0 6px;
+  padding:10px 16px;margin:12px 0;break-inside:avoid;text-align:start;}
+blockquote p{margin:0;}
+table{width:100%;border-collapse:collapse;margin:12px 0 16px;font-size:13.2px;line-height:1.75;}
+tr{break-inside:avoid;}
+th,td{border:1px solid var(--c-border);padding:6px 10px;text-align:start;vertical-align:top;}
+thead th,th{background:var(--c-accent-light);font-family:var(--f-head),'Cairo','DejaVu Sans',sans-serif;font-weight:700;
+  color:var(--c-accent-dark);font-size:13px;}
+hr{border:none;border-top:1px solid var(--c-border);margin:16px 0;}
+</style>
+</head>
+<body>
+<div class="cover">
+  <div class="deco1"></div><div class="deco2"></div><div class="deco3"></div>
+  <div><span class="badge">وثيقة 07</span></div>
+  <div class="cover-kicker">حزمة وثائق تطبيق المحاسبة الصغير</div>
+  <h1 class="cover-title">المبادئ المعمارية الموروثة من Tryton</h1>
+  <div class="cover-rule"></div>
+  <div class="cover-meta"><span class="chip">الإصدار 0.1</span><span class="chip">التاريخ 2026-10-20</span><span class="chip">الحالة ملزمة عند اعتماد المالك</span></div>
+  
+  <div class="cover-bottom"><span>مشروع تطبيق المحاسبة الصغير</span><span>إصدار 0.1</span></div>
+</div>
+<div class="main-content">
+<table><thead><tr><th>البند</th><th>القيمة</th></tr></thead><tbody><tr><td>الإصدار</td><td>0.1</td></tr><tr><td>التاريخ</td><td>2026-10-20</td></tr><tr><td>الحالة</td><td>ملزمة عند اعتماد المالك</td></tr><tr><td>دور الوثيقة</td><td>مرجع التزام يُرفَق مع كل جلسة برمجة — أي اقتراح يخالفها يُرفض ويُبلَّغ عنه المالك</td></tr></tbody></table><h2>0. الرؤية العامة</h2><p>ننقل من نظام Tryton (ERP مفتوح المصدر معروف بصرامته المحاسبية وفلسفة "البرمجيات الصغيرة") <strong>مبادئه</strong>، لا آلياته: نقتطع منه العمود الفقري المحاسبي وأسلوبه الهندسي، ونترك جسمه الوظيفي الضخم (تعدد شركات، صلاحيات مؤسسية، وحدات تشغيلية). القاعدة الذهبية التي تحكم كل جلسة برمجة:</p><blockquote><p><strong>نحن نبني تطبيقاً محاسبياً محدداً بنفس صرامة Tryton وبعُشر آلياته.</strong> كلما اقترح المُنفِّذ (بشرياً كان أو ذكاءً اصطناعياً) بناء "نظام وحدات عام" أو "إطار عمل مرن" أو "طبقة تجريد شاملة"، يُرفض الاقتراح.</p></blockquote><h2>1. المبادئ العشرة الملزمة</h2><h3>1.1 كل حدث أعمال هو قيد متوازن</h3><p>لا توجد عملية في النظام (فاتورة، سند، حركة مخزون، حركة صندوق) تُطبَّق دون أن تولّد قيداً محاسبياً متوازناً عبر <strong>محرك ترحيل واحد</strong> (PostingEngine). يُمنع منعاً باتاً وجود مسار يعدّل الأرصدة أو الحسابات مباشرة خارج المحرك. القاعدة العملية: أي كود يريد تغيير رصيد — فهو لا يعدّل رصيداً، بل يمرر حداً للمحرك.</p><h3>1.2 آلات حالات صريحة بانتقالات محروسة</h3><p>لكل مستند حالة معلنة (مسودة ← مرحّلة ← مدفوعة/مُنساة، أو ما يقابلها)، والانتقال بين الحالات يمر عبر دالة تحقق واحدة تعرض شروط الانتقال (مثال: لا ترحيل في فترة مقفلة، لا نسّ إن لم تكتمل البنود). يُمنع تعديل حقل الحالة مباشرة من أي مكان آخر في الكود.</p><h3>1.3 ثبات المستند المُرحّل</h3><p>ما رُحّل لا يُعدّل ولا يُحذف أبداً. التصحيح يكون بعكس قيد جديد (مردود بيع، مردود شراء، قيد عكسي) يحمل مرجعاً للمستند الأصلي. حذف المسودات مسموح؛ حذف المرحّل مستحيل على مستوى المحرك وعلى مستوى قاعدة البيانات.</p><h3>1.4 المصالحة أساس الذمم</h3><p>كل سداد (قبض أو صرف) يُطابق صراحةً بفواتيره التي يغطيها، ولو جزئياً، عبر جدول مطابقات. الأرصدة وأعمار الذمم تُشتق من هذه المطابقات، لا من جمع وطرح عمياء. هذا ما يجعل تقرير "من مدين لنا بكم وعلى أي فواتير" دقيقاً وقابلاً للتدقيق.</p><h3>1.5 فترات مالية وإقفال</h3><p>الزمن المحاسبي مقسّم لفترات (شهرية افتراضياً). الفترة المغلقة تتجمد: لا ترحيل فيها ولا تعديل في مستنداتها، ويتم عند إقفالها توليد قيود التسوية والأرصدة الافتتاحية للفترة التالية. الإقفال صلاحية مدير حصراً وقابل للاستعادة بفك إقفال موثق.</p><h3>1.6 دليل الحسابات إعداد لا كود</h3><p>شجرة الحسابات وترميزها بيانات قابلة للتخصيص، والتقارير (ميزان، أرباح، ميزانية) تُبنى من <strong>أنواع الحسابات</strong> (أصول، خصوم، إيرادات، مصروفات، حقوق ملكية) لا من أسمائها أو رموزها. إعادة تسمية أو ترقيم لا تكسر أي تقرير.</p><h3>1.7 العملات باحتراف منذ اليوم الأول</h3><p>حتى في الإصدار أحادي العملة: <strong>كل مبلغ يُخزَّن مع عملته وسعر صرفه لحظة العملية</strong>، والمكافئ بالعملة الأساسية يُخزَّن ولا يُحسب عند العرض. حين تُفعَّل تعددية العملات (المرحلة 3) لن يلزم أي ترحيل بيانات مؤلم، وفروق العملة (المحققة عند السداد وغير المحققة عند الإقفال) ستكون قيوداً حقيقية في الدفتر لا أرقاماً عرضية.</p><h3>1.8 طبقة مجال نقية واحدة</h3><p>كل منطق الأعمال (المحرك، الحالات، المصالحة، الفترات، الترقيم، العملات) يعيش في حزمة Dart نقية بلا أي استيراد من Flutter أو قاعدة البيانات — تشتغل نفسها على كل المنصات وقابلة للاختبار بلا واجهات. الواجهة <strong>تعرض ولا تحسب</strong>، والتخزين <strong>يحفظ ولا يقرر</strong>. هذا نظيرنا المحلي لقاعدة Tryton "المنطق كله في الخادم".</p><h3>1.9 ترقيم تسلسلي بلا فجوات</h3><p>الفواتير والسندات تأخذ أرقامها من آلية تسلسل مركزية واحدة (تسلسل سنوي لكل نوع: فاتورة بيع 2026/000001). الأرقام المُصدر لا تُعاد أبداً؛ إلغاء مستند لا يُعيد رقمه للدورة. هذا شرط تدقيق محاسبي سليم.</p><h3>1.10 ثقافة اختبارات وثوابت</h3><p>لكل قاعدة محاسبية اختبار آلي بسيناريو أرقام معروفة النتيجة يراجعها المالك (المحاسب). والثوابت (شبكة الأمان) تُفحص آلياً بعد كل عملية وعند فتح التطبيق: توازن القيود، عدم سالبية المخزون، تطابق رصيد الصندوق مع مجموع حركاته، اكتمال ارتباط كل فاتورة مرحّلة بقيد. أي خرق ثابت = إيقاف الكتابة وتنبيه فوري.</p><h2>2. القواعد التنفيذية الثلاث (غير قابلة للتفاوض)</h2><ol><li><strong>لا أعداد عشرية بعائمة أبداً</strong>: المبالغ تُخزَّن بأعداد صحيحة بالوحدة الصغرى للعملة (قروش/سنتات/6 أرقام للعملات عالية القيمة)، والكميات كأعداد صحيحة بالوحدة الأساسية أو كسور دقيقة باتفاقية موثقة. استخدام <code dir="ltr">float</code> أو <code dir="ltr">double</code> لأي مبلغ أو كمية مالية <strong>خطأ يُرفض في مراجعة الكود فوراً</strong>.</li><li><strong>التوازن يُفرض مرتين</strong>: مرة في محرك الترحيل (يرفض قيداً غير متوازن قبل الكتابة)، ومرة على مستوى قاعدة البيانات (قيد تحقق/مُشغِّل يمنع تخزين قيد غير متوازن). الدفاع المزدوج لأن كل واحد منهما وحده قابل للتعطيل بالخطأ.</li><li><strong>سجل الأحداث من اليوم الأول</strong>: كل عملية مكتملة تُسجَّل صفاً في جدول أحداث (append-only لا يُعدّل ولا يُحذف) يصف "ماذا حدث ولمن ومتى ومن أي جهاز". الأرصدة التفصيلية تُشتق من الأحداث والمستندات، والجداول التجميعية مجرد ذاكرة تخزين مؤقت قابلة لإعادة البناء. هذا السجل هو أساس التدقيق وهو ما سيجعل المزامنة (المرحلة 4) نقل أحداث مرتّبة لا دمج قواعد بيانات.</li></ol><h2>3. القراران المعلّقان المعماريان</h2><h3>3.1 ربط المخزون بالدفتر (يُحسم في المرحلة 2، يُهيَّأ له من اليوم الأول)</h3><p>نمطان معروفان: <strong>القاري</strong> (تكلفة المبيعات تُقيَّد عند الشحن/البيع) و<strong>الأنجلوساكسوني</strong> (تُقيَّد عند ترحيل الفاتورة). الميل المبدئي للنمط القاري بمتوسط مرجح لأبسطيته مع التحولات المتعددة، لكن القرار النهائي يُتخذ مع المالك في المرحلة 2. <strong>التزام التنفيذ الآن</strong>: نموذج بنود القيد (move_line) يستوعب مرجعاً اختيارياً لحركة مخزون منذ الإصدار الأول، حتى لا يحتاج الربط لاحقاً أي إعادة هيكلة.</p><h3>3.2 "الفاتورة أولاً" في MVP</h3><p>لا أوامر بيع ولا أوامر شراء ولا أوراق شحن في الإصدار الأول — العملية تبدأ من الفاتورة مباشرة (كوحدة account_invoice في Tryton). سلسلة "أمر بيع ← شحنة ← فاتورة" تُضاف لاحقاً كطبقة تشغيلية فوق الفاتورة إن طلبها العمل، دون أي تغيير في القلب المحاسبي.</p><h2>4. ما لا يُنسخ من Tryton (قرارات سلبية ملزمة)</h2><table><thead><tr><th>لا يُبنى</th><th>البديل المعتمد</th></tr></thead><tbody><tr><td>بنية خادم + PostgreSQL</td><td>تطبيق محلي بـSQLite؛ الخادم الصغير (إن وجد) للمزامنة فقط وهو قابل للتبديل</td></tr><tr><td>نظام وحدات تُركَّب وتُنزَل وقت التشغيل</td><td>حزم Dart منفصلة بتبعية باتجاه واحد: الواجهة ← المجال ← التخزين، ولا تبعية عكسية أبداً</td></tr><tr><td>محرك Workflows عام</td><td>حقول حالة صريحة + دالة تحقق لكل انتقال</td></tr><tr><td>تعدد شركات، صلاحيات مؤسسية على مستوى السجلات</td><td>أدوار وصلاحيات على مستوى الشاشة والعملية (كافية لحجم الفريق المستهدف)</td></tr><tr><td>ORM عام قابل للتوسيع</td><td>Drift بجداول صريحة ونماذج بسيطة؛ كل جدول موثق في وثيقة 05</td></tr></tbody></table><h2>5. بروتوكول الالتزام في جلسات البرمجة</h2><ol><li>تُرفق هذه الوثيقة (مع الوثائق ذات الصلة) مع كل جلسة برمجة قبل أي سطر كود.</li><li>كل ميزة تُنفَّذ تُصاغ بمرجعها في وثيقة المتطلبات (04) ووحدتها في نموذج البيانات (05).</li><li>إذا ظن المُنفِّذ أن الالتزام بالمبدأ يعيق المطلوب: <strong>يتوقف ويسأل المالك</strong>، ولا "يبتكر" حلاً مخالفاً بصمت. إذا صح التعديل يُكتب في هذه الوثيقة بإصدار جديد أولاً، ثم يُنفَّذ.</li><li>كل ملف كود جديد يُراجع بسؤالين قبل القبول: (أ) هل يمر أي حساب عبر المحرك؟ (ب) هل الكمية/المبلغ مخزنان بالقاعدة التنفيذية رقم 1؟</li></ol>
+</div>
+</body>
+</html>
