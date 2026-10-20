@@ -1,0 +1,134 @@
+# 05 — نموذج البيانات (مفاهيمي، إصدار 0.1)
+
+| البند | القيمة |
+|---|---|
+| الإصدار | 0.1 (مفاهيمي — تكتمل تفاصيل الحقول والفهارس بعد وثيقة المتطلبات 04) |
+| التاريخ | 2026-10-20 |
+| قاعدة التخزين | SQLite محلياً (عبر Drift) — قاعدة واحدة لكل منشأة على كل جهاز |
+| وثيقة الالتزام | المبادئ في وثيقة 07 ملزمة هنا (وحدات صغرى صحيحة، لا حذف فيزيائي للمرحّل، سجل أحداث) |
+
+---
+
+## 1. المدخل: ثلاث طبقات بيانات
+
+1. **طبقة مرجعية** (تتغير ببطء): الأطراف، الأصناف، الوحدات، الحسابات، العملات، المستودعات، المستخدمون والأدوار، الصناديق.
+2. **طبقة تشغيلية** (تتغير باستمرار): الفواتير، السندات، حركات المخزون، حركات الصناديق، القيود.
+3. **طبقة مشتقة** (تُبنى آلياً ولا تُحرَّر يدوياً): سجل الأحداث، أرصدة المخزون، الأرصدة التجميعية للمخزون والصناديق والذمم، المطابقات الناتجة عن السداد.
+
+القاعدة: طبقة المشتقات قابلة للحذف وإعادة البناء بالكامل من الطبقتين الأدنى في أي وقت — وهذا بحد ذاته اختبار سلامة دوري.
+
+## 2. اصطلاحات عامة ملزمة
+
+- كل جدول: `id` محلي (ترقيم تلقائي) + `uuid` عالمي (يتحمل النقل بين الأجهزة في المزامنة) + `created_at` + `updated_at` + `is_deleted` (حذف منطقي فقط للسجلات غير المرحّلة).
+- كل مبالغ بالوحدة الصغرى الصحيحة (`integer`) باسم الحقل `..._minor`، ومرفق بها `currency_id` و`fx_rate_to_base` (سعر الصرف لحظة العملية، افتراضياً 1) و`..._base_minor` (المكافئ المخزَّن بالعملة الأساسية).
+- كل كميات تُخزَّن بالوحدة الأساسية للصنف `qty_base` (عدد صحيح أو كسر بالاتفاقية الموثقة)، مع **لقطة** للوحدة والعامل وقت العملية في سطر المستند (`unit_id`, `factor_at_entry`) — تغيير عامل التحويل لاحقاً لا يشوه التاريخ.
+- كل مستند تشغيلي: `state` (آلة حالة صريحة) + `number` (تسلسل بلا فجوات) + `move_id` (مرجع القيد عند الترحيل) + `user_id` (صاحب العملية) + `device_id`.
+- تسمية المفاتيح الأجنبية موحدة: `<جدول>_id`. لا حذف متسلسل (cascade delete) لأي شيء تشغيلي.
+
+## 3. طبقة المرجع
+
+### 3.1 الأطراف والصلاحيات
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `party` | name, kind(`customer/supplier/both`), phone, address, default_currency_id, credit_limit_base_minor?, is_active | الطرف الواحد قد يكون عميلاً ومورداً معاً |
+| `app_user` | name, login, password_hash, role_id, is_active | مستخدمون محليون من الإصدار الأول |
+| `role` | name | مدير، محاسب، أمين مستودع، بائع... |
+| `permission` | role_id, scope(`screen/operation/report`), key, allowed | صلاحيات على مستوى الشاشة والعملية والتقرير |
+
+### 3.2 الأصناف والوحدات
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `unit` | name, is_base(نعم/لا) | الوحدة الأساسية عاملها 1 |
+| `unit_group` | name | مجموعة التعبئة: قطعة/علبة/كرتونة تحت مجموعة واحدة |
+| `unit_conversion` | unit_id, target_base_unit_id, factor | عامل تحويل ثابت (علبة = 12 قطعة)؛ لا يُعدَّل بعد وجود حركات — تُنشأ وحدة جديدة بدلاً منه |
+| `item` | sku, name, kind(`good/service/bundle`), base_unit_id, purchase_price_minor, sale_price_minor, price_currency_id, default_tax_id?(قيمة صفرية)، is_active | الخدمة صنف بلا مخزون؛ البضاعة تخزونية |
+| `bundle_component` | bundle_item_id, component_item_id, qty_base | وصفة التجميع البسيط: بيع التجميعي يسحب مكوناته من المخزون |
+| `item_barcode` | item_id, barcode, unit_id | تحضير للمرحلة 5 (باركود) — بنية جاهزة مبكراً |
+
+### 3.3 المستودعات والصناديق
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `warehouse` | name, is_active | مستودع واحد في MVP؛ البنية تعددية منذ البداية |
+| `cash_box` | name, currency_id (افتراضياً الأساسية), opening_balance_base_minor | كل صندوق عملته واحدة (يُمنع خلط عملات في صندوق واحد) |
+
+### 3.4 الدفتر المحاسبي
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `account` | code, name, type(`asset/liability/equity/income/expense`), normal_side(`debit/credit`), parent_id, is_leaf | شجرة؛ التقارير تُبنى من النوع لا الاسم |
+| `journal` | code, name, kind(`sales/purchase/cash/stock/general`) | كل قيد يصدر عن دفتر من هذه |
+| `fiscal_year` | name, start_date, end_date, state | سنة مالية واحدة مفتوحة غالباً |
+| `period` | fiscal_year_id, start_date, end_date, state(`open/closed`) | شهرية افتراضياً؛ الإقفال يجمّد الترحيل فيها |
+| `move` | journal_id, period_id, date, state(`draft/posted`), ref_doc_type, ref_doc_id, narration | القيد الواحد لكل مستند مرحّل غالباً |
+| `move_line` | move_id, account_id (ورقة فقط), debit_minor, credit_minor, party_id?, currency_id, amount_minor, fx_rate, ref_stock_move_id? | المرجع الاختياري لحركة مخزون هو تهيئة قرار ربط المخزون بالدفتر (3.1 من وثيقة 07) |
+
+### 3.5 العملات
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `currency` | code(ISO), name, minor_units (عدد خانات الوحدة الصغرى: SYP=2 مقترحاً) | العملة الأساسية واحدة، `is_base` |
+| `exchange_rate` | currency_id, date, rate_to_base (عدد صحيح مكبَّر) | تاريخية؛ لا تُعدَّل الأسعار القديمة أبداً |
+
+## 4. الطبقة التشغيلية
+
+### 4.1 الفواتير والمردودات
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `invoice` | kind(`sale/purchase/sale_return/purchase_return`), number, party_id, warehouse_id, invoice_date, due_date?, currency_id, fx_rate, totals..., state(`draft/posted/paid/partially_paid/cancelled`), move_id, original_invoice_id?(للمردود) | إلغاء المرحّلة = مردود لا حذف |
+| `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor | للصنف التجميعي: عند الترحيل تُولَّد حركات مخزون لمكوناته من `bundle_component` |
+
+### 4.2 السندات والصناديق
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `voucher` | kind(`receipt/payment`), number, party_id, cash_box_id, voucher_date, amount_minor, currency_id, fx_rate, state, move_id | سند قبض/صرف؛ السداد الجزئي طبيعي |
+| `voucher_allocation` | voucher_id, invoice_id, applied_base_minor | **مصالحة الذمم**: توزيع السداد على فواتير محددة (يدوياً أو آلياً بالأقدمية مع إمكانية التعديل) |
+| `cash_movement` | cash_box_id, kind(`in/out/transfer_in/transfer_out`), amount_minor, ref_doc_type, ref_doc_id, user_id | كل حركة صندوق مرجعها مستند مصدر (سند أو فاتورة نقدية أو تحويل) |
+| `box_transfer` | from_box_id, to_box_id, amount_minor, state, move_id | تحويل بين صندوقين بقيدين متكاملين |
+
+### 4.3 المخزون
+
+| الجدول | الحقول الجوهرية | ملاحظات |
+|---|---|---|
+| `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد |
+| `stock_transfer` | number, from_wh, to_wh, lines..., state | مستند التحويل بين مستودعات (المرحلة 2) |
+| `stock_count` (الجرد) | warehouse_id, count_date, lines(item, counted_qty_base, system_qty_base, diff), state, adjustment_move_id | تسوية الجرد تولّد حركة تسوية وقيداً |
+
+## 5. طبقة المشتقات
+
+| الجدول | المحتوى | لماذا |
+|---|---|---|
+| `event` | seq (تسلسل محلي بلا فجوات), uuid, device_id, user_id, type, payload_json, occurred_at | سجل الأحداث append-only؛ عمود فقري للتدقيق وللمزامنة لاحقاً |
+| `stock_balance` | item_id, warehouse_id, qty_base | ذاكرة تخزين مؤقت تُبنى من stock_move — قابلة لإعادة البناء، تُفحص آلياً ضد الحساب المباشر |
+| `box_balance` | cash_box_id, balance_base_minor | كذلك من cash_movement |
+| `party_balance` | party_id, direction(`we_owe/owes_us`), balance_base_minor | من الفواتير والمطابقات؛ مصدر تقرير الذمم وأعمارها |
+| `sequence` | kind, year, last_number | آلية الترقيم المركزي (مبدأ 1.9) |
+
+## 6. خريطة "عملية ← حركات" (جوهر النموذج)
+
+| العملية | ما تُولّده آلياً عند الترحيل |
+|---|---|
+| فاتورة شراء (آجل) | قيد: مخزون (مدين) / ذمم مورد (دائن) + حركة مخزون دخول + تحديث أرصدة |
+| فاتورة بيع (نقدية) | قيد: صندوق (مدين) / مبيعات (دائن) + قيد تكلفة مبيعات/مخزون + حركة مخزون خروج |
+| فاتورة بيع (آجل) | قيد: ذمم عميل / مبيعات + تكلفة المبيعات/مخزون + حركة خروج |
+| سند قبض جزئي | قيد: صندوق / ذمم عميل + صف في voucher_allocation |
+| مردود بيع | قيد عكسي مرجعي + حركة مخزون دخول |
+| تحويل بين مستودعين | حركتا مخزون متقابلتان (خروج/دخول) بلا قيد (إلا فروق ترحيل لاحقاً) |
+| تسوية جرد | حركة تسوية + قيد فروق جرد |
+| تحويل بين صندوقين | قيدان متكاملان (خروج/دخول) |
+
+## 7. القواعد الذهبية على مستوى البيانات
+
+1. لا `move` مرحّل بدون سطرين على الأقل، ومجموع `debit_minor` = مجموع `credit_minor` (مُفروض بمحرك + بمشغِّل قاعدة بيانات).
+2. لا حركة مخزون تجعل رصيد صنف تحت الصفر في مستودعه (يُمنع في المحرك؛ والرصيد المجمَّع يُفحص دورياً ضد إعادة البناء).
+3. كل `invoice` مرحّلة لها `move_id` غير فارغ يشير لقيد مرحّل — والعكس: لا قيد من دفتر مبيعات/مشتريات دون مستند مصدر.
+4. لا يُحذف فيزيائياً أي صف من: `move`, `move_line`, `invoice*`, `voucher*`, `stock_move`, `cash_movement`, `event` — النساءة فقط للمسودات.
+5. أي تعديل حقول محاسبية على مسودة يُسجَّل في `event` (من عدّل ماذا ومتى).
+
+## 8. حالة الوثيقة وما يتبعها
+
+هذه نسخة مفاهيمية تُثبّت الكيانات والعلاقات والقرارات الجوهرية. بعد اعتماد المالك، تُبنى وثيقة المتطلبات (04) ثم تعود هذه الوثيقة لإصدار 1.0 يتضمن: تسمية الحقول النهائية، الأنواع الدقيقة، الفهارس، وخطة الترحيلات (migrations) بين إصدارات التطبيق.
