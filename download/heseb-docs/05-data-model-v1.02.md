@@ -47,7 +47,7 @@
 | `unit` | name, is_base(نعم/لا) | الوحدة الأساسية عاملها 1 |
 | `unit_group` | name | مجموعة تعبئة بمستويات متعددة؛ قوالب مقترحة (قطعة/علبة/كرتونة) أمثلة غير حصرية ويضيف المستخدم ما يشابه ومستويات أعلى (D-026) |
 | `unit_conversion` | unit_id, target_base_unit_id, factor (عدد صحيح لا عائم) | عامل تحويل ثابت (علبة = 12 قطعة)؛ لا يُعدَّل بعد وجود حركات — تُنشأ وحدة جديدة بدلاً منه (س7) |
-| `item` | sku, name, kind(`good/service/bundle`), base_unit_id, purchase_price_minor, sale_price_minor, price_currency_id, default_tax_id?(قيمة صفرية)، is_active | الخدمة صنف بلا مخزون؛ البضاعة تخزونية |
+| `item` | sku, name, category?(نص اختياري — التصنيف أساس رفع الأسعار الجماعي F-165), kind(`good/service/bundle`), base_unit_id, purchase_price_minor, sale_price_minor, price_currency_id, default_tax_id?(قيمة صفرية)، is_active | الخدمة صنف بلا مخزون؛ البضاعة تخزونية |
 | `bundle_component` | bundle_item_id, component_item_id, qty_base | وصفة التجميع البسيط: بيع التجميعي يسحب مكوناته من المخزون |
 | `item_barcode` | item_id, barcode, unit_id | تحضير للمرحلة 5 (باركود) — بنية جاهزة مبكراً |
 
