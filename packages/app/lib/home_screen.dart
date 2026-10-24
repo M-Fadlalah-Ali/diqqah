@@ -40,18 +40,22 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      // قائمة ثابتة تُبنى كاملة — لا lazy builder (ثبات التحقق في الاختبار)
-      body: ListView(
-        children: [
-          for (final (title, stage) in _modules)
-            ListTile(
-              leading: const Icon(Icons.lock_outline),
-              title: Text(title),
-              subtitle: Text('معطلة — متاح في $stage'),
-              enabled: false, // F-016: القائمة كلها معطلة في م0
-              onTap: null,
-            ),
-        ],
+      // قائمة ثابتة تُبنى كاملة — Column تُنفخ كل أبنائها فوراً بلا كسل شجري
+      // (ListView حتى بأبناء صريحين يبني الظاهر وحده — فشل CI #8: 8 من 14)،
+      // وSingleChildScrollView يوفر التمرير على الشاشات القصيرة.
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            for (final (title, stage) in _modules)
+              ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: Text(title),
+                subtitle: Text('معطلة — متاح في $stage'),
+                enabled: false, // F-016: القائمة كلها معطلة في م0
+                onTap: null,
+              ),
+          ],
+        ),
       ),
     );
   }
