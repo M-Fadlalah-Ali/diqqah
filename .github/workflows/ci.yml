@@ -54,6 +54,14 @@ jobs:
         with:
           channel: stable
       - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      # ملفات Drift المولدة (database.g.dart) غير مودعة في المستودع، ومهمة
+      # التخزين تولّدها بنفسها — الواجهة تستهلك الحزمة بمسار مباشر فلا ترى
+      # API المولد (close() وغيره) إلا بتوليدها إياه هنا قبل التحليل.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
