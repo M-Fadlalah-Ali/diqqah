@@ -1,0 +1,58 @@
+# تبعيات الواجهة فقط — لماذا ثلاث مهام منفصلة؟
+# معيار F-010 نفسه: حزمة المجال تُبنى وتُختبَر بلا Flutter ولا Drift،
+# فلو انكسر هذا الفصل لاختراقته مهام دمج واحدة. وsqlite3 مطلوبة لحزمة
+# التخزين على جهاز المشغّل (apt هنا بلا كلفة إنترنت على المالك).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  domain:
+    name: المجال النقي — بلا Flutter ولا Drift (F-010)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/domain
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
+
+  storage:
+    name: التخزين — Drift والترحيلات (F-002/F-011)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/storage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - run: dart pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - run: dart analyze
+      - run: dart test
+
+  app:
+    name: الواجهة — Flutter (F-001)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
