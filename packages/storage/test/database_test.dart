@@ -12,11 +12,12 @@ void main() {
     await db.close();
   });
 
-  test('نسخة المخطط الأولى = 1 (F-011: الترحيلات من أول يوم)', () {
-    expect(db.schemaVersion, 1);
+  test('نسخة المخطط = 2 (F-011: كل تغيير مخطط إصدار وترحيلة)', () {
+    expect(db.schemaVersion, 2);
   });
 
-  test('إنشاء المخطط وإدراج صنف وقراءته — قيم صغيرة صحيحة (س7)', () async {
+  test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
+      () async {
     await db.into(db.items).insert(
           ItemsCompanion.insert(
             sku: 'SKU-001',
@@ -59,10 +60,54 @@ void main() {
     expect(row.defaultTaxId, isNull);
   });
 
+  test('F-015: device_id يتولد مرة ويبقى ثابتاً عبر الاستدعاءات', () async {
+    final first = await db.deviceId();
+    final second = await db.deviceId();
+    expect(first, second);
+    expect(first.length, 36); // UUID v4
+  });
+
+  test('F-014/س-01: إنشاء المدير الأول — يزرع دور «مدير» ويربطه', () async {
+    expect(await db.hasAnyUser(), isFalse);
+
+    final id = await db.createManager(
+      name: 'المالك',
+      login: 'owner',
+      passwordHash: 'salt123:hash456',
+    );
+    expect(id, greaterThan(0));
+    expect(await db.hasAnyUser(), isTrue);
+
+    final user = await (db.select(db.appUsers)
+          ..where((t) => t.login.equals('owner')))
+        .getSingle();
+    expect(user.name, 'المالك');
+    expect(user.isActive, isTrue);
+
+    final role = await (db.select(db.roles)
+          ..where((t) => t.id.equals(user.roleId)))
+        .getSingle();
+    expect(role.name, 'مدير');
+  });
+
+  test('دور «مدير» لا يتكرر — إنشاء مستخدم آخر يعيد استخدام الدور', () async {
+    await db.createManager(name: 'الأول', login: 'a', passwordHash: 's:h');
+    // مستخدم إضافي عبر المسار نفسه (القاعدة لا تمنعه — البوابة تمنعه، F-014)
+    await db.createManager(name: 'الثاني', login: 'b', passwordHash: 's:h');
+    expect(await db.select(db.roles).get(), hasLength(1));
+  });
+
+  test('login فريد — إدراج مكرر يرفض من القاعدة', () async {
+    await db.createManager(name: 'الأول', login: 'owner', passwordHash: 's:h');
+    expect(
+      () => db.createManager(
+          name: 'مكرر', login: 'owner', passwordHash: 's:h'),
+      throwsA(anything),
+    );
+  });
+
   test('السعر السالب لا يمنعه المخطط بل يمنعه المجال — التخزين صادق (س6)',
       () async {
-    // تخزين قيمة سالبة مقبول هنا (فرق فروق التكلفة يحتاج إشارات)،
-    // والقلب الصارم هو Money.subtract في حزمة المجال — فصل الأدوار.
     await db.into(db.items).insert(
           ItemsCompanion.insert(
             sku: 'SKU-003',
