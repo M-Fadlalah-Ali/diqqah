@@ -1,0 +1,124 @@
+# بناء حزم التثبيت (APK / Windows) — البند الاسمي الأخير من م0 (09 §1، سجل Task 42).
+# لماذا هنا وليس محلياً؟ القيد المؤسس من Task 37: لا SDK محلياً أبداً —
+# Flutter يعيش على عُدّة GitHub، والناتج artifact يستلمه المالك من متصفحه
+# بتحميل واحد مقنن بقراره هو (مجالات الحزم ضمن حصة التخزين المجانية).
+#
+# الإطلاق: دفعة إلى فرع «build» من بيئة العمل (دفعة كيلوبايتية)،
+# أو زر «Run workflow» بيد المالك من صفحة Actions مباشرة.
+#
+# منصات التطبيق (android/ وwindows/) غير مودعة بعد — تُولَّد هنا عند غيابها
+# فقط بحرس صريح، وحين تودع هياكلها تصير هذه الخطوة صامتة لا تعيد الكتابة
+# فوق شيئاً. أرشفة الهياكل نفسها artifact صغيراً ليودع في المستودع بعد
+# مراجعتها، فيصير البناء مُعاد إنتاجه من المودع لا من التوليد العشوائي.
+name: بناء الحزم
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [build]
+
+jobs:
+  android:
+    name: حزمة أندرويد (APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: توليد منصة أندرويد إن غابت (heseb_app/app.heseb — المعرفات التقنية المعتمدة)
+        id: gen
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --org app.heseb --project-name heseb_app .
+            rm -f test/widget_test.dart
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: أرشفة هيكل أندرويد المولد (ليودَع في المستودع بعد المراجعة)
+        if: steps.gen.outputs.created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: heseb-scaffold-android
+          path: |
+            packages/app/android
+            packages/app/.metadata
+            packages/app/.gitignore
+          retention-days: 7
+      # قالب التوليد يضع الاسم التقني عنواناً للساحة — الواجهة لاتينياً
+      # لها موضعها المعرفي (قاعدة D-025) لا شاشة هاتف المالك.
+      - name: عنوان الساحة «حسيب»
+        run: sed -i 's/android:label="heseb_app"/android:label="حسيب"/' android/app/src/main/AndroidManifest.xml || true
+      - run: flutter pub get
+      # APK شامل يعمل على كل البنى، وAPK arm64 مصغّر لهواتف اليوم —
+      # استقبال المالك ببيانات مقننة فالحجم الصغير قرار لا رفاهية.
+      - name: APK شامل
+        run: flutter build apk --release
+      - name: APK arm64 مصغّر
+        run: flutter build apk --release --split-per-abi
+      - name: رفع حزمة أندرويد
+        uses: actions/upload-artifact@v4
+        with:
+          name: heseb-android
+          path: |
+            packages/app/build/app/outputs/flutter-apk/app-release.apk
+            packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          retention-days: 30
+
+  windows:
+    name: حزمة ويندوز (مجلد محمول)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: توليد منصة Windows إن غابت
+        id: gen
+        shell: pwsh
+        run: |
+          if (-not (Test-Path windows)) {
+            flutter create --platforms=windows --org app.heseb --project-name heseb_app .
+            Add-Content $env:GITHUB_OUTPUT "created=true"
+          } else {
+            Add-Content $env:GITHUB_OUTPUT "created=false"
+          }
+      - name: أرشفة هيكل Windows المولد
+        if: steps.gen.outputs.created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: heseb-scaffold-windows
+          path: packages/app/windows
+          retention-days: 7
+      # عنوان النافذة من القالب اسم تقني — يستبدل حرفياً إن وُجد موقعه،
+      # وغيابه لا يُسقط البناء (تجميل موثق لا وظيفة).
+      - name: عنوان النافذة «حسيب»
+        shell: pwsh
+        run: |
+          $f = "windows/runner/main.cpp"
+          if (Test-Path $f) {
+            $c = Get-Content $f -Raw
+            $c = $c.Replace('"heseb_app"', '"حسيب"')
+            Set-Content -Path $f -Value $c -NoNewline -Encoding utf8BOM
+          }
+      - run: flutter pub get
+      - name: بناء إصدار Windows
+        run: flutter build windows --release
+      - name: ضغط مجلد الإصدار المحمول
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath heseb-windows-x64.zip -Force
+      - name: رفع حزمة ويندوز
+        uses: actions/upload-artifact@v4
+        with:
+          name: heseb-windows
+          path: packages/app/heseb-windows-x64.zip
+          retention-days: 30
