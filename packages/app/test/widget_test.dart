@@ -161,12 +161,9 @@ void main() {
       find.widgetWithText(TextField, 'مسار ملف النسخة الاحتياطية'),
       p.join(tempDir.path, 'غير-موجود.db'),
     );
-    // زر الاستعادة تحت الخط المرئي (602 > 600) — تمرير قبل النقر
-    await tester.scrollUntilVisible(
-      find.text('استعادة…'),
-      150,
-      scrollable: find.byType(Scrollable),
-    );
+    // زر الاستعادة تحت الخط المرئي (602 > 600) — سحب القائمة قليلاً
+    // (scrollUntilVisible لا يصلح: الشاشة تحوي عدة Scrollables بحقولها)
+    await tester.drag(find.byType(ListView), const Offset(0, -120));
     await tester.pumpAndSettle();
     await tester.tap(find.text('استعادة…'));
     await tester.pumpAndSettle();
