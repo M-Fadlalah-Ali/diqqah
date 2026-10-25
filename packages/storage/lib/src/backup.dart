@@ -98,6 +98,14 @@ Future<RestoreCandidate> prepareRestore(
   final plainPath = p.join(tempDir.path, 'verified.db');
   await File(plainPath).writeAsBytes(plain, flush: true);
   final sqlite = sqlite3.open(plainPath);
+  var sqliteClosed = false;
+  void closeSqlite() {
+    if (!sqliteClosed) {
+      sqliteClosed = true;
+      sqlite.dispose();
+    }
+  }
+
   try {
     final integrity = sqlite.select('PRAGMA integrity_check');
     if (integrity.isEmpty || integrity.first.values.first != 'ok') {
@@ -108,8 +116,10 @@ Future<RestoreCandidate> prepareRestore(
     if (version > appSchemaVersion) {
       throw BackupNewerSchemaException(version);
     }
+    closeSqlite();
     return RestoreCandidate._(plainPath, tempDir, version);
   } catch (e) {
+    closeSqlite();
     try {
       tempDir.deleteSync(recursive: true);
     } catch (_) {}
@@ -120,8 +130,6 @@ Future<RestoreCandidate> prepareRestore(
           'فحص سلامة الملف فشل — الملف تالف');
     }
     rethrow;
-  } finally {
-    if (!sqlite.isClosed) sqlite.dispose();
   }
 }
 

@@ -115,12 +115,10 @@ class HesebDatabase extends _$HesebDatabase {
         },
         // F-156: التطبيق الأقدم يرفض قاعدة أحدث مخططاً برسالة «حدّث التطبيق»
         // — باب الاستعادة يفحصها قبل الاستبدال (prepareRestore)، وهذا باب
-        // الفتح نفسه (قاعدة جرى استبدالها يدوياً أو نسخة لاحقة أعادها خطأ).
-        onDowngrade: (m, from, to) async {
-          throw const HesebNewerSchemaException();
-        },
+        // الفتح نفسه. drift يمرر التراجع (9→2) في onUpgrade نفسه فلا
+        // تنفذ حلقتنا — والحرس أدناه يرفض قبل أي استخدام.
         beforeOpen: (details) async {
-          if (details.versionBefore > schemaVersion) {
+          if ((details.versionBefore ?? 0) > schemaVersion) {
             throw const HesebNewerSchemaException();
           }
         },
