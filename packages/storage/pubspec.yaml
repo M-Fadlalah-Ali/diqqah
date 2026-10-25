@@ -8,6 +8,8 @@ environment:
 
 dependencies:
   drift: ^2.35.3
+  path: ^1.9.0
+  sqlite3: ^2.4.0
   uuid: ^4.6.0
   heseb_domain:
     path: ../domain

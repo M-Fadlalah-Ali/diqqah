@@ -6,6 +6,14 @@ import 'package:uuid/uuid.dart';
 
 part 'database.g.dart';
 
+/// يُرمى عند فتح قاعدة أحدث مخططاً من التطبيق (F-156: «حدّث التطبيق»).
+class HesebNewerSchemaException implements Exception {
+  const HesebNewerSchemaException();
+
+  @override
+  String toString() => 'القاعدة أحدث مخططاً من التطبيق — حدّث التطبيق';
+}
+
 /// جدول الأصناف — انعكاس مباشر لصف `item` في نموذج البيانات (05، v1.02).
 ///
 /// قواعد معتمدة منعكسة هنا:
@@ -103,6 +111,17 @@ class HesebDatabase extends _$HesebDatabase {
             if (version == 2) {
               await m.createAll();
             }
+          }
+        },
+        // F-156: التطبيق الأقدم يرفض قاعدة أحدث مخططاً برسالة «حدّث التطبيق»
+        // — باب الاستعادة يفحصها قبل الاستبدال (prepareRestore)، وهذا باب
+        // الفتح نفسه (قاعدة جرى استبدالها يدوياً أو نسخة لاحقة أعادها خطأ).
+        onDowngrade: (m, from, to) async {
+          throw const HesebNewerSchemaException();
+        },
+        beforeOpen: (details) async {
+          if (details.versionBefore > schemaVersion) {
+            throw const HesebNewerSchemaException();
           }
         },
       );

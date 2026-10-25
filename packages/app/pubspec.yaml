@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  path: ^1.9.0
+  path_provider: ^2.1.0
   sqlite3_flutter_libs: ^0.6.0
   heseb_storage:
     path: ../storage

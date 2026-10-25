@@ -47,7 +47,10 @@ class PasswordHasher {
   }
 
   /// PBKDF2 بمعماره المعياري: F(P, S, c, i) = U1 xor U2 xor ... xor Uc.
-  List<int> _pbkdf2(
+  /// النواة البايتية العامة — تخدم تجزئة كلمات المرور هنا وتشفير النسخ
+  /// الاحتياطية في backup.dart (نفس الرياضيات المعيارية المعتمدة بالمتجهات
+  /// أدناه في اختبارات هذا الملف).
+  static List<int> pbkdf2Bytes(
       List<int> password, List<int> salt, int iterations, int dkLen) {
     final hmac = Hmac(sha256, password);
     final blocks = (dkLen / 32).ceil();
@@ -68,6 +71,11 @@ class PasswordHasher {
       derived.addAll(f);
     }
     return derived.take(dkLen).toList(growable: false);
+  }
+
+  List<int> _pbkdf2(
+      List<int> password, List<int> salt, int iterations, int dkLen) {
+    return pbkdf2Bytes(password, salt, iterations, dkLen);
   }
 
   static String _toHex(List<int> bytes) => bytes
