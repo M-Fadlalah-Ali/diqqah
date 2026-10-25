@@ -54,6 +54,14 @@ jobs:
       # لها موضعها المعرفي (قاعدة D-025) لا شاشة هاتف المالك.
       - name: عنوان الساحة «حسيب»
         run: sed -i 's/android:label="heseb_app"/android:label="حسيب"/' android/app/src/main/AndroidManifest.xml || true
+      # ملفات Drift المولدة (database.g.dart) غير مودعة في المستودع — درس
+      # CI #6/#7 (Task 41) نفسه: البناء يجمّع مصادر ../storage فلا يرى
+      # API الحزمة المولد إلا بتوليده هنا قبل البناء.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
       # APK شامل يعمل على كل البنى، وAPK arm64 مصغّر لهواتف اليوم —
       # استقبال المالك ببيانات مقننة فالحجم الصغير قرار لا رفاهية.
@@ -110,6 +118,13 @@ jobs:
             $c = $c.Replace('"heseb_app"', '"حسيب"')
             Set-Content -Path $f -Value $c -NoNewline -Encoding utf8BOM
           }
+      # نفس درس CI #1 للبناء: التوليد قبل pub get وإلا فشل تجميع مصادر التخزين.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        shell: pwsh
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
       - name: بناء إصدار Windows
         run: flutter build windows --release
