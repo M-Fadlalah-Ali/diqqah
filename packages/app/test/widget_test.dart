@@ -87,7 +87,8 @@ void main() {
 
   testWidgets('F-012: زر النسخ في الإعدادات ينتج ملف نسخة في مجلد القاعدة',
       (tester) async {
-    final tempDir = await Directory.systemTemp.createTemp('heseb_settings_t_');
+    // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
+    final tempDir = Directory.systemTemp.createTempSync('heseb_settings_t_');
     addTearDown(() => tempDir.deleteSync(recursive: true));
     final dbPath = p.join(tempDir.path, 'heseb.db');
     final db = HesebDatabase(filePath: dbPath);
@@ -111,6 +112,11 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
+    // النسخ فيها IO حقيقي (قراءة/كتابة الملف) — يُضخ حلقة الأحداث الواقعية
+    // ليكمل، ثم تستقر الشجرة على حوار النتيجة
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 500)),
+    );
     await tester.pumpAndSettle();
 
     final backups = tempDir
@@ -119,7 +125,7 @@ void main() {
         .where((f) => p.basename(f.path).startsWith('heseb-backup-'))
         .toList();
     expect(backups, hasLength(1));
-    final bytes = await backups.first.readAsBytes();
+    final bytes = backups.first.readAsBytesSync();
     expect(BackupCipher.identify(bytes), BackupKind.plainSqlite);
     // حوار النتيجة ظهر للمستخدم
     expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
@@ -127,7 +133,8 @@ void main() {
 
   testWidgets('F-013: الاستعادة بتأكيد مزدوج — والإلغاء في أي تأكيد لم يحدث شيئاً',
       (tester) async {
-    final tempDir = await Directory.systemTemp.createTemp('heseb_restore_t_');
+    // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
+    final tempDir = Directory.systemTemp.createTempSync('heseb_restore_t_');
     addTearDown(() => tempDir.deleteSync(recursive: true));
     final dbPath = p.join(tempDir.path, 'heseb.db');
     final db = HesebDatabase(filePath: dbPath);
