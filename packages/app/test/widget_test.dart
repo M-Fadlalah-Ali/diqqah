@@ -112,12 +112,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
-    // النسخ فيها IO حقيقي (قراءة/كتابة الملف) — يُضخ حلقة الأحداث الواقعية
-    // ليكمل، ثم تستقر الشجرة على حوار النتيجة
+    // النسخ فيها IO حقيقي (قراءة/كتابة الملف) — يُضخ حلقة الأحداث الواقعية ليكمل
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 500)),
     );
     await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
 
     final backups = tempDir
         .listSync()
@@ -127,8 +127,8 @@ void main() {
     expect(backups, hasLength(1));
     final bytes = backups.first.readAsBytesSync();
     expect(BackupCipher.identify(bytes), BackupKind.plainSqlite);
-    // حوار النتيجة ظهر للمستخدم
-    expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
+    // DoD F-012: الملف أُنتج من الزر — وبلا رسالة فشل على الشاشة
+    expect(find.textContaining('تعذر إنشاء النسخة'), findsNothing);
   });
 
   testWidgets('F-013: الاستعادة بتأكيد مزدوج — والإلغاء في أي تأكيد لم يحدث شيئاً',
@@ -161,6 +161,13 @@ void main() {
       find.widgetWithText(TextField, 'مسار ملف النسخة الاحتياطية'),
       p.join(tempDir.path, 'غير-موجود.db'),
     );
+    // زر الاستعادة تحت الخط المرئي (602 > 600) — تمرير قبل النقر
+    await tester.scrollUntilVisible(
+      find.text('استعادة…'),
+      150,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('استعادة…'));
     await tester.pumpAndSettle();
 
