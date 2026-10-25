@@ -19,6 +19,7 @@ class BackupCipher {
 
   static const int formatVersion = 1;
   static const int _saltLen = 16;
+  static const int _nonceLen = 12;
   static const int _macLen = 16;
 
   /// تكرارات اشتقاق مفتاح النسخة — تحدث مرة عند النسخ ومرة عند الاستعادة
