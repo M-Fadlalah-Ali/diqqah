@@ -1,19 +1,19 @@
 import 'package:test/test.dart';
-import 'package:heseb_storage/heseb_storage.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
 
 void main() {
-  late HesebDatabase db;
+  late DiqqahDatabase db;
 
   setUp(() {
-    db = HesebDatabase.inMemory();
+    db = DiqqahDatabase.inMemory();
   });
 
   tearDown(() async {
     await db.close();
   });
 
-  test('نسخة المخطط = 2 (F-011: كل تغيير مخطط إصدار وترحيلة)', () {
-    expect(db.schemaVersion, 2);
+  test('نسخة المخطط = 3 (F-011: كل تغيير مخطط إصدار وترحيلة — v3 اصطلاح كل جدول D-055)', () {
+    expect(db.schemaVersion, 3);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -28,6 +28,7 @@ void main() {
             salePriceMinor: 1500,
             priceCurrencyId: 1,
             isActive: true,
+            uuid: 'uuid-item-001',
           ),
         );
 
@@ -50,6 +51,7 @@ void main() {
             salePriceMinor: 5000,
             priceCurrencyId: 1,
             isActive: true,
+            uuid: 'uuid-item-002',
           ),
         );
 
@@ -106,6 +108,27 @@ void main() {
     );
   });
 
+  test('اصطلاح «كل جدول» (D-055): كل سجل جديد يحمل uuid عالمياً وأزمنة وحذفاً منطقياً',
+      () async {
+    await db.createManager(
+        name: 'المالك', login: 'owner', passwordHash: 's:h');
+
+    final user = await (db.select(db.appUsers)
+          ..where((t) => t.login.equals('owner')))
+        .getSingle();
+    expect(user.uuid.length, 36); // UUID v4
+    expect(user.createdAt, greaterThan(0));
+    expect(user.updatedAt, greaterThan(0));
+    expect(user.isDeleted, isFalse);
+
+    final role = await (db.select(db.roles)
+          ..where((t) => t.id.equals(user.roleId)))
+        .getSingle();
+    expect(role.uuid.length, 36);
+    expect(role.createdAt, greaterThan(0));
+    expect(role.isDeleted, isFalse);
+  });
+
   test('السعر السالب لا يمنعه المخطط بل يمنعه المجال — التخزين صادق (س6)',
       () async {
     await db.into(db.items).insert(
@@ -118,6 +141,7 @@ void main() {
             salePriceMinor: 900,
             priceCurrencyId: 1,
             isActive: true,
+            uuid: 'uuid-item-003',
           ),
         );
     final row = await (db.select(db.items)

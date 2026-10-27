@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'package:heseb_domain/heseb_domain.dart';
-import 'package:heseb_storage/heseb_storage.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
 
 /// شاشة أول تشغيل — إنشاء المستخدم الأول (مدير) إلزامياً (F-014، س-01).
 ///
 /// لا يمكن تخطيها ولا الوصول لأي بيانات قبلها: البوابة (AppGate) لا تعرض
 /// غيرها ما دام لا مستخدمين في القاعدة.
 class FirstRunScreen extends StatefulWidget {
-  final HesebDatabase db;
+  final DiqqahDatabase db;
   final int hasherIterations;
   final VoidCallback onSetupDone;
 
@@ -89,7 +89,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'حسيب — أول تشغيل',
+                'دِقَّة — أول تشغيل',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),

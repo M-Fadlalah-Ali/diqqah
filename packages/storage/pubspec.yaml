@@ -1,5 +1,5 @@
-name: heseb_storage
-description: طبقة تخزين حسيب — Drift/SQLite مع ترحيلات من أول يوم (F-002، F-011)
+name: diqqah_storage
+description: طبقة تخزين دِقَّة — Drift/SQLite مع ترحيلات من أول يوم (F-002، F-011)
 version: 0.0.1
 publish_to: none
 
@@ -11,7 +11,7 @@ dependencies:
   path: ^1.9.0
   sqlite3: ^3.0.0
   uuid: ^4.6.0
-  heseb_domain:
+  diqqah_domain:
     path: ../domain
 
 dev_dependencies:

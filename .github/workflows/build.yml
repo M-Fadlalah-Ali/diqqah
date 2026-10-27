@@ -30,11 +30,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: توليد منصة أندرويد إن غابت (heseb_app/app.heseb — المعرفات التقنية المعتمدة)
+      - name: توليد منصة أندرويد إن غابت (diqqah_app/app.diqqah — المعرفات التقنية المعتمدة)
         id: gen
         run: |
           if [ ! -d android ]; then
-            flutter create --platforms=android --org app.heseb --project-name heseb_app .
+            flutter create --platforms=android --org app.diqqah --project-name diqqah_app .
             rm -f test/widget_test.dart
             echo "created=true" >> "$GITHUB_OUTPUT"
           else
@@ -44,7 +44,7 @@ jobs:
         if: steps.gen.outputs.created == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: heseb-scaffold-android
+          name: diqqah-scaffold-android
           path: |
             packages/app/android
             packages/app/.metadata
@@ -52,8 +52,8 @@ jobs:
           retention-days: 7
       # قالب التوليد يضع الاسم التقني عنواناً للساحة — الواجهة لاتينياً
       # لها موضعها المعرفي (قاعدة D-025) لا شاشة هاتف المالك.
-      - name: عنوان الساحة «حسيب»
-        run: sed -i 's/android:label="heseb_app"/android:label="حسيب"/' android/app/src/main/AndroidManifest.xml || true
+      - name: عنوان الساحة «دِقَّة»
+        run: sed -i 's/android:label="diqqah_app"/android:label="دِقَّة"/' android/app/src/main/AndroidManifest.xml || true
       # ملفات Drift المولدة (database.g.dart) غير مودعة في المستودع — درس
       # CI #6/#7 (Task 41) نفسه: البناء يجمّع مصادر ../storage فلا يرى
       # API الحزمة المولد إلا بتوليده هنا قبل البناء.
@@ -72,7 +72,7 @@ jobs:
       - name: رفع حزمة أندرويد
         uses: actions/upload-artifact@v4
         with:
-          name: heseb-android
+          name: diqqah-android
           path: |
             packages/app/build/app/outputs/flutter-apk/app-release.apk
             packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
@@ -95,7 +95,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path windows)) {
-            flutter create --platforms=windows --org app.heseb --project-name heseb_app .
+            flutter create --platforms=windows --org app.diqqah --project-name diqqah_app .
             Add-Content $env:GITHUB_OUTPUT "created=true"
           } else {
             Add-Content $env:GITHUB_OUTPUT "created=false"
@@ -104,18 +104,18 @@ jobs:
         if: steps.gen.outputs.created == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: heseb-scaffold-windows
+          name: diqqah-scaffold-windows
           path: packages/app/windows
           retention-days: 7
       # عنوان النافذة من القالب اسم تقني — يستبدل حرفياً إن وُجد موقعه،
       # وغيابه لا يُسقط البناء (تجميل موثق لا وظيفة).
-      - name: عنوان النافذة «حسيب»
+      - name: عنوان النافذة «دِقَّة»
         shell: pwsh
         run: |
           $f = "windows/runner/main.cpp"
           if (Test-Path $f) {
             $c = Get-Content $f -Raw
-            $c = $c.Replace('"heseb_app"', '"حسيب"')
+            $c = $c.Replace('"diqqah_app"', '"دِقَّة"')
             Set-Content -Path $f -Value $c -NoNewline -Encoding utf8BOM
           }
       # نفس درس CI #1 للبناء: التوليد قبل pub get وإلا فشل تجميع مصادر التخزين.
@@ -130,10 +130,10 @@ jobs:
         run: flutter build windows --release
       - name: ضغط مجلد الإصدار المحمول
         shell: pwsh
-        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath heseb-windows-x64.zip -Force
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath diqqah-windows-x64.zip -Force
       - name: رفع حزمة ويندوز
         uses: actions/upload-artifact@v4
         with:
-          name: heseb-windows
-          path: packages/app/heseb-windows-x64.zip
+          name: diqqah-windows
+          path: packages/app/diqqah-windows-x64.zip
           retention-days: 30

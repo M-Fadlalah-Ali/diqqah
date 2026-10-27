@@ -1,5 +1,5 @@
-name: heseb_domain
-description: حزمة المجال النقي لحسيب — بلا Flutter ولا Drift (F-010، 07 §1.8)
+name: diqqah_domain
+description: حزمة المجال النقي لدِقَّة — بلا Flutter ولا Drift (F-010، 07 §1.8)
 version: 0.0.1
 publish_to: none
 

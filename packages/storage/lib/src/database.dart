@@ -7,8 +7,8 @@ import 'package:uuid/uuid.dart';
 part 'database.g.dart';
 
 /// يُرمى عند فتح قاعدة أحدث مخططاً من التطبيق (F-156: «حدّث التطبيق»).
-class HesebNewerSchemaException implements Exception {
-  const HesebNewerSchemaException();
+class DiqqahNewerSchemaException implements Exception {
+  const DiqqahNewerSchemaException();
 
   @override
   String toString() => 'القاعدة أحدث مخططاً من التطبيق — حدّث التطبيق';
@@ -44,15 +44,44 @@ class Items extends Table {
 
   BoolColumn get isActive => boolean().named('is_active')();
 
+  /// اصطلاح «كل جدول» (05 §2، D-055): هوية عالمية تحمل النقل بين
+  /// الأجهزة في المزامنة — إلزامي عند كل إدراج. ملاحظة موثقة (قرار
+  /// الدفعة 2026-10-28): `id` التلقائي مؤجل لهذا الجدول تحديداً —
+  /// sku مفتاح طبيعي فريد وuuid يكفي الهوية العالمية، وإعادة بناء
+  /// الجدول لإضافة id تُدرس عند أول تطوير تشغيلي للأصناف في m1.
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  /// حذف منطقي فقط للسجلات غير المرحّلة (05 §2) — المالية بعد الترحيل لا تُمسّ.
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+
   @override
   Set<Column> get primaryKey => {sku};
 }
 
-/// الأدوار — 05: `role` (name). إصدار 2 أضاف المعرّف الآلي لربط app_user.
+/// الأدوار — 05: `role` (name). الإصدار 2 أضاف المعرّف الآلي لربط app_user،
+/// والإصدار 3 أضاف أعمدة اصطلاح «كل جدول» (D-055).
 class Roles extends Table {
   IntColumn get id => integer().autoIncrement()();
 
   TextColumn get name => text().unique()();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
 }
 
 /// المستخدمون المحليون — 05: `app_user` «مستخدمون محليون من الإصدار الأول».
@@ -69,9 +98,23 @@ class AppUsers extends Table {
   IntColumn get roleId => integer().named('role_id')();
 
   BoolColumn get isActive => boolean().named('is_active')();
+
+  /// اصطلاح «كل جدول» (D-055) — نفس أعمدة roles أعلاه.
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
 }
 
 /// مفاتيح النظام — موطن `device_id` (F-015) وسائر مفاتيح التهيئة.
+/// معفاة من اصطلاح «كل جدول» قراراً موثقاً (D-055): مفاتيح نظام
+/// لا سجلات أعمال — لا مزامنة ولا حذف منطقي لها.
 class AppMeta extends Table {
   TextColumn get key => text()();
 
@@ -81,22 +124,26 @@ class AppMeta extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// قاعدة حسيب — نسخة المخطط 2.
+/// قاعدة دِقَّة — نسخة المخطط 3.
 ///
 /// 1 = items فقط (جلسة م0 الأولى). 2 = التهيئة: roles / app_users / app_meta
-/// (س-01: F-014/F-015). كل تغيير مخطط قادم يضيف إصداراً وترحيلة — لا تعديل
-/// رجعي على إصدار منشور (F-011).
+/// (س-01: F-014/F-015). 3 = اصطلاح «كل جدول» (05 §2، D-055): uuid عالمي +
+/// created_at/updated_at + is_deleted على items وroles وapp_users — app_meta
+/// مفاتيح نظام معفاة قراراً موثقاً. كل تغيير مخطط قادم يضيف إصداراً وترحيلة —
+/// لا تعديل رجعي على إصدار منشور (F-011).
 @DriftDatabase(tables: [Items, Roles, AppUsers, AppMeta])
-class HesebDatabase extends _$HesebDatabase {
+class DiqqahDatabase extends _$DiqqahDatabase {
   /// التشغيل العادي: ملف القاعدة الوحيد (أساس النسخ الاحتياطي الكامل F-012).
-  HesebDatabase({String filePath = 'heseb.db'})
+  /// ملف الجيل السابق «heseb.db» يتبنّى آلياً عند أول فتح (D-053 —
+  /// adoptLegacyHesebDatabase في backup.dart).
+  DiqqahDatabase({String filePath = 'diqqah.db'})
       : super(LazyDatabase(() async => NativeDatabase(File(filePath))));
 
   /// للاختبارات: قاعدة في الذاكرة — لا أثر على ملف المستخدم أبداً.
-  HesebDatabase.inMemory() : super(NativeDatabase.memory());
+  DiqqahDatabase.inMemory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -111,6 +158,36 @@ class HesebDatabase extends _$HesebDatabase {
             if (version == 2) {
               await m.createAll();
             }
+            // 2→3 (ومن 1 مباشرة): اصطلاح «كل جدول» (D-055). أعمدة جديدة
+            // خالصة بـ ADD COLUMN — لا تعديل لأعمدة قائمة، فلا إعادة بناء.
+            // uuid NOT NULL DEFAULT '' ثم تعبئة فورية أدناه — الصفر القائم
+            // لا يبقى سوى لأجزاء من الثانية داخل الترحيلة نفسها.
+            if (version == 3) {
+              for (final table in const ['items', 'roles', 'app_users']) {
+                await customStatement(
+                    "ALTER TABLE $table ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
+                await customStatement(
+                    'ALTER TABLE $table ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0');
+                await customStatement(
+                    'ALTER TABLE $table ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
+                await customStatement(
+                    'ALTER TABLE $table ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+              }
+              // تعبئة uuid وأزمنة السجلات القائمة — م0 صغيرة فالحلقة
+              // صف بأصفار كلفة، والكبيرة لما تأتي ستكون مختبرة.
+              final ts = DateTime.now().millisecondsSinceEpoch;
+              const keyed = [('items', 'sku'), ('roles', 'id'), ('app_users', 'id')];
+              for (final (table, pk) in keyed) {
+                final rows = await customSelect('SELECT $pk AS pk FROM $table').get();
+                for (final row in rows) {
+                  await customStatement(
+                    'UPDATE $table SET uuid = ?, created_at = ?, updated_at = ? '
+                    'WHERE $pk = ?',
+                    [const Uuid().v4(), ts, ts, row.data['pk'] as Object],
+                  );
+                }
+              }
+            }
           }
         },
         // F-156: التطبيق الأقدم يرفض قاعدة أحدث مخططاً برسالة «حدّث التطبيق»
@@ -119,7 +196,7 @@ class HesebDatabase extends _$HesebDatabase {
         // تنفذ حلقتنا — والحرس أدناه يرفض قبل أي استخدام.
         beforeOpen: (details) async {
           if ((details.versionBefore ?? 0) > schemaVersion) {
-            throw const HesebNewerSchemaException();
+            throw const DiqqahNewerSchemaException();
           }
         },
       );
@@ -153,12 +230,20 @@ class HesebDatabase extends _$HesebDatabase {
       required String login,
       required String passwordHash}) async {
     await deviceId();
+    final now = DateTime.now().millisecondsSinceEpoch;
     final existing = await (select(roles)
           ..where((t) => t.name.equals('مدير')))
         .getSingleOrNull();
     final roleId = existing != null
         ? existing.id
-        : await into(roles).insert(RolesCompanion.insert(name: 'مدير'));
+        : await into(roles).insert(
+            RolesCompanion.insert(
+              name: 'مدير',
+              uuid: const Uuid().v4(),
+              createdAt: Value(now),
+              updatedAt: Value(now),
+            ),
+          );
     return into(appUsers).insert(
       AppUsersCompanion.insert(
         name: name,
@@ -166,6 +251,9 @@ class HesebDatabase extends _$HesebDatabase {
         passwordHash: passwordHash,
         roleId: roleId,
         isActive: true,
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
       ),
     );
   }

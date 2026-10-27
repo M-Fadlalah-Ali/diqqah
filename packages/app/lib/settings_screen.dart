@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:heseb_domain/heseb_domain.dart';
-import 'package:heseb_storage/heseb_storage.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'package:path/path.dart' as p;
 
@@ -11,7 +11,7 @@ import 'package:path/path.dart' as p;
 /// الاستعادة بتأكيد مزدوج وإلغاء آمن (F-013)، وبعدها سطر إحالة يري مكان
 /// نسخة ما قبل الاستعادة (F-154).
 class SettingsScreen extends StatefulWidget {
-  final HesebDatabase db;
+  final DiqqahDatabase db;
 
   /// مسار ملف القاعدة الحي — منه يشتق مجلد النسخ ولقطات الرجوع.
   final String dbPath;
@@ -58,7 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final target = p.join(
         p.dirname(widget.dbPath),
-        'heseb-backup-${_stamp()}.db',
+        'diqqah-backup-${_stamp()}.db',
       );
       final password =
           _backupPassword.text.isEmpty ? null : _backupPassword.text;

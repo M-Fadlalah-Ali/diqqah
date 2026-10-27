@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:heseb_storage/heseb_storage.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'settings_screen.dart';
 
@@ -8,7 +8,7 @@ import 'settings_screen.dart';
 /// محاسبية. الوحدات ومراحل توفرها من جدول النطاق (01 §5) حرفاً،
 /// والإعدادات متاحة فوراً بعد التهيئة (س-01: F-012/F-013).
 class HomeScreen extends StatelessWidget {
-  final HesebDatabase db;
+  final DiqqahDatabase db;
   final String dbPath;
   final VoidCallback onRestored;
 
@@ -42,7 +42,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('حسيب'),
+        title: const Text('دِقَّة'),
       ),
       // قائمة ثابتة تُبنى كاملة — Column تُنفخ كل أبنائها فوراً بلا كسل
       // شجري (ListView حتى بأبناء صريحين يبني الظاهر وحده — درس CI #8)،

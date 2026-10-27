@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
-import 'package:heseb_domain/heseb_domain.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
 
 import 'database.dart';
 
@@ -25,7 +25,7 @@ import 'database.dart';
 /// [password] فارغة أو غائبة = ملف SQLite خام؛ وإلا فغلاف مشفر
 /// AES-256-GCM (BackupCipher في حزمة المجال). الملف الهدف إن وُجد يُستبدل.
 Future<void> backupTo(
-  HesebDatabase db,
+  DiqqahDatabase db,
   String targetPath, {
   String? password,
   BackupCipher? cipher,
@@ -94,7 +94,7 @@ Future<RestoreCandidate> prepareRestore(
           'الملف ليس نسخة احتياطية معروفة — تحقق من الملف');
   }
 
-  final tempDir = await Directory.systemTemp.createTemp('heseb_restore_');
+  final tempDir = await Directory.systemTemp.createTemp('diqqah_restore_');
   final plainPath = p.join(tempDir.path, 'verified.db');
   await File(plainPath).writeAsBytes(plain, flush: true);
   final sqlite = sqlite3.open(plainPath);
@@ -137,11 +137,20 @@ Future<RestoreCandidate> prepareRestore(
 ///
 /// يغلق الاتصال الحالي [db] — المتصل يعيد بناء قاعدة جديدة من
 /// [currentDbPath] بعد نجاحها. يعيد مسار نسخة الرجوع (سطر الإحالة).
+///
+/// هوية القاعدة (D-054 — قرار المالك 2026-10-28): التطابق 100% يبقى
+/// معياراً لكل بيانات القاعدة عدا `device_id` وحده — القاعدة المستعادة
+/// تتبنى معرّف الجهاز الذي استقرت عليه (التقاطه قبل الغلق)، فيخرج
+/// جهازان استقيا من نسخة واحدة بمعرّفين مختلفين، ويبقى معرّف نفس
+/// الجهاز ثابتاً فوق قاعدته (F-015: يتولد مرة ويبقى).
 Future<String> applyRestore({
-  required HesebDatabase db,
+  required DiqqahDatabase db,
   required RestoreCandidate candidate,
   required String currentDbPath,
 }) async {
+  // D-054: معرّف الجهاز المستقر عليه يُلتقط قبل الغلق — قد يُولد الآن
+  // إن لم يوجد بعد (وإدراجه الأول يقع في اللقطة نفسها فلا يضيع).
+  final landingDeviceId = await db.deviceId();
   final now = DateTime.now();
   String two(int n) => n.toString().padLeft(2, '0');
   final stamp = '${now.year}${two(now.month)}${two(now.day)}'
@@ -149,7 +158,7 @@ Future<String> applyRestore({
       '-${now.millisecond.toString().padLeft(3, '0')}';
   final snapshotPath = p.join(
     p.dirname(currentDbPath),
-    'heseb-before-restore-$stamp.db',
+    'diqqah-before-restore-$stamp.db',
   );
 
   // لقطة ما قبل الاستعادة — متسقة ذرياً حتى والقاعدة في منتصف عمل.
@@ -164,7 +173,45 @@ Future<String> applyRestore({
   final staged = File('$currentDbPath.restoring');
   await File(candidate.plainPath).copy(staged.path);
   await staged.rename(currentDbPath);
+
+  // D-054: اعتماد هوية الجهاز المستقر عليه في القاعدة المستعادة —
+  // بالـ SQLite الخام لأن اتصال drift مُغلق، وفتح مطابق لما سيفعله
+  // الفتح التالي. نسخة مخطط v1 بلا app_meta تُتخطى — الترحيلة 1→2
+  // تبنيها ثم يولد deviceId() معرّفاً عند أول استعلام.
+  final raw = sqlite3.open(currentDbPath);
+  try {
+    final hasMeta = raw.select(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta'",
+    ).isNotEmpty;
+    if (hasMeta) {
+      final stmt = raw.prepare(
+        "INSERT INTO app_meta (key, value) VALUES ('device_id', ?) "
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      );
+      stmt.execute([landingDeviceId]);
+      stmt.dispose();
+    }
+  } finally {
+    raw.dispose();
+  }
   return snapshotPath;
+}
+
+/// D-053: تبنّي ملف قاعدة الجيل السابق — أول فتح بعد التحديث يعيد
+/// تسمية «heseb.db» (وسائر ملفاته wal/shm) إلى اسم الجديد بدل أن يُظن
+/// أول تشغيل ويتولد أرشيف فارغ. إعادة تسمية داخل المجلد نفسه — لا
+/// نسخ ولا تحويل، ولا شيء يُلمس إن غاب أي من الملفين.
+Future<void> adoptLegacyHesebDatabase(String diqqahDbPath) async {
+  final target = File(diqqahDbPath);
+  if (await target.exists()) return;
+  final legacy = File(p.join(p.dirname(diqqahDbPath), 'heseb.db'));
+  if (!await legacy.exists()) return;
+  for (final suffix in ['', '-wal', '-shm']) {
+    final f = File('${legacy.path}$suffix');
+    if (await f.exists()) {
+      await f.rename('${target.path}$suffix');
+    }
+  }
 }
 
 /// يُرمى عند فشل فحوص ملف النسخة — لم يُمس القاعدة الحية (فشل آمن).

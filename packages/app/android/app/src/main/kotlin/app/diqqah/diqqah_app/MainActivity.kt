@@ -1,4 +1,4 @@
-package app.heseb.heseb_app
+package app.diqqah.diqqah_app
 
 import io.flutter.embedding.android.FlutterActivity
 

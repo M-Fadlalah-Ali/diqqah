@@ -1,5 +1,5 @@
-name: heseb_app
-description: واجهة حسيب — Flutter واجهة واحدة لأندرويد وWindows (F-001)
+name: diqqah_app
+description: واجهة دِقَّة — Flutter واجهة واحدة لأندرويد وWindows (F-001)
 version: 0.0.1
 publish_to: none
 
@@ -12,9 +12,9 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.0
   sqlite3_flutter_libs: ^0.6.0
-  heseb_storage:
+  diqqah_storage:
     path: ../storage
-  heseb_domain:
+  diqqah_domain:
     path: ../domain
 
 dev_dependencies:

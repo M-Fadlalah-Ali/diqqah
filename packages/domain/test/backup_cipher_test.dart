@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:test/test.dart';
-import 'package:heseb_domain/heseb_domain.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
 
 void main() {
   // تكرارات منخفضة لسرعة الاختبار — الرياضيات واحدة والافتراضي الإنتاجي 100000.
@@ -55,11 +55,23 @@ void main() {
 
   test('الغلاف المشفر لا يحمل أي ترويسة SQLite — لا يُفتح بأداة خارجية', () async {
     final blob = await cipher.encrypt(utf8.encode('محتوى'), 'p');
-    expect(utf8.decode(blob.sublist(0, 8)), 'HESEBENC');
+    expect(utf8.decode(blob.sublist(0, 8)), 'DIQQENC');
     expect(
       BackupCipher.identify(blob),
       isNot(BackupKind.plainSqlite),
     );
+  });
+
+  test('توافق الجيل السابق: نسخة بترويسة «HESEBENC» تُميّز وتُفك كما هي (D-053)',
+      () async {
+    final plain = utf8.encode('نسخة من جيل حسيب');
+    final blob = await cipher.encrypt(plain, 'كلمة-السر');
+    // إحلال الترويسة القديمة مكان الجديدة — بقية البايتات كما هي
+    final legacyHeader = utf8.encode('HESEBENC');
+    final legacy = <int>[...legacyHeader, ...blob.sublist(legacyHeader.length)];
+    expect(BackupCipher.identify(legacy), BackupKind.encrypted);
+    final back = await cipher.decrypt(legacy, 'كلمة-السر');
+    expect(back, equals(plain));
   });
 
   test('نسختان لنفس المدخل تختلفان — ملح ونونس عشوائيان في كل مرة', () async {

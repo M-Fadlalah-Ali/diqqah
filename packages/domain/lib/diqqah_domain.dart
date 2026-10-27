@@ -1,4 +1,4 @@
-library heseb_domain;
+library diqqah_domain;
 
 export 'src/backup.dart';
 export 'src/money.dart';

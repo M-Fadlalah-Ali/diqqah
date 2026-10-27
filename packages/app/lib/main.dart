@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:heseb_storage/heseb_storage.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -8,11 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import 'first_run_screen.dart';
 import 'home_screen.dart';
 
-void main() => runApp(const HesebApp());
+void main() => runApp(const DiqqahApp());
 
-/// إطار الحسيب — واجهة واحدة تعمل على أندرويد وWindows (F-001).
-class HesebApp extends StatelessWidget {
-  final HesebDatabase? db;
+/// إطار دِقَّة — واجهة واحدة تعمل على أندرويد وWindows (F-001).
+class DiqqahApp extends StatelessWidget {
+  final DiqqahDatabase? db;
 
   /// تجاوز مسار القاعدة (اختبارات) — الإنتاج يشتقه من مجلد الدعم.
   final String? dbPath;
@@ -20,12 +20,12 @@ class HesebApp extends StatelessWidget {
   /// عدد تكرارات PBKDF2 — حقن للاختبارات، الافتراضي الإنتاجي.
   final int hasherIterations;
 
-  const HesebApp({super.key, this.db, this.dbPath, this.hasherIterations = 50000});
+  const DiqqahApp({super.key, this.db, this.dbPath, this.hasherIterations = 50000});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'حسيب',
+      title: 'دِقَّة',
       theme: ThemeData(useMaterial3: true),
       home: AppGate(
         db: db,
@@ -39,7 +39,7 @@ class HesebApp extends StatelessWidget {
 /// بوابة أول التشغيل (F-014، س-01): لا شاشة قبل إنشاء المدير —
 /// بلا مستخدمين تُفتح شاشة التهيئة، وبمدير موجود تُفتح الهيكلية (F-016).
 class AppGate extends StatefulWidget {
-  final HesebDatabase? db;
+  final DiqqahDatabase? db;
   final String? dbPath;
   final int hasherIterations;
 
@@ -55,7 +55,7 @@ class AppGate extends StatefulWidget {
 }
 
 class _AppGateState extends State<AppGate> {
-  HesebDatabase? _db;
+  DiqqahDatabase? _db;
   String? _dbPath;
   bool? _hasAnyUser;
 
@@ -66,19 +66,21 @@ class _AppGateState extends State<AppGate> {
   }
 
   Future<void> _resolve() async {
-    final HesebDatabase db;
+    final DiqqahDatabase db;
     final String dbPath;
     final injected = widget.db;
     if (injected != null) {
       // حقن الاختبارات — لا قنوات منصة هنا أبداً.
       db = injected;
-      dbPath = widget.dbPath ?? 'heseb.db';
+      dbPath = widget.dbPath ?? 'diqqah.db';
     } else {
       // مسار الإنتاج (قرار موثق — جلسة م0 الثالثة): ملف القاعدة الوحيد
-      // F-012 في مجلد الدعم الخاص بالتطبيق على المنصتين.
+      // F-012 في مجلد الدعم الخاص بالتطبيق على المنصتين. وتبنّي ملف
+      // الجيل السابق «heseb.db» عند أول فتح بعد التسمية (D-053).
       final dir = await getApplicationSupportDirectory();
-      dbPath = p.join(dir.path, 'heseb.db');
-      db = HesebDatabase(filePath: dbPath);
+      dbPath = p.join(dir.path, 'diqqah.db');
+      await adoptLegacyHesebDatabase(dbPath);
+      db = DiqqahDatabase(filePath: dbPath);
     }
     final hasAnyUser = await db.hasAnyUser();
     if (!mounted) return;
@@ -114,7 +116,7 @@ class _AppGateState extends State<AppGate> {
       );
     }
     final db = _db!;
-    final dbPath = _dbPath ?? widget.dbPath ?? 'heseb.db';
+    final dbPath = _dbPath ?? widget.dbPath ?? 'diqqah.db';
     if (!hasAnyUser) {
       return FirstRunScreen(
         db: db,

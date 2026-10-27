@@ -14,8 +14,14 @@ import 'setup.dart';
 /// يحقق «تحقق من سلامة الملف (وتشفيره إن وجد)» في F-013: أي عبث
 /// أو كلمة مرور خاطئة يرفض قبل وصول بايت واحد للقاعدة الحية.
 class BackupCipher {
-  /// ترويسة النسخة المشفرة — «HESEBENC».
-  static final List<int> magic = utf8.encode('HESEBENC');
+  /// ترويسة النسخة المشفرة — «DIQQENC» (D-053: التسمية الموحدة «دِقَّة»).
+  static final List<int> magic = utf8.encode('DIQQENC');
+
+  /// ترويسة الجيل السابق «HESEBENC» — تُقرأ ولا تُكتب بعد إعادة التسمية:
+  /// نسخ «حسيب» القديمة تبقى مفتوحة كما هي، والجديدة تُكتب بالترويسة
+  /// الجديدة (توافق قراءة لا كتابة). الترويستان بثمانية بايتات معاً —
+  /// فمواضع الحقول بعد الترويسة واحدة لا تتغير.
+  static final List<int> legacyMagic = utf8.encode('HESEBENC');
 
   static const int formatVersion = 1;
   static const int _saltLen = 16;
@@ -32,7 +38,9 @@ class BackupCipher {
 
   /// يميز نوع الملف دون أي فك: مشفرة / SQLite خام / مجهول.
   static BackupKind identify(List<int> blob) {
-    if (_startsWith(blob, magic)) return BackupKind.encrypted;
+    if (_startsWith(blob, magic) || _startsWith(blob, legacyMagic)) {
+      return BackupKind.encrypted;
+    }
     if (_startsWith(blob, utf8.encode('SQLite format 3'))) {
       return BackupKind.plainSqlite;
     }
@@ -63,7 +71,7 @@ class BackupCipher {
     if (identify(blob) != BackupKind.encrypted) {
       throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
     }
-    var i = magic.length;
+    var i = magic.length; // الترويستان بثمانية بايتات معاً — الإزاحة واحدة للجيلين
     final version = blob[i];
     if (version != formatVersion) {
       throw BackupCipherException('إصدار تنسيق غير معروف: $version');

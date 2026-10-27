@@ -1,5 +1,5 @@
 import 'package:test/test.dart';
-import 'package:heseb_domain/heseb_domain.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
 
 void main() {
   group('PasswordHasher — PBKDF2-HMAC-SHA256 وفق متجهات PKCS#5 المعيارية',

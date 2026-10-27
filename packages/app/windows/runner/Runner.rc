@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "app.heseb" "\0"
-            VALUE "FileDescription", "heseb_app" "\0"
+            VALUE "CompanyName", "app.diqqah" "\0"
+            VALUE "FileDescription", "diqqah_app" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "heseb_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 app.heseb. All rights reserved." "\0"
-            VALUE "OriginalFilename", "heseb_app.exe" "\0"
-            VALUE "ProductName", "heseb_app" "\0"
+            VALUE "InternalName", "diqqah_app" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 app.diqqah. All rights reserved." "\0"
+            VALUE "OriginalFilename", "diqqah_app.exe" "\0"
+            VALUE "ProductName", "diqqah_app" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

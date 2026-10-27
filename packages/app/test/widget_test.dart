@@ -5,18 +5,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:path/path.dart' as p;
 
-import 'package:heseb_domain/heseb_domain.dart';
-import 'package:heseb_storage/heseb_storage.dart';
-import 'package:heseb_app/main.dart';
-import 'package:heseb_app/settings_screen.dart';
+import 'package:diqqah_domain/diqqah_domain.dart';
+import 'package:diqqah_storage/diqqah_storage.dart';
+import 'package:diqqah_app/main.dart';
+import 'package:diqqah_app/settings_screen.dart';
 
 void main() {
   testWidgets('التدفق الكامل (س-01): أول تشغيل → إنشاء المدير → الشاشة الهيكلية',
       (tester) async {
-    final db = HesebDatabase.inMemory();
+    final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
 
-    await tester.pumpWidget(HesebApp(db: db, hasherIterations: 2));
+    await tester.pumpWidget(DiqqahApp(db: db, hasherIterations: 2));
     await tester.pumpAndSettle();
 
     // F-014: شاشة إنشاء المدير إلزامية قبل أي شاشة أخرى
@@ -44,25 +44,25 @@ void main() {
 
   testWidgets('قاعدة فيها مدير: الشاشة الهيكلية مباشرة — لا شاشة أولى',
       (tester) async {
-    final db = HesebDatabase.inMemory();
+    final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
     await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
 
-    await tester.pumpWidget(HesebApp(db: db));
+    await tester.pumpWidget(DiqqahApp(db: db));
     await tester.pumpAndSettle();
 
     expect(find.text('إنشاء المدير'), findsNothing);
-    expect(find.text('حسيب'), findsOneWidget); // AppBar الهيكلية
+    expect(find.text('دِقَّة'), findsOneWidget); // AppBar الهيكلية
     expect(find.text('الأصناف'), findsOneWidget);
   });
 
   testWidgets('F-016/س-01: 13 وحدة معطلة والإعدادات وحدها متاحة — تفتح '
       'شاشة النسخ الاحتياطي (F-012 متاحة فوراً بعد التهيئة)', (tester) async {
-    final db = HesebDatabase.inMemory();
+    final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
     await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
 
-    await tester.pumpWidget(HesebApp(db: db));
+    await tester.pumpWidget(DiqqahApp(db: db));
     await tester.pumpAndSettle();
 
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
@@ -88,10 +88,10 @@ void main() {
   testWidgets('F-012: زر النسخ في الإعدادات ينتج ملف نسخة في مجلد القاعدة',
       (tester) async {
     // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
-    final tempDir = Directory.systemTemp.createTempSync('heseb_settings_t_');
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_settings_t_');
     addTearDown(() => tempDir.deleteSync(recursive: true));
-    final dbPath = p.join(tempDir.path, 'heseb.db');
-    final db = HesebDatabase(filePath: dbPath);
+    final dbPath = p.join(tempDir.path, 'diqqah.db');
+    final db = DiqqahDatabase(filePath: dbPath);
     addTearDown(db.close);
     await db.into(db.items).insert(
           ItemsCompanion.insert(
@@ -103,6 +103,7 @@ void main() {
             salePriceMinor: 500,
             priceCurrencyId: 1,
             isActive: true,
+            uuid: 'uuid-w-001',
           ),
         );
 
@@ -122,7 +123,7 @@ void main() {
     final backups = tempDir
         .listSync()
         .whereType<File>()
-        .where((f) => p.basename(f.path).startsWith('heseb-backup-'))
+        .where((f) => p.basename(f.path).startsWith('diqqah-backup-'))
         .toList();
     expect(backups, hasLength(1));
     final bytes = backups.first.readAsBytesSync();
@@ -134,10 +135,10 @@ void main() {
   testWidgets('F-013: الاستعادة بتأكيد مزدوج — والإلغاء في أي تأكيد لم يحدث شيئاً',
       (tester) async {
     // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
-    final tempDir = Directory.systemTemp.createTempSync('heseb_restore_t_');
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_restore_t_');
     addTearDown(() => tempDir.deleteSync(recursive: true));
-    final dbPath = p.join(tempDir.path, 'heseb.db');
-    final db = HesebDatabase(filePath: dbPath);
+    final dbPath = p.join(tempDir.path, 'diqqah.db');
+    final db = DiqqahDatabase(filePath: dbPath);
     addTearDown(db.close);
     await db.into(db.items).insert(
           ItemsCompanion.insert(
@@ -149,6 +150,7 @@ void main() {
             salePriceMinor: 1,
             priceCurrencyId: 1,
             isActive: true,
+            uuid: 'uuid-w-live',
           ),
         );
 
@@ -188,7 +190,7 @@ void main() {
     expect(rows.first.sku, 'SKU-LIVE');
     final files = tempDir.listSync().whereType<File>().toList();
     expect(
-      files.where((f) => p.basename(f.path).startsWith('heseb-before-restore-')),
+      files.where((f) => p.basename(f.path).startsWith('diqqah-before-restore-')),
       isEmpty,
       reason: 'الإلغاء الآمن لا يلتقط لقطة ولا يمس شيئاً',
     );
