@@ -50,10 +50,10 @@ void main() {
         uuid: 'uuid-$sku',
       );
 
-  test('F-012: نسخة غير مشفرة = ملف SQLite خام واحد يحوي بيانات الجهاز الحي',
+  test('F-012: نسخة غير مشفرة (بعد الإلغاء الواعي) = ملف SQLite خام واحد يحوي بيانات الجهاز الحي',
       () async {
     final target = p.join(tempDir.path, 'b1.db');
-    await backupTo(db, target);
+    await backupTo(db, target, encrypted: false);
 
     final bytes = await File(target).readAsBytes();
     expect(BackupCipher.identify(bytes), BackupKind.plainSqlite);
@@ -64,31 +64,57 @@ void main() {
     expect(count, 1);
   });
 
-  test('F-012: نسخة مشفرة — ترويسة خاصة، وبلا كلمة المرور أو بخاطئة تُرفض',
+  test('F-012 + D-060: النسخة الافتراضية مشفرة بمفتاح البرنامج — تُفتح بلا أي كلمة، والعبث يُرفض قبل أي لمس',
       () async {
     final target = p.join(tempDir.path, 'b2.db');
-    await backupTo(db, target, password: 'سر-قوي');
+    await backupTo(db, target); // الافتراضي: مشفرة (D-050/D-060)
 
     final bytes = await File(target).readAsBytes();
     expect(BackupCipher.identify(bytes), BackupKind.encrypted);
+    expect(bytes[7], BackupCipher.formatVersion); // الجيل v2 بمفتاح البرنامج
 
-    // بلا كلمة مرور: رفض صريح قبل أي لمس للقاعدة
+    // بلا كلمة مرور ولا حقل: تُفتح مباشرة — N-005 بهذا أقوى (D-060)
+    final candidate = await prepareRestore(target, appSchemaVersion: 3);
+    candidate.dispose();
+
+    // عبث بايت واحد داخل النص المشفر: رفض من وسم GCM قبل أي لمس للقاعدة
+    final tampered = List<int>.from(bytes)..[bytes.length - 30] ^= 0xFF;
+    final tamperedPath = p.join(tempDir.path, 'tampered.db');
+    await File(tamperedPath).writeAsBytes(tampered, flush: true);
     await expectLater(
       () async {
-        final c = await prepareRestore(target, appSchemaVersion: 3);
-        c.dispose();
-      }(),
-      throwsA(isA<CorruptBackupException>()),
-    );
-    // كلمة مرور خاطئة: رفض من وسم GCM
-    await expectLater(
-      () async {
-        final c = await prepareRestore(target,
-            password: 'الخاطئة', appSchemaVersion: 3);
+        final c = await prepareRestore(tamperedPath, appSchemaVersion: 3);
         c.dispose();
       }(),
       throwsA(isA<BackupCipherException>()),
     );
+  });
+
+  test('D-060: الجيل القديم v1 بكلمة مرور يبقى مقروءاً بكلمته — وفراغ الكلمة رفض آمن',
+      () async {
+    // توليد ملف v1 (أيام D-050): قاعدة خام مغلّفة بكلمة مرور
+    final rawPath = p.join(tempDir.path, 'raw.db');
+    await backupTo(db, rawPath, encrypted: false);
+    final rawBytes = await File(rawPath).readAsBytes();
+    final legacyBlob =
+        await BackupCipher().encryptWithPassword(rawBytes, 'كلمة-القديمة');
+    final legacyPath = p.join(tempDir.path, 'legacy-v1.db');
+    await File(legacyPath).writeAsBytes(legacyBlob, flush: true);
+    expect(BackupCipher.encryptedVersion(legacyBlob), 1);
+
+    // بلا كلمة مرور: توجيه صريح لمسار الجيل القديم — قبل أي لمس للقاعدة
+    await expectLater(
+      () async {
+        final c = await prepareRestore(legacyPath, appSchemaVersion: 3);
+        c.dispose();
+      }(),
+      throwsA(isA<CorruptBackupException>()),
+    );
+
+    // بكلمتها: تُقرأ وتستكمل كل الفحوص — التزام القراءة الدائم
+    final c = await prepareRestore(legacyPath,
+        password: 'كلمة-القديمة', appSchemaVersion: 3);
+    c.dispose();
   });
 
   test('F-013 (الفيصل الثاني): ملف تالف — فشل آمن والقاعدة الحية لم تُمس',
@@ -129,7 +155,7 @@ void main() {
     final sourceDeviceId = await db.deviceId();
 
     final target = p.join(tempDir.path, 'travel.db');
-    await backupTo(db, target, password: 'سر-السفر');
+    await backupTo(db, target); // مشفرة بمفتاح البرنامج افتراضياً (D-060)
 
     // جهاز الهدف: قاعدة أخرى بمستخدم وبيانات مختلفة
     final otherPath = p.join(tempDir.path, 'device2.db');
@@ -140,8 +166,8 @@ void main() {
     final oldDeviceId = await other.deviceId();
     expect(oldDeviceId, isNot(sourceDeviceId));
 
-    final candidate = await prepareRestore(target,
-        password: 'سر-السفر', appSchemaVersion: other.schemaVersion);
+    final candidate =
+        await prepareRestore(target, appSchemaVersion: other.schemaVersion);
     final snapshotPath = await applyRestore(
         db: other, candidate: candidate, currentDbPath: otherPath);
     candidate.dispose();

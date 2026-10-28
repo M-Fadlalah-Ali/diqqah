@@ -22,12 +22,14 @@ import 'database.dart';
 
 /// يُنشئ ملف نسخة احتياطية كاملة في `targetPath`.
 ///
-/// [password] فارغة أو غائبة = ملف SQLite خام؛ وإلا فغلاف مشفر
-/// AES-256-GCM (BackupCipher في حزمة المجال). الملف الهدف إن وُجد يُستبدل.
+/// D-060 (قرار المالك «كلمة السر للبرنامج فقط»): [encrypted] صادقة
+/// افتراضياً (D-050) فتُغلف النسخة بمفتاح البرنامج حصراً — تُفتح داخل
+/// التطبيق نفسه وحده على أي جهاز، بلا أي كلمة. كاذبة = ملف SQLite خام
+/// بعد الإلغاء الواعي. الملف الهدف إن وُجد يُستبدل.
 Future<void> backupTo(
   DiqqahDatabase db,
   String targetPath, {
-  String? password,
+  bool encrypted = true,
   BackupCipher? cipher,
 }) async {
   final temp = File('$targetPath.tmp');
@@ -36,9 +38,9 @@ Future<void> backupTo(
   await db.customStatement("VACUUM INTO '${_sqlString(temp.path)}'");
   try {
     final bytes = await temp.readAsBytes();
-    final out = (password == null || password.isEmpty)
-        ? bytes
-        : await (cipher ?? BackupCipher()).encrypt(bytes, password);
+    final out = encrypted
+        ? await (cipher ?? BackupCipher()).encrypt(bytes)
+        : bytes;
     await File(targetPath).writeAsBytes(out, flush: true);
   } finally {
     if (await temp.exists()) await temp.delete();
@@ -69,6 +71,10 @@ class RestoreCandidate {
 /// (وسم GCM = سلامة) ← ترويسة SQLite ضمنياً بالتعرف ← integrity_check
 /// ← نسخة المخطط: الأحدث من التطبيق تُرفض بـ«حدّث التطبيق»، والأقدم
 /// تمر ليمسكها محرك الترحيلات عند الفتح (F-011).
+///
+/// D-060: الجيل الجاري v2 يُفك بمفتاح البرنامج بلا أي كلمة — [password]
+/// لقراءة الجيل القديم v1 حصراً (نسخ أيام D-050 وما قبله)، وفراغه على
+/// v1 رفض آمن قبل أي لمس.
 Future<RestoreCandidate> prepareRestore(
   String backupPath, {
   String? password,
@@ -83,11 +89,17 @@ Future<RestoreCandidate> prepareRestore(
       plain = blob;
       break;
     case BackupKind.encrypted:
-      if (password == null || password.isEmpty) {
+      if (BackupCipher.encryptedVersion(blob) >=
+          BackupCipher.formatVersion) {
+        // الجيل الجاري: مفتاح البرنامج — بلا أي كلمة (D-060)
+        plain = await resolvedCipher.decrypt(blob);
+      } else if (password == null || password.isEmpty) {
         throw const CorruptBackupException(
-            'النسخة مشفرة بكلمة مرور — أدخلها ثم أعد المحاولة');
+            'النسخة من الجيل القديم المحمي بكلمة مرور — '
+            'أدخلها في حقل كلمة المرور ثم أعد المحاولة');
+      } else {
+        plain = await resolvedCipher.decryptWithPassword(blob, password);
       }
-      plain = await resolvedCipher.decrypt(blob, password);
       break;
     case BackupKind.unknown:
       throw const CorruptBackupException(

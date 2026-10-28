@@ -55,6 +55,11 @@ String? defaultImportDirectory({String? userProfile, String? home}) {
 /// «إلغاء واعٍ» — صندوق الاختيار مشدود افتراضياً، وإلغاؤه يفتح تحذيراً
 /// صريحاً قبل إنشاء نسخة خام. هو أول بند يُفعّل عند فتح م1 (2026-10-29).
 ///
+/// D-060 (قرار المالك 2026-10-29 بلفظه «كلمة السر للبرنامج فقط»):
+/// مصدر مفتاح التشفير مفتاح البرنامج حصراً — حقل كلمة المرور زال من
+/// النسخ الجديدة، والنسخة تُفتح داخل التطبيق نفسه وحده على أي جهاز.
+/// حقل كلمة المرور في الاستعادة بقى لقراءة الجيل القديم v1 حصراً.
+///
 /// D-056 (قرار المالك بعد تجربة APK الأولى على أندرويد): قيد النظام على
 /// مسار data — مجلد التطبيق محجوب عن كل تطبيق آخر فلا تصفح ولا كتابة
 /// مسار يدوياً. الحل القياسي (سلوك واتساب ومديرات كلمات السر):
@@ -83,8 +88,9 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _backupPassword = TextEditingController();
   final _restorePath = TextEditingController();
+
+  /// D-060: للنسخ القديمة v1 حصراً — الجديدة تُفتح بمفتاح البرنامج بلا كلمة.
   final _restorePassword = TextEditingController();
 
   bool _busy = false;
@@ -94,7 +100,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _backupPassword.dispose();
     _restorePath.dispose();
     _restorePassword.dispose();
     super.dispose();
@@ -147,18 +152,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// D-050: النسخ الافتراضية مشفرة بكلمة مرور — فراغها يوقف بتنبيه لا
-  /// بنسخة خام. والإلغاء الواعي: من ألغى التشفير يُحذّر قبل الإنشاء.
+  /// D-050/D-060: النسخ الافتراضية مشفرة بمفتاح البرنامج — بلا أي كلمة،
+  /// والإلغاء الواعي: من ألغى التشفير يُحذّر قبل إنشاء نسخة خام.
   Future<void> _backup() async {
-    if (_encryptBackup && _backupPassword.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('أدخل كلمة مرور النسخة المشفرة — '
-              'أو ألغِ التشفير بوعي من صندوق الاختيار'),
-        ),
-      );
-      return;
-    }
     if (!_encryptBackup) {
       final proceed = await showDialog<bool>(
         context: context,
@@ -188,9 +184,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         p.dirname(widget.dbPath),
         'diqqah-backup-${_stamp()}.db',
       );
-      final password =
-          _encryptBackup ? _backupPassword.text : null;
-      await backupTo(widget.db, target, password: password);
+      await backupTo(widget.db, target, encrypted: _encryptBackup);
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -200,9 +194,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(password == null
-                  ? 'ملف واحد للقاعدة كاملة — غير مشفرة'
-                  : 'ملف واحد للقاعدة كاملة — مشفرة بكلمة المرور'),
+              Text(_encryptBackup
+                  ? 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح البرنامج '
+                      '(D-060): تُفتح داخل التطبيق نفسه فحسب على أي جهاز'
+                  : 'ملف واحد للقاعدة كاملة — غير مشفرة'),
               const SizedBox(height: 12),
               const Text('مسار النسخة:'),
               SelectableText(target),
@@ -361,33 +356,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Text(
                     'ملف واحد للقاعدة كاملة — يُستعاد كاملاً أو لا شيء. '
                     'يُحفظ في مجلد القاعدة نفسه. التشفير الافتراضي من م1 '
-                    'بقرار D-050، وإلغاؤه قرار واعٍ بتحذير.',
+                    'بمفتاح البرنامج (D-050/D-060)، وإلغاؤه قرار واعٍ بتحذير.',
                   ),
                   const SizedBox(height: 4),
                   // D-050: صندوق الاختيار مشدود افتراضياً — النسخة بلا
                   // تشفير لا تُنشأ إلا بعد تحذير صريح (الإلغاء الواعي).
+                  // D-060: المفتاح من البرنامج حصراً — لا كلمة مرور.
                   CheckboxListTile(
                     value: _encryptBackup,
                     onChanged: _busy
                         ? null
                         : (v) => setState(() => _encryptBackup = v ?? true),
-                    title: const Text('تشفير النسخة بكلمة مرور'),
+                    title: const Text('تشفير النسخة بمفتاح البرنامج'),
                     subtitle: const Text(
-                        'الافتراضي من م1 (D-050) — لا يقرأ النسخة إلا من يعرف كلمتها'),
+                        'الافتراضي من م1 (D-050/D-060) — لا يفتح النسخة إلا '
+                        'التطبيق نفسه على أي جهاز'),
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
-                  if (_encryptBackup) ...[
-                    TextField(
-                      controller: _backupPassword,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'كلمة مرور النسخة المشفرة',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _busy ? null : _backup,
@@ -434,7 +420,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller: _restorePassword,
                     obscureText: true,
                     decoration: const InputDecoration(
-                      labelText: 'كلمة المرور (إن كانت النسخة مشفرة)',
+                      labelText:
+                          'كلمة المرور — للنسخ القديمة فقط (الجديدة تُفتح تلقائياً)',
                       border: OutlineInputBorder(),
                     ),
                   ),

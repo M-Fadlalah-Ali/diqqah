@@ -6,15 +6,21 @@ import 'package:cryptography/cryptography.dart';
 
 import 'setup.dart';
 
-/// تشفير النسخ الاحتياطية (F-012): AES-256-GCM بمفتاح PBKDF2-HMAC-SHA256.
+/// تشفير النسخ الاحتياطية (F-012): AES-256-GCM.
 ///
-/// القرار التنفيذي (جلسة م0 الثالثة — موثق في worklog): النسخة غير المشفرة
-/// تبقى ملف SQLite خاماً (ملف واحد للقاعدة كاملة — يُفتح بأي أداة)،
-/// والمشفرة تغلفه بترويسة ثابتة تكشف نفسها دون كلمة المرور. وسم GCM
-/// يحقق «تحقق من سلامة الملف (وتشفيره إن وجد)» في F-013: أي عبث
-/// أو كلمة مرور خاطئة يرفض قبل وصول بايت واحد للقاعدة الحية.
+/// D-060 (قرار المالك 2026-10-29 بلفظه «كلمة السر للبرنامج فقط»):
+/// النسخ الجديدة تُشفَّر بمفتاح البرنامج حصراً — لا كلمة مرور للمستخدم —
+/// فيفتح الملف داخل التطبيق نفسه وحده على أي جهاز (N-005 قائمة كما هي:
+/// ثبّت ثم استعد بلا أي سؤال). الجيل القديم v1 المشتق من كلمة مرور
+/// PBKDF2 — وترويسة الجيل الأسبق HESEBENC — يبقى مقروءاً بكلمته:
+/// التزام دائم بأن تغيّر مصدر المفتاح لا يقطع طريق النسخ القديمة.
+///
+/// الصدق الموثق في السجلات: المفتاح داخل برنامج موزع للعموم قابل
+/// للاستخراج التقني بالهندسة العكسية — فهذا التشفير «ستارة خصوصية
+/// لا صندوق أمان»: يمنع الفتح العابر للملف خارج التطبيق ولا يصمد
+/// أمام خصم تقني متفرغ. قراره المالك بهذا الوصف لا بغيره.
 class BackupCipher {
-  /// ترويسة النسخة المشفرة — «DIQQENC» (D-053: التسمية الموحدة «دِقَّة»).
+  /// ترويسة النسخة المشفرة — «DIQQENC» (D-053: التسمية الموحدة).
   static final List<int> magic = utf8.encode('DIQQENC');
 
   /// ترويسة الجيل السابق «HESEBENC» — تُقرأ ولا تُكتب بعد إعادة التسمية:
@@ -24,18 +30,39 @@ class BackupCipher {
   /// تُحسب من طول الترويسة المطابقة فعلاً (علة CI 2026-10-28).
   static final List<int> legacyMagic = utf8.encode('HESEBENC');
 
-  static const int formatVersion = 1;
+  /// إصدار التنسيق الجاري كتابته: 2 = مفتاح البرنامج (D-060).
+  static const int formatVersion = 2;
+
+  /// إصدار الجيل القديم بكلمة المرور (أيام D-050) — للقراءة حصراً.
+  static const int legacyFormatVersion = 1;
+
   static const int _saltLen = 16;
   static const int _nonceLen = 12;
   static const int _macLen = 16;
 
-  /// تكرارات اشتقاق مفتاح النسخة — تحدث مرة عند النسخ ومرة عند الاستعادة
-  /// لا في كل عملية، فالرقم الأعلى من تجزئة الدخول مقبول زمنياً.
+  /// سياق اشتقاق مفتاح الملف — ثابت يعزل هذا الاستعمال عن غيره.
+  static final List<int> _hkdfInfo = utf8.encode('diqqah-backup-v2');
+
+  /// مفتاح البرنامج الرئيسي (D-060) — 32 بايتة ثابتة داخل التطبيق، واحدة
+  /// على كل الأجهزة، ومنها يُشتق مفتاح كل ملف بملحه العشوائي الخاص به
+  /// (HKDF-SHA256). ثباته عبر الأجهزة هو ما يحفظ N-005: أي تثبيت للتطبيق
+  /// يفتح أي نسخة أنتجها التطبيق أينما وُلدت.
+  static const List<int> _masterKey = [
+    104, 10, 149, 151, 247, 89, 196, 41, //
+    126, 40, 28, 222, 145, 250, 119, 253, //
+    183, 152, 202, 227, 113, 186, 40, 249, //
+    136, 199, 89, 137, 19, 240, 136, 91, //
+  ];
+
+  /// تكرارات اشتقاق الجيل القديم v1 — لا تُستعمل إلا بقراءة النسخ القديمة.
   final int iterations;
 
   final AesGcm _aes;
+  final Hkdf _hkdf;
 
-  BackupCipher({this.iterations = 100000}) : _aes = AesGcm.with256bits();
+  BackupCipher({this.iterations = 100000})
+      : _aes = AesGcm.with256bits(),
+        _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
 
   /// يميز نوع الملف دون أي فك: مشفرة / SQLite خام / مجهول.
   static BackupKind identify(List<int> blob) {
@@ -48,13 +75,24 @@ class BackupCipher {
     return BackupKind.unknown;
   }
 
-  /// يشفّر بايتات قاعدة خام ويعيد الغلاف كاملاً بالترويسة.
-  Future<List<int>> encrypt(List<int> plain, String password) async {
+  /// بايتة إصدار ملف مشفر (1 = قديم بكلمة مرور، 2 = مفتاح البرنامج)
+  /// و0 لغير المشفر — تحدد مسار الفك قبل أي محاولة.
+  static int encryptedVersion(List<int> blob) {
+    if (_startsWith(blob, legacyMagic)) return blob[legacyMagic.length];
+    if (_startsWith(blob, magic)) return blob[magic.length];
+    return 0;
+  }
+
+  /// يشفّر بايتات قاعدة خام بمفتاح البرنامج (D-060) — الترويسة بإصدار 2.
+  /// مفتاح كل ملف مشتق بملح عشوائي خاص به: نسختان لمحتوى واحد لا تتطابق
+  /// بايتات، ووسم GCM يحقق «تحقق من سلامة الملف (وتشفيره إن وجد)» في
+  /// F-013: أي عبث يُرفض قبل وصول بايت واحد للقاعدة الحية.
+  Future<List<int>> encrypt(List<int> plain) async {
     final salt = _random(_saltLen);
     final nonce = _aes.newNonce();
     final box = await _aes.encrypt(
       plain,
-      secretKey: await _deriveKey(password, salt),
+      secretKey: await _deriveProgramKey(salt),
       nonce: nonce,
     );
     final out = BytesBuilder();
@@ -67,21 +105,77 @@ class BackupCipher {
     return out.toBytes();
   }
 
-  /// يفك الغلاف ويتحقق بوسم GCM — فشل الوسم يعني كلمة مرور خاطئة أو ملفاً تالفاً.
-  Future<List<int>> decrypt(List<int> blob, String password) async {
+  /// يفك نسخة الجيل الحالي v2 بوسم GCM — بلا أي كلمة مرور (D-060).
+  /// نسخة v1 تُرفض بتوجيه صريح إلى حقل كلمة المرور.
+  Future<List<int>> decrypt(List<int> blob) async {
     if (identify(blob) != BackupKind.encrypted) {
       throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
     }
-    // DIQQENC سبعة بايتات وHESEBENC ثمانية — بايتة الإصدار تلي الترويسة
-    // في الجيلين، فالإزاحة من طول الترويسة المطابقة لا من magic وحدها.
-    var i = _startsWith(blob, legacyMagic) ? legacyMagic.length : magic.length;
-    final version = blob[i];
+    final version = encryptedVersion(blob);
     if (version != formatVersion) {
-      throw BackupCipherException('إصدار تنسيق غير معروف: $version');
+      throw BackupCipherException(version == legacyFormatVersion
+          ? 'النسخة من الجيل القديم المحمي بكلمة مرور — '
+              'أدخلها في حقل كلمة المرور ثم أعد المحاولة'
+          : 'إصدار تنسيق غير معروف: $version');
     }
-    i += 1;
-    final salt = blob.sublist(i, i + _saltLen);
-    i += _saltLen;
+    return _decryptEnvelope(
+      blob,
+      await _deriveProgramKey(_saltOf(blob)),
+      'فك التشفير فشل — الملف تالف',
+    );
+  }
+
+  /// الجيل القديم v1 (PBKDF2 بكلمة مرور): للقراءة حصراً بعد D-060.
+  /// نسخة v2 تُرفض بتوجيه معاكس — تُفتح بلا كلمة أصلاً.
+  Future<List<int>> decryptWithPassword(List<int> blob, String password) async {
+    if (identify(blob) != BackupKind.encrypted) {
+      throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
+    }
+    final version = encryptedVersion(blob);
+    if (version != legacyFormatVersion) {
+      throw BackupCipherException(version == formatVersion
+          ? 'هذه نسخة جديدة بمفتاح البرنامج — تُفتح مباشرة بلا كلمة مرور'
+          : 'إصدار تنسيق غير معروف: $version');
+    }
+    return _decryptEnvelope(
+      blob,
+      await _deriveKey(password, _saltOf(blob)),
+      'كلمة المرور خاطئة أو الملف تالف',
+    );
+  }
+
+  /// توليد ملفات الجيل القديم v1 بكلمة مرور — للاختبارات والتوافق فقط؛
+  /// المنتج لا يكتب v1 بعد D-060.
+  Future<List<int>> encryptWithPassword(
+      List<int> plain, String password) async {
+    final salt = _random(_saltLen);
+    final nonce = _aes.newNonce();
+    final box = await _aes.encrypt(
+      plain,
+      secretKey: await _deriveKey(password, salt),
+      nonce: nonce,
+    );
+    final out = BytesBuilder();
+    out.add(magic);
+    out.addByte(legacyFormatVersion);
+    out.add(salt);
+    out.add(box.nonce);
+    out.add(box.cipherText);
+    out.add(box.mac.bytes);
+    return out.toBytes();
+  }
+
+  /// الهيكل المشترك للجيلين: الترويسة (7 أو 8) ← بايتة الإصدار ← الملح
+  /// (16) ← النونس (12) ← النص المشفر ← وسم GCM (16) — والإزاحة من طول
+  /// الترويسة المطابقة فعلاً (علة CI 2026-10-28).
+  Future<List<int>> _decryptEnvelope(
+    List<int> blob,
+    SecretKey key,
+    String failureMessage,
+  ) async {
+    final headerLen =
+        _startsWith(blob, legacyMagic) ? legacyMagic.length : magic.length;
+    var i = headerLen + 1; // تجاوز بايتة الإصدار — الملح قرأه المستدعي
     final nonce = blob.sublist(i, i + _nonceLen);
     i += _nonceLen;
     final cipherText = blob.sublist(i, blob.length - _macLen);
@@ -89,13 +183,31 @@ class BackupCipher {
     try {
       return await _aes.decrypt(
         SecretBox(cipherText, nonce: nonce, mac: mac),
-        secretKey: await _deriveKey(password, salt),
+        secretKey: key,
       );
     } on SecretBoxAuthenticationError {
-      throw const BackupCipherException('كلمة المرور خاطئة أو الملف تالف');
+      throw BackupCipherException(failureMessage);
     }
   }
 
+  List<int> _saltOf(List<int> blob) {
+    final headerLen =
+        _startsWith(blob, legacyMagic) ? legacyMagic.length : magic.length;
+    return blob.sublist(headerLen + 1, headerLen + 1 + _saltLen);
+  }
+
+  /// مفتاح الملف من مفتاح البرنامج — HKDF-SHA256 بملح الملف العشوائي:
+  /// اشتقاق سريع (لا يحتاج تكرارات PBKDF2) لأن السر في ثبات المفتاح
+  /// الرئيسي داخل التطبيق لا في بطء الاشتقاق.
+  Future<SecretKey> _deriveProgramKey(List<int> salt) {
+    return _hkdf.deriveKey(
+      secretKey: SecretKeyData(Uint8List.fromList(_masterKey)),
+      nonce: salt,
+      info: _hkdfInfo,
+    );
+  }
+
+  /// اشتقاق الجيل القديم v1 — PBKDF2-HMAC-SHA256 بكلمة المستخدم.
   Future<SecretKey> _deriveKey(String password, List<int> salt) async {
     final key = PasswordHasher.pbkdf2Bytes(
         utf8.encode(password), salt, iterations, 32);
