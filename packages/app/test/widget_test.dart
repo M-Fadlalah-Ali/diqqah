@@ -113,12 +113,23 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
-    // النسخ فيها IO حقيقي (قراءة/كتابة الملف) — يُضخ حلقة الأحداث الواقعية ليكمل
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 500)),
-    );
+    // النسخ فيها IO حقيقي متسلسل (VACUUM ← قراءة ← كتابة) لا يكمله الوقت
+    // الوهمي — نوازن ضخ الوقت الواقعي (يكمل IO) مع ضخ الإطارات حتى يُنتج
+    // الملف فعلاً، بلا افتراض توقيت هش انكسر على عدّاد CI البطيء (Task 50).
+    var produced = false;
+    for (var i = 0; i < 40 && !produced; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      produced = tempDir
+          .listSync()
+          .whereType<File>()
+          .where((f) => p.basename(f.path).startsWith('diqqah-backup-'))
+          .isNotEmpty;
+    }
     await tester.pumpAndSettle();
-    await tester.pump(const Duration(milliseconds: 300));
+    expect(produced, isTrue, reason: 'ملف النسخة لم يُنشأ خلال مهلة الاختبار');
 
     final backups = tempDir
         .listSync()
@@ -152,11 +163,19 @@ void main() {
 
     // زر الإخراج يظهر في حوار نجاح النسخة — وجوده لا يستدعي أي قناة منصة
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 500)),
-    );
+    // نفس درس F-012 أعلاه: سلسلة IO حقيقية ثم دفع الحوار — حلقة توازن
+    // (وقت واقعي ← إطار ← فحص) حتى يظهر الحوار، بلا توقيت مفترض (Task 50).
+    final successTitle = find.text('أُنشئت النسخة الاحتياطية');
+    var shown = false;
+    for (var i = 0; i < 40 && !shown; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      shown = successTitle.evaluate().isNotEmpty;
+    }
     await tester.pumpAndSettle();
-    await tester.pump(const Duration(milliseconds: 300));
+    expect(shown, isTrue, reason: 'حوار نجاح النسخة لم يظهر خلال مهلة الاختبار');
 
     expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
     expect(find.text('إخراج النسخة'), findsOneWidget);
