@@ -2,22 +2,22 @@
 
 مجلد الوثائق المعتمدة للمشروع. كل ما هنا مُعتمد بلفظ المالك وتاريخه، وما هو قديم معزول في `legacy/` لا يُستند إليه.
 
-## الوثائق المعتمدة — إصدار 2.00 (دِقَّة)
+## الوثائق المعتمدة — إصدار 2.01 (دِقَّة)
 
 | الملف | الموضوع |
 |---|---|
-| `diqqah-v2.00/01-vision-and-scope-v2.00.md` | الرؤية والنطاق |
-| `diqqah-v2.00/02-terminology-v2.00.md` | المصطلحات الموحدة |
-| `diqqah-v2.00/03-chart-of-accounts-v2.00.md` | شجرة الحسابات |
-| `diqqah-v2.00/04-srs-v2.00.md` | مواصفة المتطلبات |
-| `diqqah-v2.00/05-data-model-v2.00.md` | نموذج البيانات |
-| `diqqah-v2.00/06-workflows-v2.00.md` | دورات العمل |
-| `diqqah-v2.00/07-tryton-principles-v2.00.md` | مبادئ المحاسبة المعتمدة |
-| `diqqah-v2.00/08-sync-strategy-v2.00.md` | استراتيجية المزامنة والنسخ الاحتياطي |
-| `diqqah-v2.00/09-release-plan-v2.00.md` | خطة الإصدار |
-| `diqqah-v2.00/10-test-plan-v2.00.md` | خطة الاختبار |
-| `diqqah-v2.00/README-v2.00.md` | فهرس الوثائق وقائمة المؤجلات |
-| `diqqah-docs-merged-v2.00.md` | الوثائق العشر مدموجة في ملف واحد |
+| `diqqah-v2.01/01-vision-and-scope-v2.01.md` | الرؤية والنطاق |
+| `diqqah-v2.01/02-terminology-v2.01.md` | المصطلحات الموحدة |
+| `diqqah-v2.01/03-chart-of-accounts-v2.01.md` | شجرة الحسابات |
+| `diqqah-v2.01/04-srs-v2.01.md` | مواصفة المتطلبات |
+| `diqqah-v2.01/05-data-model-v2.01.md` | نموذج البيانات |
+| `diqqah-v2.01/06-workflows-v2.01.md` | دورات العمل |
+| `diqqah-v2.01/07-tryton-principles-v2.01.md` | مبادئ المحاسبة المعتمدة |
+| `diqqah-v2.01/08-sync-strategy-v2.01.md` | استراتيجية المزامنة والنسخ الاحتياطي |
+| `diqqah-v2.01/09-release-plan-v2.01.md` | خطة الإصدار |
+| `diqqah-v2.01/10-test-plan-v2.01.md` | خطة الاختبار |
+| `diqqah-v2.01/README-v2.01.md` | فهرس الوثائق وقائمة المؤجلات |
+| `diqqah-docs-merged-v2.01.md` | الوثائق العشر مدموجة في ملف واحد |
 
 ## وثائق الحاكمية والقرارات
 
