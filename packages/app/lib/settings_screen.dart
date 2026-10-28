@@ -1,3 +1,5 @@
+import 'dart:io' show Directory, Platform;
+
 import 'package:flutter/material.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
@@ -25,11 +27,33 @@ String diqqahVersionLine(String version, String build) {
   return build.isEmpty ? 'دِقَّة $display' : 'دِقَّة $display.$build';
 }
 
+/// D-057 (قرار المالك بعد نجاح تجربة الاستعادة 2026-10-29): منتقي الاستيراد
+/// يفتح افتراضياً على مجلد «التنزيلات» — حيث تُخرج النسخة عادة، فيلزم النقر
+/// لا التفتيش. تحديد مجلد التنزيلات مدعوم في منتقي ملفات النظام على سطح
+/// المكتب (ويندوز/لينكس/ماك) حصراً؛ على أندرويد منتقي النظام (SAF) يدير
+/// نقطة البداية بنفسه ويُتجاهل المسار — فيعاد null بلا أثر. وتعاد null
+/// أيضاً حيثما تعذر تحديد المجلد فلا يُعطّل المنتقي أبداً.
+String? defaultImportDirectory({String? userProfile, String? home}) {
+  final candidates = <String>[
+    if (userProfile != null && userProfile.isNotEmpty)
+      p.join(userProfile, 'Downloads'),
+    if (home != null && home.isNotEmpty) p.join(home, 'Downloads'),
+  ];
+  for (final dir in candidates) {
+    if (Directory(dir).existsSync()) return dir;
+  }
+  return null;
+}
+
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
 ///
 /// «الإعدادات ونسخة الاحتياطي الأولى (F-012) متاحة فوراً بعد التهيئة» (س-01).
 /// الاستعادة بتأكيد مزدوج وإلغاء آمن (F-013)، وبعدها سطر إحالة يري مكان
 /// نسخة ما قبل الاستعادة (F-154).
+///
+/// D-050 (م-47): التشفير اختياري في م0 ثم إلزامي افتراضياً من م1 مع
+/// «إلغاء واعٍ» — صندوق الاختيار مشدود افتراضياً، وإلغاؤه يفتح تحذيراً
+/// صريحاً قبل إنشاء نسخة خام. هو أول بند يُفعّل عند فتح م1 (2026-10-29).
 ///
 /// D-056 (قرار المالك بعد تجربة APK الأولى على أندرويد): قيد النظام على
 /// مسار data — مجلد التطبيق محجوب عن كل تطبيق آخر فلا تصفح ولا كتابة
@@ -65,6 +89,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _busy = false;
 
+  /// D-050: التشفير الافتراضي للنسخ الاحتياطية من م1 — الإلغاء قرار واعٍ.
+  bool _encryptBackup = true;
+
   @override
   void dispose() {
     _backupPassword.dispose();
@@ -82,10 +109,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// D-056: استيراد بالتصفح — منتقي النظام يرى كل مكان (التنزيلات،
   /// Drive، مديرات الملفات) بلا صلاحيات تخزين وبلا كتابة مسار يدوياً.
+  /// D-057: نقطة البداية مجلد التنزيلات حيث تدعمها المنصة.
   Future<void> _pickBackupFile() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final result = await FilePicker.platform.pickFiles();
+      final result = await FilePicker.platform.pickFiles(
+        initialDirectory: defaultImportDirectory(
+          userProfile: Platform.environment['USERPROFILE'],
+          home: Platform.environment['HOME'],
+        ),
+      );
       final path = result?.paths.single;
       if (path == null) return; // إلغاء المستخدم — لم يحدث شيء
       if (!mounted) return;
@@ -114,7 +147,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// D-050: النسخ الافتراضية مشفرة بكلمة مرور — فراغها يوقف بتنبيه لا
+  /// بنسخة خام. والإلغاء الواعي: من ألغى التشفير يُحذّر قبل الإنشاء.
   Future<void> _backup() async {
+    if (_encryptBackup && _backupPassword.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('أدخل كلمة مرور النسخة المشفرة — '
+              'أو ألغِ التشفير بوعي من صندوق الاختيار'),
+        ),
+      );
+      return;
+    }
+    if (!_encryptBackup) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('نسخة بدون تشفير'),
+          content: const Text(
+              'كل من يملك الملف سيقرأ القاعدة كاملة بدون كلمة مرور. '
+              'إلغاء التشفير قرار واعٍ (D-050) — متابعة بدون تشفير؟'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('تراجع'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('متابعة بدون تشفير'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+    }
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -123,7 +189,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'diqqah-backup-${_stamp()}.db',
       );
       final password =
-          _backupPassword.text.isEmpty ? null : _backupPassword.text;
+          _encryptBackup ? _backupPassword.text : null;
       await backupTo(widget.db, target, password: password);
       if (!mounted) return;
       await showDialog<void>(
@@ -293,18 +359,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'ملف واحد للقاعدة كاملة — مشفر اختيارياً بكلمة مرور، '
-                    'يُستعاد كاملاً أو لا شيء. يُحفظ في مجلد القاعدة نفسه.',
+                    'ملف واحد للقاعدة كاملة — يُستعاد كاملاً أو لا شيء. '
+                    'يُحفظ في مجلد القاعدة نفسه. التشفير الافتراضي من م1 '
+                    'بقرار D-050، وإلغاؤه قرار واعٍ بتحذير.',
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _backupPassword,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'كلمة المرور (اختيارية — تعتمك النسخة)',
-                      border: OutlineInputBorder(),
+                  const SizedBox(height: 4),
+                  // D-050: صندوق الاختيار مشدود افتراضياً — النسخة بلا
+                  // تشفير لا تُنشأ إلا بعد تحذير صريح (الإلغاء الواعي).
+                  CheckboxListTile(
+                    value: _encryptBackup,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _encryptBackup = v ?? true),
+                    title: const Text('تشفير النسخة بكلمة مرور'),
+                    subtitle: const Text(
+                        'الافتراضي من م1 (D-050) — لا يقرأ النسخة إلا من يعرف كلمتها'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  if (_encryptBackup) ...[
+                    TextField(
+                      controller: _backupPassword,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'كلمة مرور النسخة المشفرة',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 12),
+                  ],
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _busy ? null : _backup,

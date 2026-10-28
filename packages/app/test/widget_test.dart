@@ -85,7 +85,7 @@ void main() {
     expect(find.text('الاستعادة الكاملة (F-013)'), findsOneWidget);
   });
 
-  testWidgets('F-012: زر النسخ في الإعدادات ينتج ملف نسخة في مجلد القاعدة',
+  testWidgets('F-012 + D-050: زر النسخ بكلمة مرور ينتج نسخة مشفرة في مجلد القاعدة',
       (tester) async {
     // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
     final tempDir = Directory.systemTemp.createTempSync('diqqah_settings_t_');
@@ -112,6 +112,11 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // D-050: التشفير مشدود افتراضياً من م1 — النسخة بكلمة مرور
+    await tester.enterText(
+      find.widgetWithText(TextField, 'كلمة مرور النسخة المشفرة'),
+      'سر-النسخة',
+    );
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
     // النسخ فيها IO حقيقي متسلسل (VACUUM ← قراءة ← كتابة) لا يكمله الوقت
     // الوهمي — نوازن ضخ الوقت الواقعي (يكمل IO) مع ضخ الإطارات حتى يُنتج
@@ -138,9 +143,68 @@ void main() {
         .toList();
     expect(backups, hasLength(1));
     final bytes = backups.first.readAsBytesSync();
-    expect(BackupCipher.identify(bytes), BackupKind.plainSqlite);
+    // D-050: الافتراضي من م1 نسخة مشفرة لا خام
+    expect(BackupCipher.identify(bytes), BackupKind.encrypted);
     // DoD F-012: الملف أُنتج من الزر — وبلا رسالة فشل على الشاشة
     expect(find.textContaining('تعذر إنشاء النسخة'), findsNothing);
+  });
+
+  testWidgets('D-050: النسخ بكلمة مرور فارغة يُوقف بتنبيه — والإلغاء الواعي '
+      'للتشفير يفتح تحذيراً ثم ينتج نسخة خام', (tester) async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_d050_t_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final dbPath = p.join(tempDir.path, 'diqqah.db');
+    final db = DiqqahDatabase(filePath: dbPath);
+    addTearDown(db.close);
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsScreen(db: db, dbPath: dbPath, onRestored: () {}),
+    ));
+    await tester.pumpAndSettle();
+
+    List<File> backups() => tempDir
+        .listSync()
+        .whereType<File>()
+        .where((f) => p.basename(f.path).startsWith('diqqah-backup-'))
+        .toList();
+
+    // (أ) التشفير مشدود وكلمة المرور فارغة → تنبيه ولا ملف
+    await tester.tap(find.text('إنشاء نسخة احتياطية'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('أدخل كلمة مرور النسخة المشفرة'), findsOneWidget);
+    expect(backups(), isEmpty, reason: 'بلا كلمة مرور لا تُنشأ نسخة');
+
+    // (ب) الإلغاء الواعي: فك التشفير → تحذير صريح → تراجع أولاً لا شيء
+    await tester.tap(find.text('تشفير النسخة بكلمة مرور'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'كلمة مرور النسخة المشفرة'),
+        findsNothing); // حقل كلمة المرور يختفي
+    await tester.tap(find.text('إنشاء نسخة احتياطية'));
+    await tester.pumpAndSettle();
+    expect(find.text('نسخة بدون تشفير'), findsOneWidget);
+    await tester.tap(find.text('تراجع'));
+    await tester.pumpAndSettle();
+    expect(backups(), isEmpty, reason: 'التراجع من التحذير لا ينتج شيئاً');
+
+    // (ج) متابعة بدون تشفير بوعي → نسخة خام
+    await tester.tap(find.text('إنشاء نسخة احتياطية'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('متابعة بدون تشفير'));
+    var produced = false;
+    for (var i = 0; i < 40 && !produced; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+      produced = backups().isNotEmpty;
+    }
+    await tester.pumpAndSettle();
+    expect(produced, isTrue, reason: 'النسخة الخام لم تُنشأ خلال مهلة الاختبار');
+    expect(backups(), hasLength(1));
+    expect(
+      BackupCipher.identify(backups().single.readAsBytesSync()),
+      BackupKind.plainSqlite,
+    );
   });
 
   testWidgets('D-056: زرا التصفح والإخراج في شاشة الإعدادات — إصلاح قيد '
@@ -162,6 +226,11 @@ void main() {
     expect(find.byTooltip('اختيار ملف النسخة'), findsOneWidget);
 
     // زر الإخراج يظهر في حوار نجاح النسخة — وجوده لا يستدعي أي قناة منصة
+    // D-050: النسخة مشفرة افتراضياً من م1 — كلمة مرور قبل الزر
+    await tester.enterText(
+      find.widgetWithText(TextField, 'كلمة مرور النسخة المشفرة'),
+      'سر-النسخة',
+    );
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
     // نفس درس F-012 أعلاه: سلسلة IO حقيقية ثم دفع الحوار — حلقة توازن
     // (وقت واقعي ← إطار ← فحص) حتى يظهر الحوار، بلا توقيت مفترض (Task 50).
@@ -213,9 +282,9 @@ void main() {
       find.widgetWithText(TextField, 'مسار ملف النسخة الاحتياطية'),
       p.join(tempDir.path, 'غير-موجود.db'),
     );
-    // زر الاستعادة تحت الخط المرئي (602 > 600) — سحب القائمة قليلاً
-    // (scrollUntilVisible لا يصلح: الشاشة تحوي عدة Scrollables بحقولها)
-    await tester.drag(find.byType(ListView), const Offset(0, -120));
+    // زر الاستعادة تحت الخط المرئي — حقل التشفير وصندوقه أضافا ارتفاعاً
+    // فيكفي سحب أعمق (D-050: البطاقة أطول من م0)
+    await tester.drag(find.byType(ListView), const Offset(0, -300));
     await tester.pumpAndSettle();
     await tester.tap(find.text('استعادة…'));
     await tester.pumpAndSettle();
