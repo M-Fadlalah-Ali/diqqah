@@ -13,10 +13,16 @@ import 'package:share_plus/share_plus.dart';
 const String kAppVersion = String.fromEnvironment('APP_VERSION');
 const String kBuildNumber = String.fromEnvironment('BUILD_NUMBER');
 
-/// سطر الإصدار — دالة قابلة للاختبار بمعطيات صريحة.
+/// D-058 (تعليمة المالك «0.2.01.X»): الصيغة المعروضة تحمل رقم الوثيقة
+/// ورقم التجربة — pubspec يحمل «0.2.1» (semver يمنع الصفر البادئ) فالتبطين
+/// إلى «01» خانتين هنا عند العرض فحسب.
 String diqqahVersionLine(String version, String build) {
   if (version.isEmpty) return '';
-  return build.isEmpty ? 'دِقَّة $version' : 'دِقَّة $version (بناء $build)';
+  final parts = version.split('.');
+  final display = parts.length == 3
+      ? '${parts[0]}.${parts[1]}.${parts[2].padLeft(2, '0')}'
+      : version;
+  return build.isEmpty ? 'دِقَّة $display' : 'دِقَّة $display.$build';
 }
 
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).

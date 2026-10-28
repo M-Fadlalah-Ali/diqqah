@@ -71,7 +71,10 @@ jobs:
         id: ver
         run: |
           VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          # D-058: عرض الطبعة بخانتين لاسم الحزمة (pubspec يحمل 0.2.1 والعرض 0.2.01)
+          MA=$(echo "$VER" | cut -d. -f1); MI=$(echo "$VER" | cut -d. -f2); PA=$(echo "$VER" | cut -d. -f3)
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "disp=$MA.$MI.$(printf '%02d' "$PA")" >> "$GITHUB_OUTPUT"
       - name: APK arm64 مصغّر — رقم البناء = رقم تشغيل CI
         run: |
           flutter build apk --release --split-per-abi --target-platform android-arm64 \
@@ -99,7 +102,7 @@ jobs:
       - name: رفع حزمة أندرويد
         uses: actions/upload-artifact@v4
         with:
-          name: diqqah-android-v${{ steps.ver.outputs.ver }}-b${{ github.run_number }}
+          name: diqqah-android-v${{ steps.ver.outputs.disp }}-b${{ github.run_number }}
           path: packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           retention-days: 30
 
@@ -156,7 +159,10 @@ jobs:
         shell: bash
         run: |
           VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          # D-058: عرض الطبعة بخانتين لاسم الحزمة (pubspec يحمل 0.2.1 والعرض 0.2.01)
+          MA=$(echo "$VER" | cut -d. -f1); MI=$(echo "$VER" | cut -d. -f2); PA=$(echo "$VER" | cut -d. -f3)
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "disp=$MA.$MI.$(printf '%02d' "$PA")" >> "$GITHUB_OUTPUT"
       - name: بناء إصدار Windows — رقم البناء = رقم تشغيل CI
         shell: bash
         run: |
@@ -170,6 +176,6 @@ jobs:
       - name: رفع حزمة ويندوز
         uses: actions/upload-artifact@v4
         with:
-          name: diqqah-windows-v${{ steps.ver.outputs.ver }}-b${{ github.run_number }}
+          name: diqqah-windows-v${{ steps.ver.outputs.disp }}-b${{ github.run_number }}
           path: packages/app/diqqah-windows-x64.zip
           retention-days: 30

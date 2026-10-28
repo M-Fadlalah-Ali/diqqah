@@ -26,7 +26,16 @@ android {
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
         // flag during build.
         versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        // D-058: الصيغة الموثقة «0.2.01.X» — pubspec يحمل 0.2.1 (semver
+        // يمنع الصفر البادئ) فيُبطَّن رقم الطبعة إلى خانتين ويُلحق رقم
+        // التجربة، ليثبت في إعدادات أندرويد النظامية ما يعرضه سطر الإعدادات.
+        versionName = flutter.versionName?.let { name ->
+            val parts = name.split(".")
+            if (parts.size == 3)
+                "${parts[0]}.${parts[1]}.${parts[2].padStart(2, '0')}.${flutter.versionCode}"
+            else
+                name
+        }
     }
 
     buildTypes {
