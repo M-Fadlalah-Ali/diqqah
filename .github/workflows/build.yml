@@ -64,15 +64,42 @@ jobs:
           dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
       # D-056 + القاعدة السادسة (سقف تحميل المالك 35MB): artifact arm64
-      # وحده (~15-18MB) لهواتف اليوم — كل الأجهزة الحديثة arm64. APK
-      # الشامل (~50MB يضخم الحزمة) يُعاد عند التوزيع العام بسطر واحد:
-      # flutter build apk --release
-      - name: APK arm64 مصغّر
-        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      # وحده (~9MB فعلياً بالقياس البايتي) لهواتف اليوم — كل الأجهزة
+      # الحديثة arm64. APK الشامل (~50MB يضخم الحزمة) يُعاد عند التوزيع
+      # العام بسطر واحد: flutter build apk --release
+      - name: قراءة الإصدار من pubspec (مصدر واحد للحقيقة — Task 51)
+        id: ver
+        run: |
+          VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+      - name: APK arm64 مصغّر — رقم البناء = رقم تشغيل CI
+        run: |
+          flutter build apk --release --split-per-abi --target-platform android-arm64 \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=APP_VERSION=${{ steps.ver.outputs.ver }} \
+            --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
+      # Task 51: خاتم توقيع ثابت — علاج «التعارض مع حزمة حالية».
+      # آلة CI تولد خاتم debug مؤقتاً جديداً بكل تشغيل، فيرفض أندرويد
+      # تثبيت نسخة موقعة بخاتم مختلف فوق المثبتة. الخاتم الثابت مودع في
+      # هذا المستودع الخاص (رمز المالك بلا صلاحية إدارة أسرار GitHub).
+      # إن صار المستودع عاماً يوماً: تدوير الخاتم ونقله لأسرار GitHub أولاً.
+      - name: إعادة توقيع APK بالخاتم الثابت (zipalign ثم apksigner)
+        env:
+          KS: ${{ github.workspace }}/.github/keystore
+        run: |
+          PW=$(cat "$KS/diqqah.keystore.pass.txt")
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          "$BT/zipalign" -f 4 "$APK" apk-aligned.apk
+          "$BT/apksigner" sign --ks "$KS/diqqah-release.keystore" \
+            --ks-key-alias diqqah --ks-pass "pass:$PW" --key-pass "pass:$PW" \
+            --out apk-signed.apk apk-aligned.apk
+          mv apk-signed.apk "$APK"
+          "$BT/apksigner" verify "$APK"
       - name: رفع حزمة أندرويد
         uses: actions/upload-artifact@v4
         with:
-          name: diqqah-android
+          name: diqqah-android-v${{ steps.ver.outputs.ver }}-b${{ github.run_number }}
           path: packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           retention-days: 30
 
@@ -124,14 +151,25 @@ jobs:
           dart pub get
           dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
-      - name: بناء إصدار Windows
-        run: flutter build windows --release
+      - name: قراءة الإصدار من pubspec (مصدر واحد للحقيقة — Task 51)
+        id: ver
+        shell: bash
+        run: |
+          VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+      - name: بناء إصدار Windows — رقم البناء = رقم تشغيل CI
+        shell: bash
+        run: |
+          flutter build windows --release \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=APP_VERSION=${{ steps.ver.outputs.ver }} \
+            --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
       - name: ضغط مجلد الإصدار المحمول
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath diqqah-windows-x64.zip -Force
       - name: رفع حزمة ويندوز
         uses: actions/upload-artifact@v4
         with:
-          name: diqqah-windows
+          name: diqqah-windows-v${{ steps.ver.outputs.ver }}-b${{ github.run_number }}
           path: packages/app/diqqah-windows-x64.zip
           retention-days: 30

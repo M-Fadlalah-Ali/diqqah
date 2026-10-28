@@ -1,6 +1,8 @@
 name: diqqah_app
 description: واجهة دِقَّة — Flutter واجهة واحدة لأندرويد وWindows (F-001)
-version: 0.0.1
+# Task 51: الإصدار المرئي يواكب ختم الوثائق (2.1.0 ≈ v2.01)، ورقم البناء
+# يُحقن من CI (--build-number = رقم تشغيل CI) فلا يتكرر أبداً.
+version: 2.1.0+1
 publish_to: none
 
 environment:

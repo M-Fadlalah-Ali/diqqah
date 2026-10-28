@@ -7,6 +7,18 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+/// Task 51: هوية الإصدار تُحقن زمن الترجمة من CI (--dart-define) —
+/// مصدر الحقيقة pubspec.yaml، ويظهر السطر للمالك أسفل شاشة الإعدادات
+/// فيعرف أي نسخة مثبتة عنده. فارغ في التطوير والاختبار فلا ضجيج ولا كسر.
+const String kAppVersion = String.fromEnvironment('APP_VERSION');
+const String kBuildNumber = String.fromEnvironment('BUILD_NUMBER');
+
+/// سطر الإصدار — دالة قابلة للاختبار بمعطيات صريحة.
+String diqqahVersionLine(String version, String build) {
+  if (version.isEmpty) return '';
+  return build.isEmpty ? 'دِقَّة $version' : 'دِقَّة $version (بناء $build)';
+}
+
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
 ///
 /// «الإعدادات ونسخة الاحتياطي الأولى (F-012) متاحة فوراً بعد التهيئة» (س-01).
@@ -346,6 +358,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ),
+          if (diqqahVersionLine(kAppVersion, kBuildNumber).isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Text(
+              diqqahVersionLine(kAppVersion, kBuildNumber),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+            ),
+          ],
         ],
       ),
     );
