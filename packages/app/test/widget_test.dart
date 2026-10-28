@@ -119,22 +119,23 @@ void main() {
     );
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
     // النسخ فيها IO حقيقي متسلسل (VACUUM ← قراءة ← كتابة) لا يكمله الوقت
-    // الوهمي — نوازن ضخ الوقت الواقعي (يكمل IO) مع ضخ الإطارات حتى يُنتج
-    // الملف فعلاً، بلا افتراض توقيت هش انكسر على عدّاد CI البطيء (Task 50).
-    var produced = false;
-    for (var i = 0; i < 40 && !produced; i++) {
+    // الوهمي — نوازن ضخ الوقت الواقعي مع ضخ الإطارات حتى يظهر حوار النجاح.
+    // علّة CI (2026-10-29): رصد «ظهور أي ملف» يلتقط المؤقت .tmp الذي يولده
+    // VACUUM INTO — اسمه يطابق بادئة النسخة وهو خام دائماً قبل اكتمال
+    // التشفير، فقرأه الاختبار على عدّاد CI البطيء وظنه الناتج. إشارة
+    // الاكتمال الصحيحة حوار النجاح: لا يظهر إلا بعد كتابة الملف النهائي
+    // وحذف المؤقت — نمط D-056 الذي سلم على CI نفسه.
+    final successTitle = find.text('أُنشئت النسخة الاحتياطية');
+    var shown = false;
+    for (var i = 0; i < 40 && !shown; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 50)),
       );
       await tester.pump();
-      produced = tempDir
-          .listSync()
-          .whereType<File>()
-          .where((f) => p.basename(f.path).startsWith('diqqah-backup-'))
-          .isNotEmpty;
+      shown = successTitle.evaluate().isNotEmpty;
     }
     await tester.pumpAndSettle();
-    expect(produced, isTrue, reason: 'ملف النسخة لم يُنشأ خلال مهلة الاختبار');
+    expect(shown, isTrue, reason: 'حوار نجاح النسخة لم يظهر خلال مهلة الاختبار');
 
     final backups = tempDir
         .listSync()
@@ -190,16 +191,20 @@ void main() {
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('متابعة بدون تشفير'));
-    var produced = false;
-    for (var i = 0; i < 40 && !produced; i++) {
+    // إشارة الاكتمال حوار النجاح لا «ظهور أي ملف» — المؤقت .tmp يطابق
+    // اسم النسخة وقد يُلتقط قبل اكتمال الكتابة أو يُرى معها معاً فتزدهم
+    // hasLength — علّة CI 2026-10-29 وهششة كامنة في هذا الموضع.
+    final successTitle = find.text('أُنشئت النسخة الاحتياطية');
+    var shown = false;
+    for (var i = 0; i < 40 && !shown; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 50)),
       );
       await tester.pump();
-      produced = backups().isNotEmpty;
+      shown = successTitle.evaluate().isNotEmpty;
     }
     await tester.pumpAndSettle();
-    expect(produced, isTrue, reason: 'النسخة الخام لم تُنشأ خلال مهلة الاختبار');
+    expect(shown, isTrue, reason: 'حوار نجاح النسخة لم يظهر خلال مهلة الاختبار');
     expect(backups(), hasLength(1));
     expect(
       BackupCipher.identify(backups().single.readAsBytesSync()),
