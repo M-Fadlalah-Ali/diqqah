@@ -162,16 +162,30 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // خالصة بـ ADD COLUMN — لا تعديل لأعمدة قائمة، فلا إعادة بناء.
             // uuid NOT NULL DEFAULT '' ثم تعبئة فورية أدناه — الصفر القائم
             // لا يبقى سوى لأجزاء من الثانية داخل الترحيلة نفسها.
+            // حارس التكرار (علة CI 2026-10-28): خطوة v2 تبني الجداول
+            // الناقصة بـ createAll بشكلتها الحالية — أي بأعمدة الاصطلاح
+            // أصلاً عند الترقية من v1 — فالإضافة العمياء تصطدم بـ
+            // «duplicate column». فحص pragma_table_info يجعل الترحيلة
+            // آمنة التكرار أي كان مسار الوصول (v1→3 أو v2→3).
             if (version == 3) {
+              const convention = <String, String>{
+                'uuid': "TEXT NOT NULL DEFAULT ''",
+                'created_at': 'INTEGER NOT NULL DEFAULT 0',
+                'updated_at': 'INTEGER NOT NULL DEFAULT 0',
+                'is_deleted': 'INTEGER NOT NULL DEFAULT 0',
+              };
               for (final table in const ['items', 'roles', 'app_users']) {
-                await customStatement(
-                    "ALTER TABLE $table ADD COLUMN uuid TEXT NOT NULL DEFAULT ''");
-                await customStatement(
-                    'ALTER TABLE $table ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0');
-                await customStatement(
-                    'ALTER TABLE $table ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
-                await customStatement(
-                    'ALTER TABLE $table ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+                final existing = (await customSelect(
+                        "SELECT name FROM pragma_table_info('$table')")
+                      .get())
+                    .map((r) => r.data['name'] as String)
+                    .toSet();
+                for (final col in convention.entries) {
+                  if (!existing.contains(col.key)) {
+                    await customStatement(
+                        'ALTER TABLE $table ADD COLUMN ${col.key} ${col.value}');
+                  }
+                }
               }
               // تعبئة uuid وأزمنة السجلات القائمة — م0 صغيرة فالحلقة
               // صف بأصفار كلفة، والكبيرة لما تأتي ستكون مختبرة.

@@ -265,8 +265,16 @@ void main() {
 
   test('D-053: أول فتح بعد التسمية يتبنى ملف «heseb.db» القديم — لا أرشيف فارغ',
       () async {
-    // قاعدة الجيل السابق على هيئة v1 — بأصناف فعلية
-    final legacyPath = p.join(tempDir.path, 'heseb.db');
+    // مجلد معزول خاص بهذا السيناريو (علة CI 2026-10-28): setUp فتح قاعدة
+    // على tempDir/diqqah.db — وحضور قاعدة جديدة يمنع التبنّي بالتصميم
+    // (سلوك الحارس لا خطأ فيه)، فيجب أن يكون المسار الجديد غائباً كلياً.
+    final dir = p.join(tempDir.path, 'adopt');
+    await Directory(dir).create(recursive: true);
+    final legacyPath = p.join(dir, 'heseb.db');
+    final newPath = p.join(dir, 'diqqah.db');
+
+    // قاعدة الجيل السابق على هيئة v1 — بأصناف فعلية وuser_version=1
+    // كما في ملفات «حسيب» الحقيقية (الملف الواقعي يحمل نسخة مخططه)
     final raw = sql.sqlite3.open(legacyPath);
     raw.execute('''
       CREATE TABLE items (
@@ -284,9 +292,9 @@ void main() {
     ''');
     raw.execute(
         "INSERT INTO items VALUES ('SKU-LEGACY', 'صنف الجيل السابق', NULL, 'good', 1, 0, 100, 1, NULL, 1)");
+    raw.execute('PRAGMA user_version = 1');
     raw.dispose();
 
-    final newPath = p.join(tempDir.path, 'diqqah.db');
     await adoptLegacyHesebDatabase(newPath);
 
     // إعادة تسمية داخل المجلد نفسه: الجديد حاضر والقديم زال

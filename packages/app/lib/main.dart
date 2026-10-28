@@ -10,7 +10,7 @@ import 'home_screen.dart';
 
 void main() => runApp(const DiqqahApp());
 
-/// إطار دِقَّة — واجهة واحدة تعمل على أندرويد وWindows (F-001).
+/// إطار دِقَّة — واجهة واحدة تعمل على أندرويد وWindows (F-001).
 class DiqqahApp extends StatelessWidget {
   final DiqqahDatabase? db;
 
@@ -25,7 +25,7 @@ class DiqqahApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'دِقَّة',
+      title: 'دِقَّة',
       theme: ThemeData(useMaterial3: true),
       home: AppGate(
         db: db,

@@ -42,7 +42,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('دِقَّة'),
+        title: const Text('دِقَّة'),
       ),
       // قائمة ثابتة تُبنى كاملة — Column تُنفخ كل أبنائها فوراً بلا كسل
       // شجري (ListView حتى بأبناء صريحين يبني الظاهر وحده — درس CI #8)،

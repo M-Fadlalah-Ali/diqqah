@@ -55,7 +55,9 @@ void main() {
 
   test('الغلاف المشفر لا يحمل أي ترويسة SQLite — لا يُفتح بأداة خارجية', () async {
     final blob = await cipher.encrypt(utf8.encode('محتوى'), 'p');
-    expect(utf8.decode(blob.sublist(0, 8)), 'DIQQENC');
+    // الترويسة 7 بايتات (DIQQENC) وبعدها بايتة الإصدار — لا 8 بايتات
+    expect(utf8.decode(blob.sublist(0, 7)), 'DIQQENC');
+    expect(blob[7], BackupCipher.formatVersion);
     expect(
       BackupCipher.identify(blob),
       isNot(BackupKind.plainSqlite),
@@ -66,9 +68,14 @@ void main() {
       () async {
     final plain = utf8.encode('نسخة من جيل حسيب');
     final blob = await cipher.encrypt(plain, 'كلمة-السر');
-    // إحلال الترويسة القديمة مكان الجديدة — بقية البايتات كما هي
+    // بنية الجيل السابق حرفاً (كود ما قبل إعادة التسمية): ترويسة بثمانية
+    // بايتات ثم بايتة الإصدار ثم الملح — فما بعد الترويسة الجديدة (7)
+    // يحفظ بايتة الإصدار والملح والبقية كما هي.
     final legacyHeader = utf8.encode('HESEBENC');
-    final legacy = <int>[...legacyHeader, ...blob.sublist(legacyHeader.length)];
+    final legacy = <int>[
+      ...legacyHeader,
+      ...blob.sublist(BackupCipher.magic.length),
+    ];
     expect(BackupCipher.identify(legacy), BackupKind.encrypted);
     final back = await cipher.decrypt(legacy, 'كلمة-السر');
     expect(back, equals(plain));

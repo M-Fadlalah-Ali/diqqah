@@ -89,7 +89,7 @@ class _FirstRunScreenState extends State<FirstRunScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'دِقَّة — أول تشغيل',
+                'دِقَّة — أول تشغيل',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),

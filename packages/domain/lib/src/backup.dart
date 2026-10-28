@@ -19,8 +19,9 @@ class BackupCipher {
 
   /// ترويسة الجيل السابق «HESEBENC» — تُقرأ ولا تُكتب بعد إعادة التسمية:
   /// نسخ «حسيب» القديمة تبقى مفتوحة كما هي، والجديدة تُكتب بالترويسة
-  /// الجديدة (توافق قراءة لا كتابة). الترويستان بثمانية بايتات معاً —
-  /// فمواضع الحقول بعد الترويسة واحدة لا تتغير.
+  /// الجديدة (توافق قراءة لا كتابة). الترويستان مختلفتا الطول — ثمانية
+  /// وسبعة — وكلتاهما تليها بايتة الإصدار، فبنية ما بعدهما واحدة والإزاحة
+  /// تُحسب من طول الترويسة المطابقة فعلاً (علة CI 2026-10-28).
   static final List<int> legacyMagic = utf8.encode('HESEBENC');
 
   static const int formatVersion = 1;
@@ -71,7 +72,9 @@ class BackupCipher {
     if (identify(blob) != BackupKind.encrypted) {
       throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
     }
-    var i = magic.length; // الترويستان بثمانية بايتات معاً — الإزاحة واحدة للجيلين
+    // DIQQENC سبعة بايتات وHESEBENC ثمانية — بايتة الإصدار تلي الترويسة
+    // في الجيلين، فالإزاحة من طول الترويسة المطابقة لا من magic وحدها.
+    var i = _startsWith(blob, legacyMagic) ? legacyMagic.length : magic.length;
     final version = blob[i];
     if (version != formatVersion) {
       throw BackupCipherException('إصدار تنسيق غير معروف: $version');
