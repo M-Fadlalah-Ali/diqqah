@@ -3,13 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
+import 'package:share_plus/share_plus.dart';
 
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
 ///
 /// «الإعدادات ونسخة الاحتياطي الأولى (F-012) متاحة فوراً بعد التهيئة» (س-01).
 /// الاستعادة بتأكيد مزدوج وإلغاء آمن (F-013)، وبعدها سطر إحالة يري مكان
 /// نسخة ما قبل الاستعادة (F-154).
+///
+/// D-056 (قرار المالك بعد تجربة APK الأولى على أندرويد): قيد النظام على
+/// مسار data — مجلد التطبيق محجوب عن كل تطبيق آخر فلا تصفح ولا كتابة
+/// مسار يدوياً. الحل القياسي (سلوك واتساب ومديرات كلمات السر):
+/// استيراد منتقي ملفات النظام (SAF)، وتصدير نافذة المشاركة لإخراج النسخة
+/// إلى مكان يختاره المالك. النسخة تُنشأ في مجلد القاعدة كما هو عقد
+/// F-012 — الزر وسيلة إخراج لا تغيير للعقد. على ويندوز يبقى المسار
+/// اليدوي متاحاً كما كان.
 class SettingsScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
@@ -52,6 +62,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
         '-${two(now.hour)}${two(now.minute)}${two(now.second)}';
   }
 
+  /// D-056: استيراد بالتصفح — منتقي النظام يرى كل مكان (التنزيلات،
+  /// Drive، مديرات الملفات) بلا صلاحيات تخزين وبلا كتابة مسار يدوياً.
+  Future<void> _pickBackupFile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await FilePicker.platform.pickFiles();
+      final path = result?.paths.single;
+      if (path == null) return; // إلغاء المستخدم — لم يحدث شيء
+      if (!mounted) return;
+      setState(() => _restorePath.text = path);
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر فتح منتقي الملفات — $e')),
+      );
+    }
+  }
+
+  /// D-056: تصدير النسخة بنافذة المشاركة — تخرجها من مجلد التطبيق
+  /// المحجوب إلى مكان يختاره المالك (تنزيلات/سحابة/رسالة لنفسه).
+  Future<void> _exportBackup(String path) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await Share.shareXFiles(
+        [XFile(path)],
+        subject: p.basename(path),
+        text: 'نسخة احتياطية دِقَّة',
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر إخراج النسخة — $e')),
+      );
+    }
+  }
+
   Future<void> _backup() async {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
@@ -81,6 +125,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           actions: [
+            // D-056: إخراج النسخة من مجلد التطبيق — جوهر الإصلاح الأندرويدي
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _exportBackup(target);
+              },
+              child: const Text('إخراج النسخة'),
+            ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('حسناً'),
@@ -263,9 +315,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 12),
                   TextField(
                     controller: _restorePath,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'مسار ملف النسخة الاحتياطية',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      // D-056: على أندرويد مسار data مخفي لا يُكتب يدوياً —
+                      // التصفح من داخل التطبيق هو الطريق القياسي الوحيد.
+                      helperText: 'على الهاتف استخدم زر التصفح بدل الكتابة اليدوية',
+                      suffixIcon: IconButton(
+                        tooltip: 'اختيار ملف النسخة',
+                        icon: const Icon(Icons.folder_open),
+                        onPressed: _busy ? null : _pickBackupFile,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),

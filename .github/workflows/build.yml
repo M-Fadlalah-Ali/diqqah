@@ -63,19 +63,17 @@ jobs:
           dart pub get
           dart run build_runner build --delete-conflicting-outputs
       - run: flutter pub get
-      # APK شامل يعمل على كل البنى، وAPK arm64 مصغّر لهواتف اليوم —
-      # استقبال المالك ببيانات مقننة فالحجم الصغير قرار لا رفاهية.
-      - name: APK شامل
-        run: flutter build apk --release
+      # D-056 + القاعدة السادسة (سقف تحميل المالك 35MB): artifact arm64
+      # وحده (~15-18MB) لهواتف اليوم — كل الأجهزة الحديثة arm64. APK
+      # الشامل (~50MB يضخم الحزمة) يُعاد عند التوزيع العام بسطر واحد:
+      # flutter build apk --release
       - name: APK arm64 مصغّر
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
       - name: رفع حزمة أندرويد
         uses: actions/upload-artifact@v4
         with:
           name: diqqah-android
-          path: |
-            packages/app/build/app/outputs/flutter-apk/app-release.apk
-            packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          path: packages/app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           retention-days: 30
 
   windows:

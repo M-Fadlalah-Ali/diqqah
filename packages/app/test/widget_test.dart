@@ -132,6 +132,37 @@ void main() {
     expect(find.textContaining('تعذر إنشاء النسخة'), findsNothing);
   });
 
+  testWidgets('D-056: زرا التصفح والإخراج في شاشة الإعدادات — إصلاح قيد '
+      'أندرويد على مسار data (استيراد منتقي النظام + تصدير نافذة المشاركة)',
+      (tester) async {
+    // IO متزامن — نفس نمط اختبار F-012 أعلاه
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_d056_t_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final dbPath = p.join(tempDir.path, 'diqqah.db');
+    final db = DiqqahDatabase(filePath: dbPath);
+    addTearDown(db.close);
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsScreen(db: db, dbPath: dbPath, onRestored: () {}),
+    ));
+    await tester.pumpAndSettle();
+
+    // زر التصفح بجوار حقل المسار (suffixIcon) — لا قنوات منصة في وجوده
+    expect(find.byTooltip('اختيار ملف النسخة'), findsOneWidget);
+
+    // زر الإخراج يظهر في حوار نجاح النسخة — وجوده لا يستدعي أي قناة منصة
+    await tester.tap(find.text('إنشاء نسخة احتياطية'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 500)),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
+    expect(find.text('إخراج النسخة'), findsOneWidget);
+    expect(find.text('حسناً'), findsOneWidget);
+  });
+
   testWidgets('F-013: الاستعادة بتأكيد مزدوج — والإلغاء في أي تأكيد لم يحدث شيئاً',
       (tester) async {
     // IO متزامن — بيئة testWidgets الوهمية لا تكمل عمليات الملفات غير المتزامنة
