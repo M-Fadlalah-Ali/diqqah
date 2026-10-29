@@ -120,7 +120,11 @@ void main() {
   test('F-013 (الفيصل الثاني): ملف تالف — فشل آمن والقاعدة الحية لم تُمس',
       () async {
     final target = p.join(tempDir.path, 'corrupt.db');
-    await backupTo(db, target);
+    // خام صرياً — علّة CI 2026-10-29 كشفتها أول دفعة D-050/D-060: الافتراضي
+    // صار مشفراً فصار البايت 15 داخل الملح ويرفضه وسم GCM قبل بلوغ SQLite،
+    // وهذا الاختبار لبوابة سلامة SQLite الثانية حصراً (بوابة GCM غطاها
+    // اختبار العبث في «F-012 + D-060» قبله) — فالخام هنا مقصود لا سهو.
+    await backupTo(db, target, encrypted: false);
     final bytes = await File(target).readAsBytes();
     // البايت 15 هو خاتمة ترويسة SQLite ("...3\0") — عبثه يبقي التعرف
     // «خام سليم الشكل» لكن SQLite يرفض الملف قطعاً — مسار فشل آمن قاطع.

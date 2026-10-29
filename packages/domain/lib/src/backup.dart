@@ -175,7 +175,10 @@ class BackupCipher {
   ) async {
     final headerLen =
         _startsWith(blob, legacyMagic) ? legacyMagic.length : magic.length;
-    var i = headerLen + 1; // تجاوز بايتة الإصدار — الملح قرأه المستدعي
+    // علّة CI 2026-10-29 (Task 59): الإزاحة يجب أن تجاوز الترويسة وبايتة
+    // الإصدار والملح معاً — «قرأه المستدعي» لا يقدّم أي مؤشر فعلي؛ وبلا
+    // تخطي الملح تُقرأ النونس من أول الملح فيفشل وسم GCM في كل فك بالجيلين.
+    var i = headerLen + 1 + _saltLen;
     final nonce = blob.sublist(i, i + _nonceLen);
     i += _nonceLen;
     final cipherText = blob.sublist(i, blob.length - _macLen);
