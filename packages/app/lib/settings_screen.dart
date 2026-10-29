@@ -182,7 +182,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final target = p.join(
         p.dirname(widget.dbPath),
-        'diqqah-backup-${_stamp()}.db',
+        // D-061: لاحقة النسخة الخاصة بالبرنامج — بطاقة تعريف للإنسان
+        // والنظام؛ والتعرف الحقيقي عند الاستعادة من بصمة المحتوى.
+        'diqqah-backup-${_stamp()}.diqqah',
       );
       await backupTo(widget.db, target, encrypted: _encryptBackup);
       if (!mounted) return;
@@ -354,7 +356,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'ملف واحد للقاعدة كاملة — يُستعاد كاملاً أو لا شيء. '
+                    'ملف واحد للقاعدة كاملة بلاحقة البرنامج الخاصة (.diqqah) — '
+                    'يُستعاد كاملاً أو لا شيء. '
                     'يُحفظ في مجلد القاعدة نفسه. التشفير الافتراضي من م1 '
                     'بمفتاح البرنامج (D-050/D-060)، وإلغاؤه قرار واعٍ بتحذير.',
                   ),

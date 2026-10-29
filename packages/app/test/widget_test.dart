@@ -140,6 +140,8 @@ void main() {
         .where((f) => p.basename(f.path).startsWith('diqqah-backup-'))
         .toList();
     expect(backups, hasLength(1));
+    // D-061: النسخة بلاحقة البرنامج الخاصة لا .db
+    expect(p.basename(backups.first.path), endsWith('.diqqah'));
     final bytes = backups.first.readAsBytesSync();
     // D-050/D-060: الافتراضي من م1 نسخة مشفرة بمفتاح البرنامج لا خام —
     // وبايتة الإصدار 2 تثبت الجيل الجديد حصراً
