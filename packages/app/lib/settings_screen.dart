@@ -1,4 +1,4 @@
-import 'dart:io' show Directory, Platform;
+import 'dart:io' show Directory, File, Platform;
 
 import 'package:flutter/material.dart';
 
@@ -43,6 +43,27 @@ String? defaultImportDirectory({String? userProfile, String? home}) {
     if (Directory(dir).existsSync()) return dir;
   }
   return null;
+}
+
+/// اختيار مسار نسخة حرة — ثغرة CI #40/#41 (2026-10-29): الختم بدقة
+/// الثانية وD-061 بلاحقة موحدة `.diqqah` يعني أن نسختين متتاليتين في
+/// نفس الثانية (نمط الاختبارات والسكربتات لا الإنسان) تولدان الاسم
+/// نفسه، وكانت الثانية تدمر الأولى بصمت بإعادة الكتابة فوقها. اللواحق
+/// -2 و-3... تفرد الاسم عند التصادم حصراً دون مساس بالصيغة الاعتيادية،
+/// والتعرف على النسخة أصلاً من بصمة محتواها لا من اسمها (D-061).
+/// الدالة نقية بلا نظام ملفات — الوجود يُمرر إليها ليثبتها الاختبار النقي.
+String freeBackupPath(
+  String dirPath,
+  String stamp,
+  bool Function(String path) exists,
+) {
+  var target = p.join(dirPath, 'diqqah-backup-$stamp.diqqah');
+  var n = 2;
+  while (exists(target)) {
+    target = p.join(dirPath, 'diqqah-backup-$stamp-$n.diqqah');
+    n++;
+  }
+  return target;
 }
 
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
@@ -180,11 +201,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final target = p.join(
+      // D-061: لاحقة النسخة الخاصة بالبرنامج — بطاقة تعريف للإنسان
+      // والنظام؛ والتعرف الحقيقي عند الاستعادة من بصمة المحتوى.
+      // freeBackupPath يمنع الاكتساب الصامت فوق نسخة قائمة عند تطابق
+      // الختم في نفس الثانية — علّة CI #40/#41 (2026-10-29).
+      final target = freeBackupPath(
         p.dirname(widget.dbPath),
-        // D-061: لاحقة النسخة الخاصة بالبرنامج — بطاقة تعريف للإنسان
-        // والنظام؛ والتعرف الحقيقي عند الاستعادة من بصمة المحتوى.
-        'diqqah-backup-${_stamp()}.diqqah',
+        _stamp(),
+        (path) => File(path).existsSync(),
       );
       await backupTo(widget.db, target, encrypted: _encryptBackup);
       if (!mounted) return;
