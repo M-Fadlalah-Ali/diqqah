@@ -3,10 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'settings_screen.dart';
+import 'parties_screen.dart';
 
-/// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل دون أي وظيفة
-/// محاسبية. الوحدات ومراحل توفرها من جدول النطاق (01 §5) حرفاً،
-/// والإعدادات متاحة فوراً بعد التهيئة (س-01: F-012/F-013).
+/// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل. الوحدات ومراحل
+/// توفرها من جدول النطاق (01 §5) حرفاً، والإعدادات متاحة فوراً بعد
+/// التهيئة (س-01)، والأطراف أول وحدة تُفتح في م1 (دفعتها الأولى).
 class HomeScreen extends StatelessWidget {
   final DiqqahDatabase db;
   final String dbPath;
@@ -20,9 +21,10 @@ class HomeScreen extends StatelessWidget {
   });
 
   /// (اسم الوحدة، مرحلة التوفر في 01، متاحة الآن؟) — إظهار الواقع لا وعود
-  /// مبكرة، والإعدادات وحدها مفتوحة في م0 (س-01: بعد التهيئة فوراً).
+  /// مبكرة. الإعدادات متاحة فوراً بعد التهيئة (س-01)، والأطراف فُتحت بدفعة
+  /// م1 الأولى (F-020..F-023، س-29..س-35) — البقية في مفرغها.
   static const List<(String, String, bool)> _modules = [
-    ('الأطراف', 'الإصدار 1', false),
+    ('الأطراف', 'متاحة الآن — بطاقة الأطراف والبحث الجامع (F-020..F-023)', true),
     ('الأصناف', 'الإصدار 1 — البضاعة والخدمات', false),
     ('وحدات القياس والتعبئة', 'الإصدار 2', false),
     ('المستودعات', 'الإصدار 1 (واحد) → 2 (متعدد + جرد)', false),
@@ -53,21 +55,28 @@ class HomeScreen extends StatelessWidget {
             for (final (title, stage, enabled) in _modules)
               ListTile(
                 leading: Icon(
-                  enabled ? Icons.settings_outlined : Icons.lock_outline,
+                  !enabled
+                      ? Icons.lock_outline
+                      : title == 'الأطراف'
+                          ? Icons.people_outline
+                          : Icons.settings_outlined,
                 ),
                 title: Text(title),
                 subtitle: Text(enabled ? stage : 'معطلة — متاح في $stage'),
                 enabled: enabled,
                 onTap: enabled
                     ? () {
+                        // الأطراف وحدة مفتوحة بدفعة م1 (1) — والبقية
+                        // الإعدادات وحدها حتى دفعاتها.
+                        final Widget target = title == 'الأطراف'
+                            ? PartiesScreen(db: db)
+                            : SettingsScreen(
+                                db: db,
+                                dbPath: dbPath,
+                                onRestored: onRestored,
+                              );
                         Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => SettingsScreen(
-                              db: db,
-                              dbPath: dbPath,
-                              onRestored: onRestored,
-                            ),
-                          ),
+                          MaterialPageRoute<void>(builder: (_) => target),
                         );
                       }
                     : null,

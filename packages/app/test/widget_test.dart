@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/main.dart';
+import 'package:diqqah_app/parties_screen.dart';
 import 'package:diqqah_app/settings_screen.dart';
 
 void main() {
@@ -56,8 +57,8 @@ void main() {
     expect(find.text('الأصناف'), findsOneWidget);
   });
 
-  testWidgets('F-016/س-01: 13 وحدة معطلة والإعدادات وحدها متاحة — تفتح '
-      'شاشة النسخ الاحتياطي (F-012 متاحة فوراً بعد التهيئة)', (tester) async {
+  testWidgets('F-016: الأطراف فُتحت بدفعة م1 (1) مع الإعدادات — والبقية معطلة؛\n'
+      'وفتح الأطراف يفتح شاشتها والبحث فيها يعمل', (tester) async {
     final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
     await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
@@ -68,21 +69,22 @@ void main() {
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
     expect(tiles.length, 14); // 13 وحدة + الإعدادات
     final locked = tiles.where((t) => t.enabled != true).length;
-    expect(locked, 13, reason: 'كل وحدات F-016 معطلة في م0');
+    expect(locked, 12,
+        reason: 'الأطراف فُتحت بدفعة م1 (1) — والبقية (11 وحدة) معطلة');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 1, reason: 'الإعدادات وحدها متاحة — س-01');
+    expect(open, 2, reason: 'الأطراف (دفعة م1 (1)) والإعدادات (س-01)');
 
-    // الإعدادات بند 14 خارج الشاشة الافتراضية — تمرير ثم فتح
+    // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(
-      find.text('الإعدادات'),
+      find.text('الأطراف'),
       200,
       scrollable: find.byType(Scrollable),
     );
+    await tester.tap(find.text('الأطراف'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('الإعدادات'));
-    await tester.pumpAndSettle();
-    expect(find.text('النسخ الاحتياطي الكامل (F-012)'), findsOneWidget);
-    expect(find.text('الاستعادة الكاملة (F-013)'), findsOneWidget);
+    expect(find.text('لا أطراف بعد — أضف أول طرف بزر «إضافة طرف»'),
+        findsOneWidget);
+    expect(find.byType(PartiesScreen), findsOneWidget);
   });
 
   testWidgets('F-012 + D-050 + D-060: زر النسخ ينتج نسخة مشفرة بمفتاح البرنامج في مجلد القاعدة',

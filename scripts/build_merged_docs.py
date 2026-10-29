@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""توليد النسخة المجمّعة لوثائق الحزمة v2.01 (D-013/D-019/D-023).
+
+السكربت المعتمد لتوليد docs/diqqah-docs-merged-v2.01.md من الملفات
+المنفصلة الإحدى عشرة في docs/diqqah-v2.01/ — الملفات المنفصلة تبقى
+المرجع الوحيد وهذا الملف أرشيف قراءة يعاد توليده بعد كل تحديث.
+
+الاستخدام:
+    python3 scripts/build_merged_docs.py
+
+التحقق المدمج:
+    - 11 قسماً بمصادرها بترتيب القراءة المعلن (README ثم 01 → 10).
+    - حضور قيود بطاقة الأطراف D-060..D-066 كلها.
+    - حضور قسما «1-ب إدارة الأطراف» وسيناريوهاته س-29..س-35.
+    - تطابق الترويسة مع تاريخ اليوم وسلامة الكتابة بايتياً (UTF-8).
+"""
+
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DOCS = ROOT / "docs" / "diqqah-v2.01"
+OUT = ROOT / "docs" / "diqqah-docs-merged-v2.01.md"
+
+SOURCES = [
+    "README-v2.01.md",
+    "01-vision-and-scope-v2.01.md",
+    "02-terminology-v2.01.md",
+    "03-chart-of-accounts-v2.01.md",
+    "04-srs-v2.01.md",
+    "05-data-model-v2.01.md",
+    "06-workflows-v2.01.md",
+    "07-tryton-principles-v2.01.md",
+    "08-sync-strategy-v2.01.md",
+    "09-release-plan-v2.01.md",
+    "10-test-plan-v2.01.md",
+]
+
+HEADER = """# «دِقَّة» (Diqqah) — الحزمة الكاملة المجمّعة — v2.01
+
+| البند | القيمة |
+|---|---|
+| طبيعة هذا الملف | نسخة قراءة مجمّعة وُلِّدت آلياً من ملفات الحزمة v2.01 — وفق D-013 (نسخة مجمّعة عند الطلب) |
+| المصدر الرسمي | ملفات الحزمة المنفصلة الإحدى عشرة في `diqqah-docs/` — تبقى المرجع الوحيد (D-019)؛ هذا الملف أرشيف قراءة لا يُحدَّث، وأي تحديث يُصدر في الملفات المنفصلة بإصدار جديد (D-023) ثم يعاد توليد المجمّعة |
+| تاريخ التوليد | {today} |
+| ترتيب الأقسام | README ثم الوثائق 01 → 10 بترتيب القراءة المعلن |
+
+---
+
+---
+
+---
+
+---
+
+---
+
+---
+
+---
+
+
+"""
+
+
+def section(filename: str) -> str:
+    content = (DOCS / filename).read_text(encoding="utf-8").rstrip("\n")
+    bar = "=" * 60
+    return (
+        f"<!-- {bar}\n"
+        f"     الملف المصدري: {filename}\n"
+        f"     {bar} -->\n\n"
+        f"{content}\n\n---"
+    )
+
+
+def main() -> None:
+    parts = [section(name) for name in SOURCES]
+    merged = HEADER.format(today=date.today().isoformat()) + "\n\n".join(parts) + "\n"
+
+    # التحقق المدمج — أي فشل يوقف التوليد قبل الكتابة
+    assert merged.count("<!-- " + "=" * 60) == 11, "الأقسام الإحدى عشرة"
+    for d in range(60, 67):
+        assert f"D-0{d}" in merged, f"قيود بطاقة الأطراف D-0{d} غائبة"
+    assert "1-ب. إدارة الأطراف" in merged, "قسم الأطراف في 06"
+    for s in range(29, 36):
+        assert f"س-{s}" in merged, f"السيناريو س-{s} غائب"
+    assert "معتمدة من المالك بلفظه" in merged, "حالة الاعتماد"
+
+    OUT.write_text(merged, encoding="utf-8", newline="\n")
+    size = OUT.stat().st_size
+    print(f"تولد المدموج: {OUT} — {size} بايت — 11 قسماً — القيود سليمة")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:uuid/uuid.dart';
@@ -112,6 +113,57 @@ class AppUsers extends Table {
       boolean().withDefault(const Constant(false)).named('is_deleted')();
 }
 
+/// جدول الأطراف — انعكاس مباشر لصف `party` في نموذج البيانات (05 §3.1)
+/// بقرارات بطاقة الأطراف (D-062..D-066) والسيناريوهات المعتمدة (س-29..س-35):
+///
+/// - `number` يخزن نصاً كما كُتب بأصفاره («0053» تبقى 0053 — D-063)؛
+///   قيد UNIQUE هنا تفرد حرفي للتخزين حصراً، أما التفرد المطبَّق بعد نزع
+///   الأصفار الزائدة («0053» و«53» طرف واحد) فهو قاعدة مجال تُفحص قبل
+///   الحفظ (validatePartyDraft) — فـ SQLite يفرق بين النصين وما من قيد
+///   SQL يفعل ذلك بعد كتابتهما.
+/// - الرقم لا يعدل بعد الحفظ (D-063) — لا مسار تحديث له في هذا الملف
+///   عملاً، والبطاقة تقفل حقلَه في التعديل (س-32).
+/// - منع تكرار الاسم المطابق حرفياً (D-065) قاعدة مجال حصراً — المقارنة
+///   حرفية بلا تطبيع، والتطبيع للبحث حصراً (D-064).
+/// - العملة معبأة دوماً بالافتراضية ولا تخزن فارغة (D-066)؛ المعرّف 1
+///   هو العملة الأساسية (D-017) حتى تُبنى جدول العملات في دفعاتها —
+///   الاصطلاح نفسه المعتمد لـ price_currency_id في الأصناف.
+/// - حد الائتمان اختياري (F-023/س-34) — null فراغ مشروع معناه «بلا سقف».
+/// - زر الحذف غير موجود أصلاً والتعطيل بطي is_active (س-33)؛ is_deleted
+///   من اصطلاح «كل جدول» (D-055) يبقى للبنية لا لمسار مستخدم.
+class Parties extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  TextColumn get number => text().unique()();
+
+  TextColumn get name => text()();
+
+  /// customer / supplier / both (05 §3.1، س-30)
+  TextColumn get kind => text()();
+
+  TextColumn get phone => text().nullable()();
+
+  TextColumn get address => text().nullable()();
+
+  IntColumn get defaultCurrencyId => integer().named('default_currency_id')();
+
+  IntColumn get creditLimitBaseMinor =>
+      integer().nullable().named('credit_limit_base_minor')();
+
+  BoolColumn get isActive => boolean().named('is_active')();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
 /// مفاتيح النظام — موطن `device_id` (F-015) وسائر مفاتيح التهيئة.
 /// معفاة من اصطلاح «كل جدول» قراراً موثقاً (D-055): مفاتيح نظام
 /// لا سجلات أعمال — لا مزامنة ولا حذف منطقي لها.
@@ -124,14 +176,15 @@ class AppMeta extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// قاعدة دِقَّة — نسخة المخطط 3.
+/// قاعدة دِقَّة — نسخة المخطط 4.
 ///
 /// 1 = items فقط (جلسة م0 الأولى). 2 = التهيئة: roles / app_users / app_meta
 /// (س-01: F-014/F-015). 3 = اصطلاح «كل جدول» (05 §2، D-055): uuid عالمي +
 /// created_at/updated_at + is_deleted على items وroles وapp_users — app_meta
-/// مفاتيح نظام معفاة قراراً موثقاً. كل تغيير مخطط قادم يضيف إصداراً وترحيلة —
-/// لا تعديل رجعي على إصدار منشور (F-011).
-@DriftDatabase(tables: [Items, Roles, AppUsers, AppMeta])
+/// مفاتيح نظام معفاة قراراً موثقاً. 4 = جدول الأطراف (05 §3.1 — دفعة م1
+/// الأولى: D-062..D-066، س-29..س-35). كل تغيير مخطط قادم يضيف إصداراً
+/// وترحيلة — لا تعديل رجعي على إصدار منشور (F-011).
+@DriftDatabase(tables: [Items, Roles, AppUsers, AppMeta, Parties])
 class DiqqahDatabase extends _$DiqqahDatabase {
   /// التشغيل العادي: ملف القاعدة الوحيد (أساس النسخ الاحتياطي الكامل F-012).
   /// ملف الجيل السابق «heseb.db» يتبنّى آلياً عند أول فتح (D-053 —
@@ -143,7 +196,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   DiqqahDatabase.inMemory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -201,6 +254,13 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                   );
                 }
               }
+            }
+            // 3→4 (ومن إصدار أدنى مباشرة): جدول الأطراف جديد خالص —
+            // createAll يبني الناقص بـ IF NOT EXISTS ولا يمس الجداول
+            // القائمة (نمط v2 المجرّب)، ولا أعمدة على جداول قائمة هنا
+            // أصلاً فلا يلحق درس علة «duplicate column» في v3.
+            if (version == 4) {
+              await m.createAll();
             }
           }
         },
@@ -271,4 +331,86 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       ),
     );
   }
+
+  /// إدراج طرف جديد بأعمدة الاصطلاح (D-055) — يعيد معرّف الصف (س-29).
+  ///
+  /// العملة تُستلم معبأة من الواجهة ولا تُقبل صفراً هنا حرساً ثانوياً بعد
+  /// مدقق المجال (D-066). الهاتف والعنوان الفارغان يسجلان null — اختياريان
+  /// (س-29). حد الائتمان null فراغ مشروع «بلا سقف» (س-34).
+  Future<int> insertParty({
+    required String number,
+    required String name,
+    required String kind,
+    String? phone,
+    String? address,
+    required int defaultCurrencyId,
+    int? creditLimitBaseMinor,
+  }) async {
+    assert(defaultCurrencyId > 0, 'D-066: عملة الطرف لا تصل فارغة أبداً');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return into(parties).insert(
+      PartiesCompanion.insert(
+        number: number,
+        name: name,
+        kind: kind,
+        phone: Value(_nullIfBlank(phone)),
+        address: Value(_nullIfBlank(address)),
+        defaultCurrencyId: defaultCurrencyId,
+        creditLimitBaseMinor: Value(creditLimitBaseMinor),
+        isActive: true,
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
+  /// تحديث بيانات طرف — الرقم خارج التوقيع أصلاً فلا يعدل بعد الحفظ
+  /// (D-063)، والاسم يعدل بحرية مع بقاء قاعدة المنع الحرفي (س-32/D-065).
+  /// تخزينه null لحد الائتمان يعني إزالة السقف عمداً (س-34).
+  Future<void> updatePartyDetails(
+    Party party, {
+    required String name,
+    required String kind,
+    String? phone,
+    String? address,
+    required int defaultCurrencyId,
+    int? creditLimitBaseMinor,
+  }) async {
+    assert(defaultCurrencyId > 0, 'D-066: عملة الطرف لا تصل فارغة أبداً');
+    await (update(parties)..where((t) => t.id.equals(party.id))).write(
+      PartiesCompanion(
+        name: Value(name),
+        kind: Value(kind),
+        phone: Value(_nullIfBlank(phone)),
+        address: Value(_nullIfBlank(address)),
+        defaultCurrencyId: Value(defaultCurrencyId),
+        creditLimitBaseMinor: Value(creditLimitBaseMinor),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// س-33: التعطيل والتفعيل بطي is_active حصراً — لا حذف فيزيائي ولا
+  /// منطقي هنا: المستندات القائمة تبقى سليمة والطرف يبقى في كشفه
+  /// وتقاريره، وإعادة التفعيل ممكنة متى شئت.
+  Future<void> setPartyActive(int id, {required bool active}) async {
+    await (update(parties)..where((t) => t.id.equals(id))).write(
+      PartiesCompanion(
+        isActive: Value(active),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// اقتراح الرقم التالي آلياً (D-063/س-29): القراءة من هنا والحساب في
+  /// المجال النقي (suggestNextPartyNumber) — مقترح قابل للتعديل قبل
+  /// الحفظ حصراً.
+  Future<String> nextPartyNumberSuggestion() async {
+    final rows = await select(parties).get();
+    return suggestNextPartyNumber(rows.map((r) => r.number));
+  }
+
+  String? _nullIfBlank(String? s) =>
+      (s == null || s.trim().isEmpty) ? null : s.trim();
 }
