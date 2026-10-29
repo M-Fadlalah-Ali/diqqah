@@ -60,7 +60,10 @@ void main() {
   testWidgets('F-016: الأطراف فُتحت بدفعة م1 (1) مع الإعدادات — والبقية معطلة؛\n'
       'وفتح الأطراف يفتح شاشتها والبحث فيها يعمل', (tester) async {
     final db = DiqqahDatabase.inMemory();
-    addTearDown(db.close);
+    // الإغلاق عبر runAsync — هذا الاختبار وحده من اختبارات هذا الملف يعرض
+    // شاشة الأطراف فيبقى تدفق watch نشطاً حتى الteardown، وإغلاق drift معه
+    // ينتظر مؤقتاً زائفاً لا يُطلق فيعلق (علّة CI 2026-10-29 س24).
+    addTearDown(() => tester.runAsync(() => db.close()));
     await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
 
     await tester.pumpWidget(DiqqahApp(db: db));
