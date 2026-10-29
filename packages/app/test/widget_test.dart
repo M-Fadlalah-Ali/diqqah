@@ -81,7 +81,11 @@ void main() {
       scrollable: find.byType(Scrollable),
     );
     await tester.tap(find.text('الأطراف'));
-    await tester.pumpAndSettle();
+    // ضخّات محدودة لا pumpAndSettle: مؤشر انتظار شاشة الأطراف (StreamBuilder)
+    // يتحرك حتى يصدر التدفق فلا تستقر قبله (علّة CI 2026-10-29 — تعليق 40+ د).
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('لا أطراف بعد — أضف أول طرف بزر «إضافة طرف»'),
         findsOneWidget);
     expect(find.byType(PartiesScreen), findsOneWidget);

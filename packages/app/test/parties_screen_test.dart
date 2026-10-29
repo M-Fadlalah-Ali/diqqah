@@ -26,7 +26,9 @@ void main() {
         findsOneWidget);
 
     await tester.tap(find.text('إضافة طرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // التوليد الآلي (D-063): مقترح 0001 قابل للتعديل قبل الحفظ حصراً
     final numberField =
@@ -37,7 +39,9 @@ void main() {
     // الاسم إلزامي وحده (س-29) — الحفظ بلا اسم مرفوض برسالة لا صمت
     // (نص الرسالة حرفياً — نص المساعدة تحت الحقل يحمل الكلمات نفسها)
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(
       find.text('الاسم إلزامي وحده — أدخل الاسم ثم احفظ (س-29)'),
       findsOneWidget,
@@ -45,7 +49,9 @@ void main() {
 
     await tester.enterText(find.byType(TextFormField).at(1), 'محمد الخالدي');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // عاد للقائمة والطرف بصيغة «الاسم (الرقم)» (D-065/س-29)
     expect(find.text('محمد الخالدي (0001)'), findsOneWidget);
@@ -71,12 +77,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('إضافة طرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     // المقترح 0002 — يكتب 53 بدله فتصدقه قاعدة التفرد المطبَّع (D-063)
     await tester.enterText(find.byType(TextFormField).first, '53');
     await tester.enterText(find.byType(TextFormField).at(1), 'آخر');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('الرقم 53 مستخدم للطرف: محمد الخالدي (0053)'),
         findsOneWidget);
@@ -111,19 +121,25 @@ void main() {
 
     // كلمات متفرقة تلتقي: «خال» في الاسم و«53» في الرقم بأي ترتيب
     await tester.enterText(find.byType(TextField).first, 'خال 53');
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('محمد الخالدي (0053)'), findsOneWidget);
     expect(find.text('أحمد الغالي (0012)'), findsNothing);
 
     // التطبيع في البحث فقط: «احمد» بلا همزة تجيء بـ«أحمد»
     await tester.enterText(find.byType(TextField).first, 'احمد');
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('أحمد الغالي (0012)'), findsOneWidget);
     expect(find.text('محمد الخالدي (0053)'), findsNothing);
 
     // النتيجة الفارغة رسالة (س-31)
     await tester.enterText(find.byType(TextField).first, 'غائب تماما');
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('لا نتائج مطابقة للبحث'), findsOneWidget);
   });
 
@@ -143,12 +159,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('محمد الخالدي (0053)'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // زر الحذف غير موجود أصلاً (س-33)
     expect(find.textContaining('حذف'), findsNothing);
     await tester.tap(find.text('تعطيل الطرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // عاد للقائمة — الطرف معطّل بشارة ولا يزال ظاهراً
     expect(find.text('معطّل'), findsOneWidget);
@@ -156,9 +176,13 @@ void main() {
 
     // إعادة التفعيل من البطاقة نفسها
     await tester.tap(find.text('محمد الخالدي (0053)'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إعادة تفعيل الطرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('معطّل'), findsNothing);
   });
 
@@ -177,7 +201,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('محمد الخالدي (0053)'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // الهوية الثابتة (D-063): لا حقل تعديل للرقم أصلاً في التعديل
     final numberField =
@@ -187,7 +213,9 @@ void main() {
 
     await tester.enterText(find.byType(TextFormField).at(1), 'محمد المعدل');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('محمد المعدل (0053)'), findsOneWidget);
     final row = await (db.select(db.parties)
@@ -206,14 +234,20 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إضافة طرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('الاثنان معاً'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.enterText(find.byType(TextFormField).at(1), 'شركة الرحمة');
     await tester.enterText(find.byType(TextFormField).last, '5000');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     final rows = await db.select(db.parties).get();
     expect(rows, hasLength(1));
@@ -239,10 +273,14 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إضافة طرف'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.enterText(find.byType(TextFormField).at(1), 'أحمد');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(
       find.text(
           'الاسم مطابق حرفياً لطرف قائم: أحمد (0001) — اختر اسماً آخر (D-065)'),
@@ -251,7 +289,9 @@ void main() {
     // عدّل الاسم إلى «احمد» بلا همزة — طرف مختلف مشروع (D-065 الحرفي)
     await tester.enterText(find.byType(TextFormField).at(1), 'احمد');
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('احمد (0002)'), findsOneWidget);
   });
 }
