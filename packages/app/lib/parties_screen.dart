@@ -27,14 +27,17 @@ class PartiesScreen extends StatefulWidget {
 class _PartiesScreenState extends State<PartiesScreen> {
   String _query = '';
 
-  Stream<List<Party>> _watchSorted() {
-    // الفرز الرقمي الذكي يقع في الذاكرة على النطاق المعروض — مقياس
-    // MVP (5,000 طرف N-003) أقل من الميلي ثانية للفرز على حاسب أو هاتف.
-    return widget.db.select(widget.db.parties).watch().map(
-          (rows) => [...rows]
-            ..sort((a, b) => comparePartyNumbers(a.number, b.number)),
-        );
-  }
+  // التدفق يُنشأ مرة واحدة لعمر الحالة لا عند كل بناء (علّة CI 2026-10-29
+  // س23): تمرير تدفق جديد في build يعيد StreamBuilder الاشتراك عند كل إعادة
+  // بناء فيحلّق الجلب والتحديث بلا نهاية — لا تستقر pumpAndSettle قط ولا
+  // يهدأ ملف الاختبار، والتطبيق نفسه يهدر اشتراكات قاعدة البيانات.
+  late final Stream<List<Party>> _partiesStream = widget.db
+      .select(widget.db.parties)
+      .watch()
+      .map(
+        (rows) => [...rows]
+          ..sort((a, b) => comparePartyNumbers(a.number, b.number)),
+      );
 
   void _openNewParty() {
     Navigator.of(context).push(
@@ -77,7 +80,7 @@ class _PartiesScreenState extends State<PartiesScreen> {
           ),
           Expanded(
             child: StreamBuilder<List<Party>>(
-              stream: _watchSorted(),
+              stream: _partiesStream,
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
