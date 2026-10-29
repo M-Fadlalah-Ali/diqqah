@@ -64,7 +64,9 @@ int comparePartyNumbers(String a, String b) {
 /// زيادة رقم صرف بمقدار واحد على السلسلة النصية نفسها — بلا تحويل لعدد
 /// صحيح فلا فائض مهما طال الرقم («999…9» يزيد موضعاً).
 String _incrementNumericString(String s) {
-  final digits = s.codeUnits;
+  // نسخة قابلة للكتابة — codeUnits تعيد قائمة غير قابلة للتعديل (علّة CI
+  // 2026-10-29: «Cannot modify an unmodifiable list» كان يفشل التوليد كله).
+  final digits = List<int>.of(s.codeUnits);
   var i = digits.length - 1;
   while (i >= 0) {
     if (digits[i] < 0x39) {

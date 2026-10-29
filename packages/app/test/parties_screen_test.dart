@@ -7,13 +7,21 @@ import 'package:diqqah_app/parties_screen.dart';
 /// اختبارات شاشة الأطراف — دفعة م1 (1) على السيناريوهات المعتمدة
 /// س-29..س-35 (06 §1-ب) بقرارات D-062..D-066.
 void main() {
+  // مؤشر الكتابة الوامض يجعل pumpAndSettle تدور إلى مهلتها (10 دقائق لكل
+  // موضع — علّة CI 2026-10-29: الوظيفة عالقت 40+ دقيقة بلا نتيجة). التثبيت
+  // التجريبي للمؤشر يقضي على المصدر: لا وميض فلا إطارات لا نهائية.
+  EditableText.debugDeterministicCursor = true;
+
   testWidgets('س-29: بطاقة طرف جديد — الرقم مقترح آلياً (0001)، والحفظ بلا '
       'اسم مرفوض برسالة، وبالحفظ يظهر «الاسم (الرقم)» بالقائمة', (tester) async {
     final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    // ضخّات محدودة لا pumpAndSettle: مؤشر الانتظار (سطر الشاشة 83) يظل
+    // يتحرك حتى يصدر التدفق فلا تستقر pumpAndSettle قبله أبداً.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('لا أطراف بعد — أضف أول طرف بزر «إضافة طرف»'),
         findsOneWidget);
 
@@ -59,7 +67,8 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('إضافة طرف'));
     await tester.pumpAndSettle();
@@ -95,7 +104,8 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('أحمد الغالي (0012)'), findsOneWidget);
     expect(find.text('محمد الخالدي (0053)'), findsOneWidget);
 
@@ -129,7 +139,8 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('محمد الخالدي (0053)'));
     await tester.pumpAndSettle();
@@ -163,7 +174,8 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('محمد الخالدي (0053)'));
     await tester.pumpAndSettle();
 
@@ -191,7 +203,8 @@ void main() {
     addTearDown(db.close);
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إضافة طرف'));
     await tester.pumpAndSettle();
 
@@ -223,7 +236,8 @@ void main() {
     );
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إضافة طرف'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(1), 'أحمد');

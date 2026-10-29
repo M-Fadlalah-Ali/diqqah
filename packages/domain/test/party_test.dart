@@ -276,10 +276,13 @@ void main() {
       );
     });
     final watch = Stopwatch()..start();
-    final hits = fields.where((f) => f.matchesQuery('رقم 4999')).toList();
+    // «5000» لا «4999»: عينة الأصل كانت تصادمية — طرف i=4998 رقمه «4999»
+    // وطرف i=4999 اسمه «طرف رقم 4999» فالاستعلام يصيب اثنين صحيحين ولا
+    // علة في المجال (علّة CI 2026-10-29). «5000» لا يظهر إلا برقم طرف واحد.
+    final hits = fields.where((f) => f.matchesQuery('رقم 5000')).toList();
     watch.stop();
     expect(hits, hasLength(1));
-    expect(hits.single.number, '4999');
+    expect(hits.single.number, '5000');
     expect(watch.elapsed, lessThan(const Duration(seconds: 2)),
         reason: 'الفلترة في الذاكرة عند 5,000 طرف أضعاف أسرع من الحد — '
             'الارتفاع عن الحد المتساهل علة انحدار لا بطء طبيعي');
