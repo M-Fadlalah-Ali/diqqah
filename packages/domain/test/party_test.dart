@@ -73,35 +73,35 @@ void main() {
   });
 
   group('البحث الجامع (س-31) — كلمات متفرقة تلتقي بأي ترتيب', () {
-    const خالدي = PartySearchFields(
+    const khalidi = PartySearchFields(
       name: 'محمد الخالدي',
       number: '0053',
       phone: '0933',
     );
 
     test('«خال 53» تجيء بالطرف — بالترتيبين', () {
-      expect(خالدي.matchesQuery('خال 53'), isTrue);
-      expect(خالدي.matchesQuery('53 خال'), isTrue);
+      expect(khalidi.matchesQuery('خال 53'), isTrue);
+      expect(khalidi.matchesQuery('53 خال'), isTrue);
     });
 
     test('كل كلمة قد تجد موضعها في حقل مختلف', () {
-      expect(خالدي.matchesQuery('محمد 0933'), isTrue);
-      expect(خالدي.matchesQuery('0053 خالدي'), isTrue);
+      expect(khalidi.matchesQuery('محمد 0933'), isTrue);
+      expect(khalidi.matchesQuery('0053 خالدي'), isTrue);
     });
 
     test('كلمة غائبة تُفشل المطابقة كلها', () {
-      expect(خالدي.matchesQuery('خال 53 زيد'), isFalse);
+      expect(khalidi.matchesQuery('خال 53 زيد'), isFalse);
     });
 
     test('البحث مطبَّع: «احمد» تجد «أحمد»', () {
-      const غالي = PartySearchFields(name: 'أحمد الغالي', number: '0012');
-      expect(غالي.matchesQuery('احمد'), isTrue);
-      expect(غالي.matchesQuery('أحمد'), isTrue);
+      const ghali = PartySearchFields(name: 'أحمد الغالي', number: '0012');
+      expect(ghali.matchesQuery('احمد'), isTrue);
+      expect(ghali.matchesQuery('أحمد'), isTrue);
     });
 
     test('الخانة الفارغة تجيء بالجميع', () {
-      expect(خالدي.matchesQuery(''), isTrue);
-      expect(خالدي.matchesQuery('   '), isTrue);
+      expect(khalidi.matchesQuery(''), isTrue);
+      expect(khalidi.matchesQuery('   '), isTrue);
     });
   });
 

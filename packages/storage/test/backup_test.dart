@@ -74,7 +74,7 @@ void main() {
     expect(bytes[7], BackupCipher.formatVersion); // الجيل v2 بمفتاح البرنامج
 
     // بلا كلمة مرور ولا حقل: تُفتح مباشرة — N-005 بهذا أقوى (D-060)
-    final candidate = await prepareRestore(target, appSchemaVersion: 3);
+    final candidate = await prepareRestore(target, appSchemaVersion: db.schemaVersion);
     candidate.dispose();
 
     // عبث بايت واحد داخل النص المشفر: رفض من وسم GCM قبل أي لمس للقاعدة
@@ -83,7 +83,7 @@ void main() {
     await File(tamperedPath).writeAsBytes(tampered, flush: true);
     await expectLater(
       () async {
-        final c = await prepareRestore(tamperedPath, appSchemaVersion: 3);
+        final c = await prepareRestore(tamperedPath, appSchemaVersion: db.schemaVersion);
         c.dispose();
       }(),
       throwsA(isA<BackupCipherException>()),
@@ -105,7 +105,7 @@ void main() {
     // بلا كلمة مرور: توجيه صريح لمسار الجيل القديم — قبل أي لمس للقاعدة
     await expectLater(
       () async {
-        final c = await prepareRestore(legacyPath, appSchemaVersion: 3);
+        final c = await prepareRestore(legacyPath, appSchemaVersion: db.schemaVersion);
         c.dispose();
       }(),
       throwsA(isA<CorruptBackupException>()),
@@ -113,7 +113,7 @@ void main() {
 
     // بكلمتها: تُقرأ وتستكمل كل الفحوص — التزام القراءة الدائم
     final c = await prepareRestore(legacyPath,
-        password: 'كلمة-القديمة', appSchemaVersion: 3);
+        password: 'كلمة-القديمة', appSchemaVersion: db.schemaVersion);
     c.dispose();
   });
 
@@ -138,7 +138,7 @@ void main() {
 
     await expectLater(
       () async {
-        final c = await prepareRestore(target, appSchemaVersion: 3);
+        final c = await prepareRestore(target, appSchemaVersion: db.schemaVersion);
         c.dispose();
       }(),
       throwsA(isA<CorruptBackupException>()),
@@ -207,7 +207,7 @@ void main() {
     await backupTo(db, target);
 
     final candidate =
-        await prepareRestore(target, appSchemaVersion: 3);
+        await prepareRestore(target, appSchemaVersion: db.schemaVersion);
     await applyRestore(db: db, candidate: candidate, currentDbPath: dbPath);
     candidate.dispose();
 
@@ -222,12 +222,15 @@ void main() {
     final newerPath = p.join(tempDir.path, 'newer.db');
     final raw = sql.sqlite3.open(newerPath);
     raw.execute('CREATE TABLE t (x INTEGER)');
-    raw.execute('PRAGMA user_version = 4');
+    // «أحدث من التطبيق» تُحاكى دائماً بإصدار التطبيق نفسه +1 — لا برقم ثابت
+    // علّة CI 2026-10-29: الرقم 4 كان «المستقبل» حتى رفعه دفعة الأطراف إلى
+    // 4 فصار الحاضر — والثابت الميت يكذب على الاختبار مع كل ترقية مخطط.
+    raw.execute('PRAGMA user_version = ${db.schemaVersion + 1}');
     raw.dispose();
 
     await expectLater(
       () async {
-        final c = await prepareRestore(newerPath, appSchemaVersion: 3);
+        final c = await prepareRestore(newerPath, appSchemaVersion: db.schemaVersion);
         c.dispose();
       }(),
       throwsA(isA<BackupNewerSchemaException>()),
