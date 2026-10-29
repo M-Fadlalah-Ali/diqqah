@@ -287,18 +287,18 @@ class PartyCreditLimitInvalid extends PartyValidationError {
 /// وبالاسم الحرفي بعد تقليم الفراغات الطرفية حصراً بلا أي تطبيع (D-065).
 class PartyUniquenessIndex {
   final Map<String, ExistingParty> _byNumberKey;
-  final Map<String, String> _byLiteralName;
+  final Map<String, ExistingParty> _byLiteralName;
 
   const PartyUniquenessIndex._(this._byNumberKey, this._byLiteralName);
 
   factory PartyUniquenessIndex.build(Iterable<ExistingParty> parties) {
     final byNumber = <String, ExistingParty>{};
-    final byName = <String, String>{};
+    final byName = <String, ExistingParty>{};
     for (final party in parties) {
       final nameKey = party.name.trim();
       // أول طرف يفوز بالفهرسة — الفهرس أداة تحقق لا إصلاح تاريخ.
       byNumber.putIfAbsent(party.numberKey, () => party);
-      if (nameKey.isNotEmpty) byName.putIfAbsent(nameKey, () => party.displayLabel);
+      if (nameKey.isNotEmpty) byName.putIfAbsent(nameKey, () => party);
     }
     return PartyUniquenessIndex._(byNumber, byName);
   }
@@ -306,7 +306,7 @@ class PartyUniquenessIndex {
   ExistingParty? byNumberKey(String rawNumber) =>
       _byNumberKey[partyNumberKey(rawNumber)];
 
-  String? byLiteralName(String rawName) => _byLiteralName[rawName.trim()];
+  ExistingParty? byLiteralName(String rawName) => _byLiteralName[rawName.trim()];
 }
 
 /// التحقق قبل الحفظ (س-29/س-35) — يعيد قائمة الأخطاء (فارغة = سليم).
@@ -341,7 +341,7 @@ List<PartyValidationError> validatePartyDraft(
   if (name.isNotEmpty) {
     final holder = existing.byLiteralName(name);
     if (holder != null && holder.id != excludePartyId) {
-      errors.add(PartyNameTaken(holder));
+      errors.add(PartyNameTaken(holder.displayLabel));
     }
   }
   return errors;
