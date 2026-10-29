@@ -38,7 +38,7 @@
 
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
-| `party` | name, kind(`customer/supplier/both`), phone, address, default_currency_id, credit_limit_base_minor?, is_active | الطرف الواحد قد يكون عميلاً ومورداً معاً |
+| `party` | number (TEXT — الرقم الأساس بقرار المالك D-062: يخزن كما كُتب بأصفاره، فريد بعد نزع الأصفار الزائدة، لا يعدل بعد الحفظ — D-063), name, kind(`customer/supplier/both`), phone, address, default_currency_id (معبأة مسبقاً بالافتراضية ولا تخزن فارغة — D-066), credit_limit_base_minor?, is_active | الطرف الواحد قد يكون عميلاً ومورداً معاً؛ منع تكرار الاسم المطابق حرفياً قيد نطاق (D-065)؛ والمستندات ترتبط بالصف برقمه فتعديل الاسم لا يكسر شيئاً |
 | `app_user` | name, login, password_hash, role_id, is_active | مستخدمون محليون من الإصدار الأول |
 | `role` | name | مدير، محاسب، أمين مستودع، بائع... |
 | `permission` | role_id, scope(`screen/operation/report`), key, allowed | صلاحيات على مستوى الشاشة والعملية والتقرير |
