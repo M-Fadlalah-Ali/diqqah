@@ -540,7 +540,7 @@ String describeMoveValidationError(MoveValidationError error) {
       return 'السطر ${lineIndex + 1}: على الجانبين معاً — السطر جهة واحدة';
     case MoveLineAmountInvalid(:final lineIndex):
       return 'السطر ${lineIndex + 1}: المبلغ صفر أو سالب';
-    case const MoveTooFewLines():
+    case MoveTooFewLines():
       return 'القيد بسطر واحد — قيدان فأكثر (05 §7-1)';
     case MoveUnbalanced(
         :final debitTotalMinor,

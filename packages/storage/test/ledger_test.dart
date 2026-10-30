@@ -341,7 +341,8 @@ void main() {
         reason: 'المُشغِّل يرفض الانتقال بقيد غير متوازن',
       );
       final state = (await db.customSelect(
-              'SELECT state FROM moves WHERE id = ?', [Variable.withInt(moveId)])
+              'SELECT state FROM moves WHERE id = ?',
+              variables: [Variable.withInt(moveId)])
           .getSingle());
       expect(state.data['state'], 'draft',
           reason: 'الانتقال لم يقع — لا حالة وسطى');
