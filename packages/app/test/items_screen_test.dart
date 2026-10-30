@@ -269,30 +269,19 @@ void main() {
     expect(skuField.enabled, isFalse);
     expect(skuField.controller!.text, '100');
 
-    // زر الحذف غير موجود أصلاً (س-40) — وبالسحبة أقوى: كل الأبناء مبنيون
-    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    // زر الحذف غير موجود أصلاً في البطاقة كلها (س-40) — والفحص حارس
+    // انحدار لا يحتاج سحبة: لا «حذف» في أي بناة للبطاقة (علة س30:
+    // السحبة قرب انتقال الدخول أفقدت حالة البطاقة ثباتها فسقط الإدخال
+    // في حالة سابقة ورُفض الحفظ بخطأ تفرد زائف)
     expect(find.textContaining('حذف'), findsNothing);
 
-    // س-39: الاسم يعدل ويحفظ — والكود باقٍ كما هو
+    // س-39: الاسم يعدل ويحفظ — والكود باقٍ كما هو — بالنمط ذاته لس-32
+    // الأطراف (بلا سحبة — هو أخضر دائماً)
     await tester.enterText(find.byType(TextFormField).at(1), 'زيت ممتاز');
     await tester.tap(find.text('حفظ'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    // تشخيص س30 مؤقت — يُزال بعد حسم العلة
-    debugPrint('DIAG screens: ItemsScreen=${find.byType(ItemsScreen).evaluate().length} '
-        'ItemEditScreen=${find.byType(ItemEditScreen).evaluate().length}');
-    for (final t in tester.widgetList<Text>(find.byType(Text))) {
-      final s = t.data ?? t.textSpan?.toPlainText() ?? '<span>';
-      debugPrint('DIAG text: $s');
-    }
-    final rowsDiag = await db.select(db.items).get();
-    for (final r in rowsDiag) {
-      debugPrint('DIAG row: id=${r.id} sku=${r.sku} name=${r.name} '
-          'kind=${r.kind} unit=${r.baseUnitId} active=${r.isActive}');
-    }
     expect(find.text('زيت ممتاز (100)'), findsOneWidget);
 
     // س-40: فتح البطاقة ثانية ثم التعطيل — بشارة وبلا حذف
@@ -300,6 +289,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
+    // استقرار كامل لانتقال الدخول قبل السحبة (علة س30)
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.drag(find.byType(ListView).last, const Offset(0, -320));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));

@@ -230,8 +230,6 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       );
 
   Future<void> _save() async {
-    debugPrint('SAVE: enter _saving=$_saving name="${_name.text}" '
-        'sku="${_sku.text}" unit=$_unitId kind=${_kind.storageValue}'); // تشخيص س30
     if (_saving) return;
     setState(() => _saving = true);
     try {
@@ -246,14 +244,11 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         currencyId: _baseCurrencyId,
       );
       final rows = await widget.db.select(widget.db.items).get();
-      debugPrint('SAVE: rows=${rows.length}'); // تشخيص س30 مؤقت
       final errors = validateItemDraft(
         draft,
         existing: ItemUniquenessIndex.build(rows.map(_asExisting)),
         excludeItemId: widget.existing?.id,
       );
-      debugPrint('SAVE: errors=${errors.length} '
-          '${errors.map((e) => e.runtimeType).toList()}'); // تشخيص س30
       if (errors.isNotEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context)
@@ -267,7 +262,6 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         return;
       }
       if (_isEdit) {
-        debugPrint('SAVE: updating id=${widget.existing!.id}'); // تشخيص س30
         await widget.db.updateItemDetails(
           widget.existing!,
           name: draft.name.trim(),
@@ -278,7 +272,6 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           salePriceMinor: draft.salePriceMinor,
           priceCurrencyId: _baseCurrencyId,
         );
-        debugPrint('SAVE: updated'); // تشخيص س30 مؤقت
       } else {
         await widget.db.insertItem(
           sku: draft.sku.trim(),
@@ -292,7 +285,6 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         );
       }
       if (!mounted) return;
-      debugPrint('SAVE: popping'); // تشخيص س30 مؤقت
       Navigator.of(context).pop();
     } finally {
       if (mounted) setState(() => _saving = false);
