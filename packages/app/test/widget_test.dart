@@ -11,6 +11,9 @@ import 'package:diqqah_app/main.dart';
 import 'package:diqqah_app/items_screen.dart';
 import 'package:diqqah_app/parties_screen.dart';
 import 'package:diqqah_app/settings_screen.dart';
+import 'package:diqqah_app/invoices_screen.dart';
+import 'package:diqqah_app/boxes_screen.dart';
+import 'package:diqqah_app/roles_screen.dart';
 
 void main() {
   // تثبيت المؤشر الوامض تجريبياً — F-016 يفتح شاشة بحقل بحث، والوميض مصدر
@@ -75,12 +78,14 @@ void main() {
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
     expect(tiles.length, 14); // 13 وحدة + الإعدادات
     final locked = tiles.where((t) => t.enabled != true).length;
-    expect(locked, 10,
-        reason: 'الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2)) والتقارير اليومية '
-            '(دفعتا م1 (6) و(6-ب)) فُتحت — والبقية (9 وحدات) معطلة');
+    expect(locked, 7,
+        reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1 1..6-ب) والفواتير '
+            'والصناديق والصلاحيات (دفعة 6-ج بأمر «تنفيذها كلها معاً» س36) '
+            'فُتحت — والبقية (7 وحدات) معطلة');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 4,
-        reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1) والإعدادات (س-01)');
+    expect(open, 7,
+        reason: 'الأطراف والأصناف والتقارير والفواتير والصناديق والصلاحيات '
+            'والإعدادات');
 
     // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(
@@ -121,6 +126,60 @@ void main() {
     expect(find.text('لا أصناف بعد — أضف أول صنف بزر «إضافة صنف»'),
         findsOneWidget);
     expect(find.byType(ItemsScreen), findsOneWidget);
+  });
+
+  testWidgets('دفعة (6-ج) بأمر المالك «تنفيذها كلها معاً» (س36): الفواتير '
+      'والصناديق والصلاحيات تنفتح من الهيكلية بشاشاتها وفراغاتها المرسلة',
+      (tester) async {
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
+    await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
+
+    await tester.pumpWidget(DiqqahApp(db: db));
+    await tester.pumpAndSettle();
+
+    // الفواتير — فراغها رسالة إرشاد لا صمت (F-162 روحاً)
+    await tester.scrollUntilVisible(
+      find.text('الفواتير'),
+      200,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.tap(find.text('الفواتير'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(InvoicesScreen), findsOneWidget);
+    expect(find.textContaining('لا فواتير بعد'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // الصناديق — القائمة تعرض الصندوق المبذر بحسابه
+    await tester.scrollUntilVisible(
+      find.text('الصناديق'),
+      200,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.tap(find.text('الصناديق'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(BoxesScreen), findsOneWidget);
+    expect(find.textContaining('حساب 1111 · SYP'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // الصلاحيات — عرض قراءة حصراً (D-097)
+    await tester.scrollUntilVisible(
+      find.text('الصلاحيات'),
+      200,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.tap(find.text('الصلاحيات'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(RolesScreen), findsOneWidget);
+    expect(find.textContaining('العرض قراءة حصراً'), findsOneWidget);
   });
 
   testWidgets('F-012 + D-050 + D-060: زر النسخ ينتج نسخة مشفرة بمفتاح البرنامج في مجلد القاعدة',

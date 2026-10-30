@@ -4652,6 +4652,234 @@ Future<List<PurchasesMovementRow>> purchasesMovementReport({
   ]);
 }
 
+// ═══ قراءات قوائم المستندات — دفعة (6-ج) واجهات الإدخال (س-86..س-94،
+// D-094..D-097 معروضة): قراءات عرض خالصة من المرحّل حصراً على نمط
+// قراءات دفعة (6) الموثقة (D-088/D-089) — لا جداول تجميع ولا أعمدة
+// جديدة، والمدى الاختياري يُدقق بمدقق التقارير ذاته قبل لمس القاعدة
+// (D-077)، والفراغ يعطي القائمة كاملة لا صمتاً (F-162 روحاً). الصياغة
+// العرضية (تسميات الأنواع والحالات) بدوال المجال الجاهزة — التخزين
+// يقرأ ولا يحسب (نمط س-50).
+
+/// المستودعات القائمة للنماذج (05 §3.3) — المستودع الواحد في م1
+/// والبنية تعددية من م0. قراءة عرض خالصة.
+Future<List<WarehouseRow>> warehousesOf() async {
+  final rows = await customSelect(
+    'SELECT id, name, is_active FROM warehouses '
+    'WHERE is_deleted = 0 ORDER BY id',
+  ).get();
+  return [
+    for (final r in rows)
+      WarehouseRow(
+        id: r.data['id'] as int,
+        name: r.data['name'] as String,
+        isActive: (r.data['is_active'] as int) == 1,
+      ),
+  ];
+}
+
+/// صف قائمة فواتير للعرض (05 §4.1) — للتصفح لا للقرار.
+Future<List<InvoiceListRow>> invoicesListReport({
+  String? fromText,
+  String? toText,
+  String? kindStorageValue,
+}) async {
+  final from = fromText?.trim() ?? '';
+  final to = toText?.trim() ?? '';
+  if (from.isNotEmpty || to.isNotEmpty) {
+    final errors = validateReportRange(from, to);
+    if (errors.isNotEmpty) {
+      throw ReportValidationException(errors);
+    }
+  }
+  final kind = kindStorageValue?.trim() ?? '';
+  final rows = await customSelect(
+    'SELECT inv.id AS id, inv.kind AS kind, inv.number AS number, '
+    'inv.invoice_date AS invoice_date, inv.state AS state, '
+    'inv.total_doc_minor AS total_doc_minor, '
+    'inv.total_base_minor AS total_base_minor, '
+    'c.code AS currency_code, p.name AS party_name, b.name AS box_name '
+    'FROM invoices inv '
+    'JOIN currencies c ON c.id = inv.currency_id '
+    'LEFT JOIN parties p ON p.id = inv.party_id '
+    'LEFT JOIN cash_boxes b ON b.id = inv.cash_box_id '
+    "WHERE inv.is_deleted = 0 "
+    "AND (?1 = '' OR inv.kind = ?1) "
+    "AND (?2 = '' OR inv.invoice_date >= ?2) "
+    "AND (?3 = '' OR inv.invoice_date <= ?3) "
+    'ORDER BY inv.invoice_date DESC, inv.id DESC',
+    variables: [
+      Variable.withString(kind),
+      Variable.withString(from),
+      Variable.withString(to),
+    ],
+  ).get();
+  return [
+    for (final r in rows)
+      InvoiceListRow(
+        id: r.data['id'] as int,
+        kind: r.data['kind'] as String,
+        number: r.data['number'] as String,
+        invoiceDate: r.data['invoice_date'] as String,
+        state: r.data['state'] as String,
+        totalDocMinor: r.data['total_doc_minor'] as int,
+        totalBaseMinor: r.data['total_base_minor'] as int,
+        currencyCode: r.data['currency_code'] as String,
+        partyName: r.data['party_name'] as String?,
+        boxName: r.data['box_name'] as String?,
+      ),
+  ];
+}
+
+/// صف قائمة سندات القبض والصرف للعرض (05 §4.2) — الطرفي وغير الطرفي
+/// معاً والمميزان بحقليهما (طرف أو حساب مباشر).
+Future<List<VoucherListRow>> vouchersListReport({
+  String? fromText,
+  String? toText,
+}) async {
+  final from = fromText?.trim() ?? '';
+  final to = toText?.trim() ?? '';
+  if (from.isNotEmpty || to.isNotEmpty) {
+    final errors = validateReportRange(from, to);
+    if (errors.isNotEmpty) {
+      throw ReportValidationException(errors);
+    }
+  }
+  final rows = await customSelect(
+    'SELECT v.id AS id, v.kind AS kind, v.number AS number, '
+    'v.voucher_date AS voucher_date, v.state AS state, '
+    'v.amount_doc_minor AS amount_doc_minor, '
+    'v.amount_base_minor AS amount_base_minor, v.narration AS narration, '
+    'c.code AS currency_code, p.name AS party_name, '
+    'a.code AS direct_account_code, b.name AS box_name '
+    'FROM vouchers v '
+    'JOIN currencies c ON c.id = v.currency_id '
+    'LEFT JOIN parties p ON p.id = v.party_id '
+    'LEFT JOIN accounts a ON a.id = v.direct_account_id '
+    'JOIN cash_boxes b ON b.id = v.cash_box_id '
+    "WHERE v.is_deleted = 0 "
+    "AND (?1 = '' OR v.voucher_date >= ?1) "
+    "AND (?2 = '' OR v.voucher_date <= ?2) "
+    'ORDER BY v.voucher_date DESC, v.id DESC',
+    variables: [
+      Variable.withString(from),
+      Variable.withString(to),
+    ],
+  ).get();
+  return [
+    for (final r in rows)
+      VoucherListRow(
+        id: r.data['id'] as int,
+        kind: r.data['kind'] as String,
+        number: r.data['number'] as String,
+        voucherDate: r.data['voucher_date'] as String,
+        state: r.data['state'] as String,
+        amountDocMinor: r.data['amount_doc_minor'] as int,
+        narration: r.data['narration'] as String?,
+        currencyCode: r.data['currency_code'] as String,
+        partyName: r.data['party_name'] as String?,
+        directAccountCode: r.data['direct_account_code'] as String?,
+        boxName: r.data['box_name'] as String,
+      ),
+  ];
+}
+
+/// صف قائمة تحويلات الصناديق للعرض (س-16/05 §6) — المستند موحد بطرفه
+/// (من/إلى) والمبلغ بعملة الصندوقين (الواحدة — D-087 معتمد).
+Future<List<BoxTransferListRow>> boxTransfersListReport({
+  String? fromText,
+  String? toText,
+}) async {
+  final from = fromText?.trim() ?? '';
+  final to = toText?.trim() ?? '';
+  if (from.isNotEmpty || to.isNotEmpty) {
+    final errors = validateReportRange(from, to);
+    if (errors.isNotEmpty) {
+      throw ReportValidationException(errors);
+    }
+  }
+  final rows = await customSelect(
+    'SELECT t.id AS id, t.number AS number, '
+    't.transfer_date AS transfer_date, t.state AS state, '
+    't.amount_doc_minor AS amount_doc_minor, t.narration AS narration, '
+    'c.code AS currency_code, '
+    'f.name AS from_box_name, u.name AS to_box_name '
+    'FROM box_transfers t '
+    'JOIN currencies c ON c.id = t.currency_id '
+    'JOIN cash_boxes f ON f.id = t.from_box_id '
+    'JOIN cash_boxes u ON u.id = t.to_box_id '
+    "WHERE t.is_deleted = 0 "
+    "AND (?1 = '' OR t.transfer_date >= ?1) "
+    "AND (?2 = '' OR t.transfer_date <= ?2) "
+    'ORDER BY t.transfer_date DESC, t.id DESC',
+    variables: [
+      Variable.withString(from),
+      Variable.withString(to),
+    ],
+  ).get();
+  return [
+    for (final r in rows)
+      BoxTransferListRow(
+        id: r.data['id'] as int,
+        number: r.data['number'] as String,
+        transferDate: r.data['transfer_date'] as String,
+        state: r.data['state'] as String,
+        amountDocMinor: r.data['amount_doc_minor'] as int,
+        narration: r.data['narration'] as String?,
+        currencyCode: r.data['currency_code'] as String,
+        fromBoxName: r.data['from_box_name'] as String,
+        toBoxName: r.data['to_box_name'] as String,
+      ),
+  ];
+}
+
+/// صف قائمة تسويات الصناديق للعرض (س-17) — الاتجاه والسبب النصي
+/// الإلزامي ظاهران بالصفحة فتُرى مسوغة كل فرق.
+Future<List<CashAdjustmentListRow>> cashAdjustmentsListReport({
+  String? fromText,
+  String? toText,
+}) async {
+  final from = fromText?.trim() ?? '';
+  final to = toText?.trim() ?? '';
+  if (from.isNotEmpty || to.isNotEmpty) {
+    final errors = validateReportRange(from, to);
+    if (errors.isNotEmpty) {
+      throw ReportValidationException(errors);
+    }
+  }
+  final rows = await customSelect(
+    'SELECT s.id AS id, s.number AS number, '
+    's.adjustment_date AS adjustment_date, s.direction AS direction, '
+    's.state AS state, s.reason AS reason, '
+    's.amount_doc_minor AS amount_doc_minor, '
+    'c.code AS currency_code, b.name AS box_name '
+    'FROM cash_adjustments s '
+    'JOIN currencies c ON c.id = s.currency_id '
+    'JOIN cash_boxes b ON b.id = s.cash_box_id '
+    "WHERE s.is_deleted = 0 "
+    "AND (?1 = '' OR s.adjustment_date >= ?1) "
+    "AND (?2 = '' OR s.adjustment_date <= ?2) "
+    'ORDER BY s.adjustment_date DESC, s.id DESC',
+    variables: [
+      Variable.withString(from),
+      Variable.withString(to),
+    ],
+  ).get();
+  return [
+    for (final r in rows)
+      CashAdjustmentListRow(
+        id: r.data['id'] as int,
+        number: r.data['number'] as String,
+        adjustmentDate: r.data['adjustment_date'] as String,
+        direction: r.data['direction'] as String,
+        state: r.data['state'] as String,
+        reason: r.data['reason'] as String,
+        amountDocMinor: r.data['amount_doc_minor'] as int,
+        currencyCode: r.data['currency_code'] as String,
+        boxName: r.data['box_name'] as String,
+      ),
+  ];
+}
+
 Future<void> _createClosingTriggers() async {
   // ═══ حواجز الإقفال الثالثة (دفعة 6 — ترحيلة v9): المجال يفحص فترة
   // التاريخ (MoveClosedPeriod وأخواتها الأربع) والمحرك يمنع قبل أي كتابة
@@ -4977,4 +5205,171 @@ String voucherDisplayLabel(VoucherDocument voucher) {
   final label =
       sequenceKindLabels[voucherSequenceKind(kind)] ?? kind.label;
   return '$label ${voucher.number}';
+}
+
+// ═══ صفوف قوائم المستندات — دفعة (6-ج): صور عرض للتصفح لا للقرار،
+// والتسميات من دوال المجال الجاهزة حصراً (لا صياغة مخزنة — D-089).
+
+/// صف قائمة فواتير للتصفح (05 §4.1).
+class InvoiceListRow {
+  final int id;
+  final String kind;
+
+  /// فارغ للمسودة — الترقيم لحظة الترحيل حصراً (07 §1.9).
+  final String number;
+  final String invoiceDate;
+  final String state;
+  final int totalDocMinor;
+  final int totalBaseMinor;
+  final String currencyCode;
+
+  /// الطرف للآجل واسم صندوق النقدية للنقدي — أحدهما فأعلى.
+  final String? partyName;
+  final String? boxName;
+
+  const InvoiceListRow({
+    required this.id,
+    required this.kind,
+    required this.number,
+    required this.invoiceDate,
+    required this.state,
+    required this.totalDocMinor,
+    required this.totalBaseMinor,
+    required this.currencyCode,
+    required this.partyName,
+    required this.boxName,
+  });
+
+  /// «فاتورة بيع 2026/000001» — والمسودة بلا رقم بعد فتسميتها «— مسودة».
+  String get displayLabel {
+    final k = InvoiceKind.fromStorage(kind);
+    final kindLabel =
+        sequenceKindLabels[invoiceSequenceKind(k)] ?? k.label;
+    return number.isEmpty ? '$kindLabel — مسودة' : '$kindLabel $number';
+  }
+
+  String get stateLabel => InvoiceState.fromStorage(state).label;
+
+  InvoiceKind get kindValue => InvoiceKind.fromStorage(kind);
+
+  /// الطرف أو الصندوق بالعرض — الآجل طرفاً والنقدي صندوقاً (س-03/س-06).
+  String get counterpartLabel =>
+      partyName ?? boxName ?? '—';
+}
+
+/// صف قائمة سندات القبض والصرف للتصفح (05 §4.2).
+class VoucherListRow {
+  final int id;
+  final String kind;
+  final String number;
+  final String voucherDate;
+  final String state;
+  final int amountDocMinor;
+  final String? narration;
+  final String currencyCode;
+
+  /// طرف السند الطرفي — وحسابه المباشر لغير الطرفي (س-13/س-15).
+  final String? partyName;
+  final String? directAccountCode;
+  final String boxName;
+
+  const VoucherListRow({
+    required this.id,
+    required this.kind,
+    required this.number,
+    required this.voucherDate,
+    required this.state,
+    required this.amountDocMinor,
+    required this.narration,
+    required this.currencyCode,
+    required this.partyName,
+    required this.directAccountCode,
+    required this.boxName,
+  });
+
+  String get displayLabel {
+    final k = VoucherKind.fromStorage(kind);
+    final kindLabel =
+        sequenceKindLabels[voucherSequenceKind(k)] ?? k.label;
+    return number.isEmpty ? '$kindLabel — مسودة' : '$kindLabel $number';
+  }
+
+  String get stateLabel =>
+      state == 'posted' ? 'مرحّل' : 'مسودة';
+
+  /// الجهة المعروضة بالسطر: طرفاً بلسان الطرفية أو حساباً بالكود
+  /// للسند بغير طرف — والفراغ لا يظهر.
+  String get counterpartLabel =>
+      partyName ??
+      (directAccountCode == null ? '—' : 'حساب $directAccountCode');
+}
+
+/// صف قائمة تحويلات الصناديق للتصفح (س-16/05 §6).
+class BoxTransferListRow {
+  final int id;
+  final String number;
+  final String transferDate;
+  final String state;
+  final int amountDocMinor;
+  final String? narration;
+  final String currencyCode;
+  final String fromBoxName;
+  final String toBoxName;
+
+  const BoxTransferListRow({
+    required this.id,
+    required this.number,
+    required this.transferDate,
+    required this.state,
+    required this.amountDocMinor,
+    required this.narration,
+    required this.currencyCode,
+    required this.fromBoxName,
+    required this.toBoxName,
+  });
+
+  String get displayLabel {
+    final kindLabel = sequenceKindLabels['box_transfer'] ?? 'تحويل بين صناديق';
+    return number.isEmpty ? '$kindLabel — مسودة' : '$kindLabel $number';
+  }
+
+  String get stateLabel =>
+      state == 'posted' ? 'مرحّل' : 'مسودة';
+}
+
+/// صف قائمة تسويات الصناديق للتصفح (س-17) — والسبب نصي إلزامي ظاهر.
+class CashAdjustmentListRow {
+  final int id;
+  final String number;
+  final String adjustmentDate;
+  final String direction;
+  final String state;
+  final String reason;
+  final int amountDocMinor;
+  final String currencyCode;
+  final String boxName;
+
+  const CashAdjustmentListRow({
+    required this.id,
+    required this.number,
+    required this.adjustmentDate,
+    required this.direction,
+    required this.state,
+    required this.reason,
+    required this.amountDocMinor,
+    required this.currencyCode,
+    required this.boxName,
+  });
+
+  String get displayLabel {
+    final kindLabel =
+        sequenceKindLabels['cash_adjustment'] ?? 'تسوية صندوق';
+    return number.isEmpty ? '$kindLabel — مسودة' : '$kindLabel $number';
+  }
+
+  String get directionLabel =>
+      CashAdjustmentDirection.fromStorage(direction).label;
+
+  String get stateLabel =>
+      state == 'posted' ? 'مرحّل' : 'مسودة';
 }
