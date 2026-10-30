@@ -79,7 +79,9 @@ void main() {
     expect(find.textContaining('أُقفلت الفترة'), findsOneWidget);
     expect(find.text('مقفلة'), findsOneWidget,
         reason: 'مارس وحده المقفلة');
-    expect(find.text('مفتوحة'), findsNWidgets(11));
+    // السرد الكسول يبني الظاهر حصراً — يكفي «واحد على الأقل» والحالة
+    // الفعلية للفترات الاثنتي عشرة تُفحص من القاعدة أسفل الاختبار
+    expect(find.text('مفتوحة'), findsWidgets);
     expect(find.text('فك الإقفال'), findsOneWidget);
 
     // الفك: الفراغ مرفوض برسالة المدقق ثم السبب يمرّ ويوثق
@@ -102,7 +104,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.textContaining('فُتحت الفترة'), findsOneWidget);
-    expect(find.text('مفتوحة'), findsNWidgets(12));
+    expect(find.text('مفتوحة'), findsWidgets);
     expect(find.text('مقفلة'), findsNothing);
 
     // والحالة في القاعدة عادت مفتوحة فعلاً
@@ -146,7 +148,7 @@ void main() {
 
     expect(find.textContaining('أُقفلت الفترة'), findsOneWidget);
     expect(find.text('مقفلة'), findsOneWidget);
-    expect(find.text('مفتوحة'), findsNWidgets(11));
+    expect(find.text('مفتوحة'), findsWidgets);
 
     // ولقطة سجل الإقفال موثقة بالمحرك (حدث period_closed)
     final events = await db.customSelect(

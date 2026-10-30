@@ -61,7 +61,7 @@ void main() {
     expect(find.text('الأصناف'), findsOneWidget);
   });
 
-  testWidgets('F-016: الأطراف والأصناف فُتحتا بدفعتي م1 مع الإعدادات — والبقية معطلة؛\n'
+  testWidgets('F-016: الأطراف والأصناف والتقارير اليومية فُتحت بدفعات م1 مع الإعدادات — والبقية معطلة؛\n'
       'وفتح الأطراف يفتح شاشتها والبحث فيها يعمل', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     // الإغلاق العادي يكفي — القاعدة بنمط inMemorySyncClose (س26) فلا مؤقت
@@ -75,11 +75,12 @@ void main() {
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
     expect(tiles.length, 14); // 13 وحدة + الإعدادات
     final locked = tiles.where((t) => t.enabled != true).length;
-    expect(locked, 11,
-        reason: 'الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2)) فُتحتا — والبقية (10 وحدة) معطلة');
+    expect(locked, 10,
+        reason: 'الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2)) والتقارير اليومية '
+            '(دفعتا م1 (6) و(6-ب)) فُتحت — والبقية (9 وحدات) معطلة');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 3,
-        reason: 'الأطراف والأصناف (دفعتي م1) والإعدادات (س-01)');
+    expect(open, 4,
+        reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1) والإعدادات (س-01)');
 
     // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(

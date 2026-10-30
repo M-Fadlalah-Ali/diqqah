@@ -45,8 +45,8 @@ void main() {
     expect(find.textContaining('1111'), findsOneWidget);
     expect(find.textContaining('545,000'), findsOneWidget);
     expect(find.textContaining('40,000'), findsNWidgets(2));
-    expect(find.textContaining('100,000'), findsNWidgets(2),
-        reason: 'مدين المخزون وذمة الموردين معاً');
+    expect(find.textContaining('100,000'), findsNWidgets(3),
+        reason: 'مدين المخزون ودائن الموردين ورصيدهما');
     expect(find.textContaining('500,000'), findsNWidgets(2),
         reason: 'دائن رأس المال ورصيده');
     // والحساب الغائب لا صف له (لا 42 ولا 58 في هذه الدورة)
@@ -71,8 +71,8 @@ void main() {
         reason: '500,000 ضخ + 50,000 قبض − 5,000 عجز');
     expect(find.textContaining('1111'), findsOneWidget);
     expect(find.textContaining('SYP'), findsOneWidget);
-    expect(find.textContaining('معطل'), findsNothing,
-        reason: 'الصندوق نشط — لا شارة');
+    expect(find.text('حساب 1111 · SYP'), findsOneWidget,
+        reason: 'الصندوق نشط — لا لاحقة « — معطل» في بطاقته');
   });
 
   testWidgets('س-81: الذمم بالاتجاهين — «هم يدينون لنا» 40,000 و«نحن '

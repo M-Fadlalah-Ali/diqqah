@@ -33,7 +33,11 @@ class _PeriodsScreenState extends State<PeriodsScreen> {
   }
 
   void _reload() {
-    setState(() => _future = widget.db.ledgerPeriods());
+    // بأقواس لا سهم: السهم يرجع Future من setState فيرمي استثناء (فشل CI
+    // الجولة الأولى لدفعة 6-ب — 2026-10-31)
+    setState(() {
+      _future = widget.db.ledgerPeriods();
+    });
   }
 
   Future<void> _closePeriod(PeriodInfo period) async {
