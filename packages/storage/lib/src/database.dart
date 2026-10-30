@@ -1393,7 +1393,6 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       );
       await _recordMoveEvent(moveId: moveId, action: 'posted');
       return moveId;
-    });
   }
 
   /// س-48: مسودة العكس لقيد مرحّل (07 §1.3) — الأسطر نفسها بجانبين
