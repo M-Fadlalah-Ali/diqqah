@@ -5,7 +5,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value, Variable;
 
 /// أدوات الدفعة — بنمط ledger_test: معرفات بالبحث بالكود لا بالثبوت
 /// الأعمى، وسنة ديناميكية من البذر لا مثبتة كي لا يكسرها تغيّر سنة CI.
