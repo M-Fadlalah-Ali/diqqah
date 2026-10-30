@@ -204,6 +204,9 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// تفكيك الشجرة») يسبق teardowns فلا سبيل لإطلاقه بعد التفكيك —
   /// والخيار هنا يقطع الطريق من مصدره: لا مؤقت يُجدول أصلاً عند إلغاء
   /// أي اشتراك. للاختبارات حصراً — المنتج لا يستعمله.
+  /// ملاحظة مصدرية: DatabaseConnectionUser الرئيسي يمرر DatabaseConnection
+  /// كما هو بلا إعادة غلاف (`executor is DatabaseConnection ? executor`)
+  /// فتبقى مخزنة التدفقات المخصصة هنا هي الفاعلة.
   factory DiqqahDatabase.inMemorySyncClose() =>
       DiqqahDatabase._syncClose(DatabaseConnection(
         NativeDatabase.memory(),
@@ -211,7 +214,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       ));
 
   DiqqahDatabase._syncClose(DatabaseConnection connection)
-      : super.connect(connection);
+      : super(connection);
 
   @override
   int get schemaVersion => 4;

@@ -1221,3 +1221,16 @@ Work Log:
 
 Stage Summary:
 - الدفعة دُفعت والمراقبة حتى الخضرة الكاملة — إن خضرت الواجهة اكتملت خضرة CI لإيداع دفعة الأطراف.
+
+---
+Task ID: 73
+Agent: main agent (Z.ai)
+Task: متابعة ذاتية — الجولة العاشرة: تصويبة مُنشئ الاتصال بعد انكسار ترجمة الجولة التاسعة.
+
+Work Log:
+- الجولة التاسعة (291c432): المجال أخضر؛ التخزين والواجهة انكسرتا بخطأ ترجمة وحيد: «_$DiqqahDatabase لا يملك مُنشئ connect» — خياري أن المولد يُصدره افتراضياً كان خاطئاً (generate_connect_constructor معطل افتراضياً في drift 2.x).
+- الحسم من مصدر drift: DatabaseConnectionUser(QueryExecutor) يمرر DatabaseConnection كما هو (`executor is DatabaseConnection ? executor`) — فالإصلاح: _syncClose يستعمل المُنشئ العادي super(connection) — بلا build.yaml ولا خيارات توليد.
+- تصويبة موثقة في س26 (نمط الصدق المعمول به مع س24).
+
+Stage Summary:
+- الدفعة دُفعت والمراقبة حتى الخضرة الكاملة.
