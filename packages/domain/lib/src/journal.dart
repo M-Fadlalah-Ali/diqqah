@@ -133,8 +133,8 @@ const List<AccountSpec> defaultChartOfAccounts = [
   AccountSpec(code: '3', name: 'حقوق الملكية', type: AccountType.equity, parentCode: null, isLeaf: false),
   AccountSpec(code: '31', name: 'رأس المال', type: AccountType.equity, parentCode: '3', isLeaf: false),
   AccountSpec(code: '311', name: 'رأس المال', type: AccountType.equity, parentCode: '31', isLeaf: true),
-  AccountSpec(code: '32', name: 'المسحوبات', type: AccountType.equity, parentCode: '3', isLeaf: false),
-  AccountSpec(code: '321', name: 'المسحوبات الشخصية', type: AccountType.equity, parentCode: '32', isLeaf: true),
+  AccountSpec(code: '32', name: 'المسحوبات', type: AccountType.equity, normalSide: NormalSide.debit, parentCode: '3', isLeaf: false),
+  AccountSpec(code: '321', name: 'المسحوبات الشخصية', type: AccountType.equity, normalSide: NormalSide.debit, parentCode: '32', isLeaf: true),
   AccountSpec(code: '33', name: 'النتيجة', type: AccountType.equity, parentCode: '3', isLeaf: false),
   AccountSpec(code: '331', name: 'الأرباح المحتجزة', type: AccountType.equity, parentCode: '33', isLeaf: true),
   AccountSpec(

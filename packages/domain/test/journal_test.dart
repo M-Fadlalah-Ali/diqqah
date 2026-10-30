@@ -339,11 +339,12 @@ void main() {
 
   group('القيد العكس (07 §1.3/س-48)', () {
     test('الأسطر تتقابل جانباً بجانب ومرجع الأصل محفوظ', () {
+      // حسابان ورقيان بالمؤشر المصغر: 2 (1111 أصول) و3 (113 مخزون)
       final original = [
         const LedgerLine(
             moveId: 9, accountId: 2, debitMinor: 70000, creditMinor: 0),
         const LedgerLine(
-            moveId: 9, accountId: 4, debitMinor: 0, creditMinor: 70000),
+            moveId: 9, accountId: 3, debitMinor: 0, creditMinor: 70000),
       ];
       final reversal = buildReversalMoveDraft(
         journalId: 5,
@@ -360,7 +361,7 @@ void main() {
       expect(reversal.lines[0].accountId, 2);
       expect(reversal.lines[0].debitMinor, 0);
       expect(reversal.lines[0].creditMinor, 70000);
-      expect(reversal.lines[1].accountId, 4);
+      expect(reversal.lines[1].accountId, 3);
       expect(reversal.lines[1].debitMinor, 70000);
       expect(reversal.lines[1].creditMinor, 0);
       // العكس نفسه متوازن — يمر بالمدقق نفسه
@@ -375,7 +376,7 @@ void main() {
         journalId: 5,
         originalLines: const [
           LedgerLine(moveId: 9, accountId: 2, debitMinor: 1, creditMinor: 0),
-          LedgerLine(moveId: 9, accountId: 4, debitMinor: 0, creditMinor: 1),
+          LedgerLine(moveId: 9, accountId: 3, debitMinor: 0, creditMinor: 1),
         ],
         originalLabel: '2026/000007',
         reversalDateText: '2026-11-01',
