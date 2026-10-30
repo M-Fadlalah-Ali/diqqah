@@ -277,8 +277,16 @@ void main() {
     expect(rows.single.kind, 'both', reason: 'س-30: صف مرجعي واحد للدورتين');
     expect(rows.single.creditLimitBaseMinor, 5000,
         reason: 'س-34: يخزن بوحدات صغرى');
-    // ملصق النوع في القائمة من مجال الأطراف
-    expect(find.textContaining('عميل ومورد معاً'), findsOneWidget);
+    // ملصق النوع في القائمة من مجال الأطراف — محصوراً ببلاط القائمة إذ قد
+    // تكون شريحة بطاقة التعديل ما تزال بشجرتها في طور الخروج لحظة الفحص
+    // (فشل CI 2026-10-30: وجد النص مرتين — العنوان الفرعي وشريحة البطاقة)
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.textContaining('عميل ومورد معاً'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('س-29/D-065: الاسم المطابق حرفياً لطرف قائم مرفوض برسالة تحمل '
