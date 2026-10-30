@@ -4086,6 +4086,209 @@ Future<List<CurrencyRow>> currenciesOf() async {
   /// الاشتقاق والقراءة (F-063/D-084 معروضان).
   Future<int> invoiceCoveredDocMinor(int invoiceId) =>
       _coveredDocSingleTx(invoiceId);
+
+/// جداول دفعة السندات (05 §4.2 + س-16/س-17): السند وصفوف مطابقته
+/// (تشغيلية جزء لا يتجزأ من السند — م-21/D-042) ومستندا التحويل
+/// والتسوية برقمهما المستقل (D-083 معروض). الأعمدة التنفيذية:
+/// `applied_doc_minor` على المطابقة بعملة الفاتورة (D-084 معروض)
+/// و`number`/`state`/`move_id` على المستندات الأربعة بنمط الفواتير.
+Future<void> _createVoucherTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "vouchers" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"kind" TEXT NOT NULL, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"party_id" INTEGER NULL, '
+        '"direct_account_id" INTEGER NULL, '
+        '"cash_box_id" INTEGER NOT NULL, '
+        '"voucher_date" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"narration" TEXT NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "voucher_allocations" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"voucher_id" INTEGER NOT NULL, '
+        '"invoice_id" INTEGER NOT NULL, '
+        '"applied_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"applied_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "box_transfers" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"from_box_id" INTEGER NOT NULL, '
+        '"to_box_id" INTEGER NOT NULL, '
+        '"transfer_date" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"narration" TEXT NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "cash_adjustments" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"cash_box_id" INTEGER NOT NULL, '
+        '"adjustment_date" TEXT NOT NULL, '
+        '"direction" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"reason" TEXT NOT NULL DEFAULT \'\', '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
+/// المُشغِّلات الحواجز لجداول السندات — الحاجز الثاني المختبَر بعد فحص
+/// المحرك (نمط D-067): تجميد السند المرحّل وصفوف مطابقاته ومستندَي
+/// التحويل والتسوية، ومنع حذف المرحّل، ومنع مطابقة فاتورة مسودة،
+/// وتوسعة حاجز سالب الصندوق لتشمل الخروج بالتحويل (D-083 معروض).
+Future<void> _createVoucherTriggers() async {
+  const triggers = <String>[
+    // توسيع حاجز سالب الصندوق (05 §7-2): الخروج بالتحويل خروج فعلي من
+    // الصندوق يقبضه الحاجز ذاته — والداخل بالتحويل دخول لا حاجز عليه.
+    // إعادة تعريف موثقة للنسخة المجرَّبة بشرط أوسع وتوازن يشمل transfer_in.
+    'DROP TRIGGER IF EXISTS trg_cash_no_negative',
+    "CREATE TRIGGER trg_cash_no_negative "
+        "BEFORE INSERT ON cash_movements FOR EACH ROW "
+        "WHEN NEW.kind IN ('out', 'transfer_out') AND ("
+        "(SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
+        " WHERE id = NEW.cash_box_id)"
+        " + (SELECT COALESCE(SUM(CASE WHEN kind IN ('in', 'transfer_in') "
+        "THEN amount_base_minor ELSE -amount_base_minor END), 0) "
+        "FROM cash_movements WHERE cash_box_id = NEW.cash_box_id)"
+        " - NEW.amount_base_minor < 0) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'رصيد الصندوق لا يكفي — منع السالب الموحد "
+        "(05 §7-2)'); END",
+    // تجميد السند المرحّل — ما رُحّل لا يعدل (07 §1.3/05 §7-4) والتصحيح
+    // بمطابقة تكميلية (س-12) أو مستند معاكس
+    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_posted_frozen "
+        "BEFORE UPDATE ON vouchers FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.kind IS NOT OLD.kind OR "
+        "NEW.number IS NOT OLD.number OR "
+        "COALESCE(NEW.party_id,-1) IS NOT COALESCE(OLD.party_id,-1) OR "
+        "COALESCE(NEW.direct_account_id,-1) IS NOT "
+        "COALESCE(OLD.direct_account_id,-1) OR "
+        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
+        "NEW.voucher_date IS NOT OLD.voucher_date OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'السند المرحّل لا تعدل — التصحيح بمطابقة "
+        "تكميلية أو مستند معاكس (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_no_delete_posted "
+        "BEFORE DELETE ON vouchers FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'السند المرحّل لا يحذف (05 §7-4)'); END",
+    // صفوف مطابقة السند المرحّل مجمدة — والمسودة تُعدَّل بحرية قبل الترحيل
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_insert "
+        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = NEW.voucher_id) "
+        "<> 'draft' "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تضاف — التصحيح "
+        "بمطابقة تكميلية (س-12)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_update "
+        "BEFORE UPDATE ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
+        "= 'posted' "
+        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تعدل'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_delete "
+        "BEFORE DELETE ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
+        "= 'posted' "
+        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تحذف'); END",
+    // حاجز ثالث: لا مطابقة على فاتورة مسودة حتى لو تسللت بمعاملة خارجية
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_no_draft_invoice "
+        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM invoices WHERE id = NEW.invoice_id) "
+        "= 'draft' "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'لا مطابقة على فاتورة مسودة — تُرحَّل أولاً'); "
+        "END",
+    // تجميد التحويل المرحّل — قيد الطرفين لحظي لا مساس به (F-068)
+    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_posted_frozen "
+        "BEFORE UPDATE ON box_transfers FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.number IS NOT OLD.number OR "
+        "NEW.from_box_id IS NOT OLD.from_box_id OR "
+        "NEW.to_box_id IS NOT OLD.to_box_id OR "
+        "NEW.transfer_date IS NOT OLD.transfer_date OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'التحويل المرحّل لا تعدل (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_no_delete_posted "
+        "BEFORE DELETE ON box_transfers FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'التحويل المرحّل لا يحذف (05 §7-4)'); END",
+    // تجميد التسوية المرحّلة — مستند موثق مرقّم لا يعدل (س-17)
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_posted_frozen "
+        "BEFORE UPDATE ON cash_adjustments FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.number IS NOT OLD.number OR "
+        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
+        "NEW.adjustment_date IS NOT OLD.adjustment_date OR "
+        "NEW.direction IS NOT OLD.direction OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "NEW.reason IS NOT OLD.reason OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'التسوية المرحّلة لا تعدل (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_no_delete_posted "
+        "BEFORE DELETE ON cash_adjustments FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'التسوية المرحّلة لا تحذف (05 §7-4)'); END",
+  ];
+  for (final sql in triggers) {
+    await customStatement(sql);
+  }
+}
+
+/// بذر دفعة السندات (س-61): تفعيل حسابَي فروق العملة الجاهزين معطلين
+/// (44 أرباحها و55 خسائرها — F-123/D-085 معروضان: تفعيل إعداداً بلا
+/// واجهة إعدادات بعد، نتيجة تقديم D-070 لتعدد العملات إلى م1-نواة).
+/// البذر فاحص الحالة ذاته فآمن التكرار.
+Future<void> _seedVoucherBaseline() async {
+  await customStatement(
+      "UPDATE accounts SET is_active = 1 "
+      "WHERE code IN ('44', '55') AND is_active = 0");
+}
 }
 
 /// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
@@ -4307,209 +4510,6 @@ String invoiceDisplayLabel(InvoiceDocument invoice) {
 // المحرك (07 §2.2 نمط D-067) بما فيها توسعة حاجز سالب الصندوق للخروج
 // بالتحويل، والبذر فاحص الحالة ذاته.
 // ═══════════════════════════════════════════════════════════════════
-
-/// جداول دفعة السندات (05 §4.2 + س-16/س-17): السند وصفوف مطابقته
-/// (تشغيلية جزء لا يتجزأ من السند — م-21/D-042) ومستندا التحويل
-/// والتسوية برقمهما المستقل (D-083 معروض). الأعمدة التنفيذية:
-/// `applied_doc_minor` على المطابقة بعملة الفاتورة (D-084 معروض)
-/// و`number`/`state`/`move_id` على المستندات الأربعة بنمط الفواتير.
-Future<void> _createVoucherTables() async {
-  const statements = <String>[
-    'CREATE TABLE IF NOT EXISTS "vouchers" ('
-        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
-        '"kind" TEXT NOT NULL, '
-        '"number" TEXT NOT NULL DEFAULT \'\', '
-        '"party_id" INTEGER NULL, '
-        '"direct_account_id" INTEGER NULL, '
-        '"cash_box_id" INTEGER NOT NULL, '
-        '"voucher_date" TEXT NOT NULL, '
-        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
-        '"fx_rate" INTEGER NOT NULL, '
-        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"state" TEXT NOT NULL DEFAULT \'draft\', '
-        '"move_id" INTEGER NULL, '
-        '"narration" TEXT NULL, '
-        '"uuid" TEXT NOT NULL, '
-        '"created_at" INTEGER NOT NULL DEFAULT 0, '
-        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
-        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
-    'CREATE TABLE IF NOT EXISTS "voucher_allocations" ('
-        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
-        '"voucher_id" INTEGER NOT NULL, '
-        '"invoice_id" INTEGER NOT NULL, '
-        '"applied_doc_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"applied_base_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"uuid" TEXT NOT NULL, '
-        '"created_at" INTEGER NOT NULL DEFAULT 0, '
-        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
-        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
-    'CREATE TABLE IF NOT EXISTS "box_transfers" ('
-        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
-        '"number" TEXT NOT NULL DEFAULT \'\', '
-        '"from_box_id" INTEGER NOT NULL, '
-        '"to_box_id" INTEGER NOT NULL, '
-        '"transfer_date" TEXT NOT NULL, '
-        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
-        '"fx_rate" INTEGER NOT NULL, '
-        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"state" TEXT NOT NULL DEFAULT \'draft\', '
-        '"move_id" INTEGER NULL, '
-        '"narration" TEXT NULL, '
-        '"uuid" TEXT NOT NULL, '
-        '"created_at" INTEGER NOT NULL DEFAULT 0, '
-        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
-        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
-    'CREATE TABLE IF NOT EXISTS "cash_adjustments" ('
-        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
-        '"number" TEXT NOT NULL DEFAULT \'\', '
-        '"cash_box_id" INTEGER NOT NULL, '
-        '"adjustment_date" TEXT NOT NULL, '
-        '"direction" TEXT NOT NULL, '
-        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
-        '"fx_rate" INTEGER NOT NULL, '
-        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
-        '"reason" TEXT NOT NULL DEFAULT \'\', '
-        '"state" TEXT NOT NULL DEFAULT \'draft\', '
-        '"move_id" INTEGER NULL, '
-        '"uuid" TEXT NOT NULL, '
-        '"created_at" INTEGER NOT NULL DEFAULT 0, '
-        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
-        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
-  ];
-  for (final sql in statements) {
-    await customStatement(sql);
-  }
-}
-
-/// المُشغِّلات الحواجز لجداول السندات — الحاجز الثاني المختبَر بعد فحص
-/// المحرك (نمط D-067): تجميد السند المرحّل وصفوف مطابقاته ومستندَي
-/// التحويل والتسوية، ومنع حذف المرحّل، ومنع مطابقة فاتورة مسودة،
-/// وتوسعة حاجز سالب الصندوق لتشمل الخروج بالتحويل (D-083 معروض).
-Future<void> _createVoucherTriggers() async {
-  const triggers = <String>[
-    // توسيع حاجز سالب الصندوق (05 §7-2): الخروج بالتحويل خروج فعلي من
-    // الصندوق يقبضه الحاجز ذاته — والداخل بالتحويل دخول لا حاجز عليه.
-    // إعادة تعريف موثقة للنسخة المجرَّبة بشرط أوسع وتوازن يشمل transfer_in.
-    'DROP TRIGGER IF EXISTS trg_cash_no_negative',
-    "CREATE TRIGGER trg_cash_no_negative "
-        "BEFORE INSERT ON cash_movements FOR EACH ROW "
-        "WHEN NEW.kind IN ('out', 'transfer_out') AND ("
-        "(SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
-        " WHERE id = NEW.cash_box_id)"
-        " + (SELECT COALESCE(SUM(CASE WHEN kind IN ('in', 'transfer_in') "
-        "THEN amount_base_minor ELSE -amount_base_minor END), 0) "
-        "FROM cash_movements WHERE cash_box_id = NEW.cash_box_id)"
-        " - NEW.amount_base_minor < 0) "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'رصيد الصندوق لا يكفي — منع السالب الموحد "
-        "(05 §7-2)'); END",
-    // تجميد السند المرحّل — ما رُحّل لا يعدل (07 §1.3/05 §7-4) والتصحيح
-    // بمطابقة تكميلية (س-12) أو مستند معاكس
-    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_posted_frozen "
-        "BEFORE UPDATE ON vouchers FOR EACH ROW "
-        "WHEN OLD.state = 'posted' AND ("
-        "NEW.kind IS NOT OLD.kind OR "
-        "NEW.number IS NOT OLD.number OR "
-        "COALESCE(NEW.party_id,-1) IS NOT COALESCE(OLD.party_id,-1) OR "
-        "COALESCE(NEW.direct_account_id,-1) IS NOT "
-        "COALESCE(OLD.direct_account_id,-1) OR "
-        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
-        "NEW.voucher_date IS NOT OLD.voucher_date OR "
-        "NEW.currency_id IS NOT OLD.currency_id OR "
-        "NEW.fx_rate IS NOT OLD.fx_rate OR "
-        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
-        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
-        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'السند المرحّل لا تعدل — التصحيح بمطابقة "
-        "تكميلية أو مستند معاكس (07 §1.3)'); END",
-    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_no_delete_posted "
-        "BEFORE DELETE ON vouchers FOR EACH ROW "
-        "WHEN OLD.state <> 'draft' "
-        "BEGIN SELECT RAISE(ABORT, 'السند المرحّل لا يحذف (05 §7-4)'); END",
-    // صفوف مطابقة السند المرحّل مجمدة — والمسودة تُعدَّل بحرية قبل الترحيل
-    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_insert "
-        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
-        "WHEN (SELECT state FROM vouchers WHERE id = NEW.voucher_id) "
-        "<> 'draft' "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تضاف — التصحيح "
-        "بمطابقة تكميلية (س-12)'); END",
-    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_update "
-        "BEFORE UPDATE ON voucher_allocations FOR EACH ROW "
-        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
-        "= 'posted' "
-        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تعدل'); END",
-    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_delete "
-        "BEFORE DELETE ON voucher_allocations FOR EACH ROW "
-        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
-        "= 'posted' "
-        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تحذف'); END",
-    // حاجز ثالث: لا مطابقة على فاتورة مسودة حتى لو تسللت بمعاملة خارجية
-    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_no_draft_invoice "
-        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
-        "WHEN (SELECT state FROM invoices WHERE id = NEW.invoice_id) "
-        "= 'draft' "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'لا مطابقة على فاتورة مسودة — تُرحَّل أولاً'); "
-        "END",
-    // تجميد التحويل المرحّل — قيد الطرفين لحظي لا مساس به (F-068)
-    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_posted_frozen "
-        "BEFORE UPDATE ON box_transfers FOR EACH ROW "
-        "WHEN OLD.state = 'posted' AND ("
-        "NEW.number IS NOT OLD.number OR "
-        "NEW.from_box_id IS NOT OLD.from_box_id OR "
-        "NEW.to_box_id IS NOT OLD.to_box_id OR "
-        "NEW.transfer_date IS NOT OLD.transfer_date OR "
-        "NEW.currency_id IS NOT OLD.currency_id OR "
-        "NEW.fx_rate IS NOT OLD.fx_rate OR "
-        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
-        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
-        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'التحويل المرحّل لا تعدل (07 §1.3)'); END",
-    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_no_delete_posted "
-        "BEFORE DELETE ON box_transfers FOR EACH ROW "
-        "WHEN OLD.state <> 'draft' "
-        "BEGIN SELECT RAISE(ABORT, 'التحويل المرحّل لا يحذف (05 §7-4)'); END",
-    // تجميد التسوية المرحّلة — مستند موثق مرقّم لا يعدل (س-17)
-    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_posted_frozen "
-        "BEFORE UPDATE ON cash_adjustments FOR EACH ROW "
-        "WHEN OLD.state = 'posted' AND ("
-        "NEW.number IS NOT OLD.number OR "
-        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
-        "NEW.adjustment_date IS NOT OLD.adjustment_date OR "
-        "NEW.direction IS NOT OLD.direction OR "
-        "NEW.currency_id IS NOT OLD.currency_id OR "
-        "NEW.fx_rate IS NOT OLD.fx_rate OR "
-        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
-        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
-        "NEW.reason IS NOT OLD.reason OR "
-        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
-        "BEGIN "
-        "SELECT RAISE(ABORT, 'التسوية المرحّلة لا تعدل (07 §1.3)'); END",
-    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_no_delete_posted "
-        "BEFORE DELETE ON cash_adjustments FOR EACH ROW "
-        "WHEN OLD.state <> 'draft' "
-        "BEGIN SELECT RAISE(ABORT, 'التسوية المرحّلة لا تحذف (05 §7-4)'); END",
-  ];
-  for (final sql in triggers) {
-    await customStatement(sql);
-  }
-}
-
-/// بذر دفعة السندات (س-61): تفعيل حسابَي فروق العملة الجاهزين معطلين
-/// (44 أرباحها و55 خسائرها — F-123/D-085 معروضان: تفعيل إعداداً بلا
-/// واجهة إعدادات بعد، نتيجة تقديم D-070 لتعدد العملات إلى م1-نواة).
-/// البذر فاحص الحالة ذاته فآمن التكرار.
-Future<void> _seedVoucherBaseline() async {
-  await customStatement(
-      "UPDATE accounts SET is_active = 1 "
-      "WHERE code IN ('44', '55') AND is_active = 0");
-}
 
 /// صورة سند قائم للقراءة (05 §4.2) — للقراءة والتوثيق لا للقرار.
 class VoucherDocument {
