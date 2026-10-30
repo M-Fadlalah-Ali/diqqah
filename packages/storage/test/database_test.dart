@@ -475,9 +475,10 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    // أول استخدام يثير الترقية 4→5 — createAll ثم إعادة البناء
+    // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
+    // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 5);
+    expect(migrated.schemaVersion, 6);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');
