@@ -4,6 +4,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'settings_screen.dart';
 import 'parties_screen.dart';
+import 'items_screen.dart';
 
 /// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل. الوحدات ومراحل
 /// توفرها من جدول النطاق (01 §5) حرفاً، والإعدادات متاحة فوراً بعد
@@ -22,11 +23,12 @@ class HomeScreen extends StatelessWidget {
 
   /// (اسم الوحدة، مرحلة التوفر في 01، متاحة الآن؟) — إظهار الواقع لا وعود
   /// مبكرة. الإعدادات متاحة فوراً بعد التهيئة (س-01)، والأطراف فُتحت بدفعة
-  /// م1 الأولى (F-020..F-023، س-29..س-35) — البقية في مفرغها.
+  /// م1 الأولى (F-020..F-023، س-29..س-35) والأصناف بدفعتها الثانية
+  /// (F-030/F-031، س-36..س-41) — البقية في مفرغها.
   static const List<(String, String, bool)> _modules = [
     ('الأطراف', 'متاحة الآن — بطاقة الأطراف والبحث الجامع (F-020..F-023)', true),
-    ('الأصناف', 'الإصدار 1 — البضاعة والخدمات', false),
-    ('وحدات القياس والتعبئة', 'الإصدار 2', false),
+    ('الأصناف', 'متاحة الآن — بطاقة الصنف والوحدات الأساسية (F-030/F-031)', true),
+    ('وحدات القياس والتعبئة', 'الإصدار 2 — الإدخال في م1 بالوحدة الأساسية من شاشة الأصناف', false),
     ('المستودعات', 'الإصدار 1 (واحد) → 2 (متعدد + جرد)', false),
     ('الفواتير', 'الإصدار 1', false),
     ('طلبات الشراء والبيع', 'لاحقاً — تُقيَّم بعد MVP (D-026)', false),
@@ -59,22 +61,26 @@ class HomeScreen extends StatelessWidget {
                       ? Icons.lock_outline
                       : title == 'الأطراف'
                           ? Icons.people_outline
-                          : Icons.settings_outlined,
+                          : title == 'الأصناف'
+                              ? Icons.inventory_2_outlined
+                              : Icons.settings_outlined,
                 ),
                 title: Text(title),
                 subtitle: Text(enabled ? stage : 'معطلة — متاح في $stage'),
                 enabled: enabled,
                 onTap: enabled
                     ? () {
-                        // الأطراف وحدة مفتوحة بدفعة م1 (1) — والبقية
-                        // الإعدادات وحدها حتى دفعاتها.
+                        // الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2))
+                        // وحدات مفتوحة — والبقية الإعدادات وحدها حتى دفعاتها.
                         final Widget target = title == 'الأطراف'
                             ? PartiesScreen(db: db)
-                            : SettingsScreen(
-                                db: db,
-                                dbPath: dbPath,
-                                onRestored: onRestored,
-                              );
+                            : title == 'الأصناف'
+                                ? ItemsScreen(db: db)
+                                : SettingsScreen(
+                                    db: db,
+                                    dbPath: dbPath,
+                                    onRestored: onRestored,
+                                  );
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(builder: (_) => target),
                         );

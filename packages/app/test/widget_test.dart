@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/main.dart';
+import 'package:diqqah_app/items_screen.dart';
 import 'package:diqqah_app/parties_screen.dart';
 import 'package:diqqah_app/settings_screen.dart';
 
@@ -60,7 +61,7 @@ void main() {
     expect(find.text('الأصناف'), findsOneWidget);
   });
 
-  testWidgets('F-016: الأطراف فُتحت بدفعة م1 (1) مع الإعدادات — والبقية معطلة؛\n'
+  testWidgets('F-016: الأطراف والأصناف فُتحتا بدفعتي م1 مع الإعدادات — والبقية معطلة؛\n'
       'وفتح الأطراف يفتح شاشتها والبحث فيها يعمل', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     // الإغلاق العادي يكفي — القاعدة بنمط inMemorySyncClose (س26) فلا مؤقت
@@ -74,10 +75,11 @@ void main() {
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
     expect(tiles.length, 14); // 13 وحدة + الإعدادات
     final locked = tiles.where((t) => t.enabled != true).length;
-    expect(locked, 12,
-        reason: 'الأطراف فُتحت بدفعة م1 (1) — والبقية (11 وحدة) معطلة');
+    expect(locked, 11,
+        reason: 'الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2)) فُتحتا — والبقية (10 وحدة) معطلة');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 2, reason: 'الأطراف (دفعة م1 (1)) والإعدادات (س-01)');
+    expect(open, 3,
+        reason: 'الأطراف والأصناف (دفعتي م1) والإعدادات (س-01)');
 
     // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(
@@ -94,6 +96,30 @@ void main() {
     expect(find.text('لا أطراف بعد — أضف أول طرف بزر «إضافة طرف»'),
         findsOneWidget);
     expect(find.byType(PartiesScreen), findsOneWidget);
+  });
+
+  testWidgets('دفعة م1 (2): فتح الأصناف من الشاشة الهيكلية يفتح شاشتها — '
+      'وفراغها رسالة إرشاد لا صمت', (tester) async {
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
+    await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
+
+    await tester.pumpWidget(DiqqahApp(db: db));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('الأصناف'),
+      200,
+      scrollable: find.byType(Scrollable),
+    );
+    await tester.tap(find.text('الأصناف'));
+    // ضخّات محدودة لا pumpAndSettle — نمط شاشة الأطراف الموثق (س23)
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('لا أصناف بعد — أضف أول صنف بزر «إضافة صنف»'),
+        findsOneWidget);
+    expect(find.byType(ItemsScreen), findsOneWidget);
   });
 
   testWidgets('F-012 + D-050 + D-060: زر النسخ ينتج نسخة مشفرة بمفتاح البرنامج في مجلد القاعدة',

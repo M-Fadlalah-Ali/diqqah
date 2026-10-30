@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
@@ -12,8 +16,8 @@ void main() {
     await db.close();
   });
 
-  test('نسخة المخطط = 4 (F-011: كل تغيير مخطط إصدار وترحيلة — v4 جدول الأطراف دفعة م1 (1))', () {
-    expect(db.schemaVersion, 4);
+  test('نسخة المخطط = 5 (F-011: كل تغيير مخطط إصدار وترحيلة — v5 دفعة الأصناف دفعة م1 (2): D-073..D-075)', () {
+    expect(db.schemaVersion, 5);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -246,5 +250,255 @@ void main() {
       expect(row.phone, isNull);
       expect(row.address, isNull);
     });
+  });
+
+  group('جدول الأصناف والوحدات — دفعة م1 (2): D-073..D-075 وس-36..س-41', () {
+    test('س-41: إضافة وحدة — الاسم مقلم، والاصطلاح كامل، وis_base ثابتة true (D-075)',
+        () async {
+      final id = await db.insertUnit(name: ' قطعة ');
+      final row = await (db.select(db.units)..where((t) => t.id.equals(id)))
+          .getSingle();
+      expect(row.name, 'قطعة', reason: 'الفراغات الطرفية تقلَم عند الحفظ');
+      expect(row.isBase, isTrue, reason: 'بنية لم2 — ثابتة true في م1 (D-075)');
+      expect(row.uuid, isNotEmpty);
+      expect(row.createdAt, greaterThan(0));
+      expect(row.isDeleted, isFalse);
+    });
+
+    test('تفرد اسم الوحدة حرفياً قيد تخزين — تكرار «قطعة» يرفض من القاعدة (D-074)',
+        () async {
+      await db.insertUnit(name: 'قطعة');
+      expect(
+        () => db.insertUnit(name: 'قطعة'),
+        throwsA(anything),
+      );
+    });
+
+    test('س-36: إدراج صنف بضاعة كامل — الكود مقلم، والتصنيف الفارغ null، والمعرف هو الهوية (D-073)',
+        () async {
+      final unitId = await db.insertUnit(name: 'قطعة');
+      final id = await db.insertItem(
+        sku: ' 100 ',
+        name: ' زيت محلي ',
+        category: '  ',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 250000,
+        salePriceMinor: 275000,
+        priceCurrencyId: 1,
+      );
+      final row = await (db.select(db.items)
+            ..where((t) => t.id.equals(id)))
+          .getSingle();
+      expect(row.id, id, reason: 'D-073: المعرف الآلي هو الهوية الدائمة');
+      expect(row.sku, '100', reason: 'الكود يقلَم لا يُمس جسمه');
+      expect(row.name, 'زيت محلي');
+      expect(row.category, isNull, reason: 'التصنيف الفارغ يسجل null');
+      expect(row.kind, 'good');
+      expect(row.baseUnitId, unitId, reason: 'F-031: الوحدة إلزامية بالاختيار');
+      expect(row.purchasePriceMinor, 250000, reason: 'س7: وحدات صغرى صحيحة');
+      expect(row.priceCurrencyId, 1, reason: 'D-066: لا فراغ للعملة');
+      expect(row.isActive, isTrue);
+      expect(row.uuid, isNotEmpty);
+    });
+
+    test('التفرد الحرفي للكود قيد تخزين — تكرار 100 يرفض من القاعدة؛\n'
+        'و«0100» كود آخر مشروع بلا نزع أصفار (D-073)', () async {
+      final unitId = await db.insertUnit(name: 'قطعة');
+      await db.insertItem(
+        sku: '100',
+        name: 'زيت محلي',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 0,
+        salePriceMinor: 0,
+        priceCurrencyId: 1,
+      );
+      expect(
+        () => db.insertItem(
+              sku: '100',
+              name: 'آخر',
+              kind: 'good',
+              baseUnitId: unitId,
+              purchasePriceMinor: 0,
+              salePriceMinor: 0,
+              priceCurrencyId: 1,
+            ),
+        throwsA(anything),
+      );
+      // «0100» حرفياً مختلف — كود مشروع (نزع الأصفار قرار أطراف خاص)
+      await db.insertItem(
+        sku: '0100',
+        name: 'كود بأصفار',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 0,
+        salePriceMinor: 0,
+        priceCurrencyId: 1,
+      );
+    });
+
+    test('س-39: تعديل الصنف بالمرجع — الكود خارج التوقيع فلا مسار تحديث له (D-073)',
+        () async {
+      final unitId = await db.insertUnit(name: 'قطعة');
+      final id = await db.insertItem(
+        sku: '100',
+        name: 'زيت محلي',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 250000,
+        salePriceMinor: 275000,
+        priceCurrencyId: 1,
+      );
+      final before = await (db.select(db.items)
+            ..where((t) => t.id.equals(id)))
+          .getSingle();
+      await db.updateItemDetails(
+        before,
+        name: 'زيت محلي فاخر',
+        category: 'مواد غذائية',
+        kind: 'service',
+        baseUnitId: unitId,
+        purchasePriceMinor: 0,
+        salePriceMinor: 300000,
+        priceCurrencyId: 1,
+      );
+      final after = await (db.select(db.items)
+            ..where((t) => t.id.equals(id)))
+          .getSingle();
+      expect(after.id, id);
+      expect(after.sku, '100', reason: 'الكود لا يعدل بعد الحفظ');
+      expect(after.name, 'زيت محلي فاخر');
+      expect(after.category, 'مواد غذائية');
+      expect(after.kind, 'service');
+      expect(after.salePriceMinor, 300000);
+      expect(after.updatedAt, greaterThanOrEqualTo(before.updatedAt));
+    });
+
+    test('س-40: التعطيل بطي is_active بلا حذف — الصف باقٍ كامل بياناته',
+        () async {
+      final unitId = await db.insertUnit(name: 'قطعة');
+      final id = await db.insertItem(
+        sku: '100',
+        name: 'زيت محلي',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 0,
+        salePriceMinor: 0,
+        priceCurrencyId: 1,
+      );
+      await db.setItemActive(id, active: false);
+      final rows = await db.select(db.items).get();
+      expect(rows, hasLength(1), reason: 'لا حذف فيزيائي ولا منطقي');
+      expect(rows.single.isActive, isFalse);
+      expect(rows.single.name, 'زيت محلي');
+      await db.setItemActive(id, active: true);
+      expect(
+          (await (db.select(db.items)..where((t) => t.id.equals(id)))
+                .getSingle())
+              .isActive,
+          isTrue,
+          reason: 'إعادة التفعيل ممكنة متى شئت');
+    });
+
+    test('F-035: جدول item_barcode بنية جاهزة — يُنشأ وباركوده فريد وقيمة unit_id صفرية',
+        () async {
+      final unitId = await db.insertUnit(name: 'قطعة');
+      final itemId = await db.insertItem(
+        sku: '100',
+        name: 'زيت محلي',
+        kind: 'good',
+        baseUnitId: unitId,
+        purchasePriceMinor: 0,
+        salePriceMinor: 0,
+        priceCurrencyId: 1,
+      );
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.into(db.itemBarcodes).insert(
+            ItemBarcodesCompanion.insert(
+              itemId: itemId,
+              barcode: '6290000000001',
+              uuid: 'uuid-bc-001',
+              createdAt: Value(now),
+              updatedAt: Value(now),
+            ),
+          );
+      final row = await db.select(db.itemBarcodes).getSingle();
+      expect(row.unitId, isNull, reason: 'وحدة القراءة بنية م2');
+      expect(
+        () => db.into(db.itemBarcodes).insert(
+              ItemBarcodesCompanion.insert(
+                itemId: itemId,
+                barcode: '6290000000001',
+                uuid: 'uuid-bc-002',
+                createdAt: Value(now),
+                updatedAt: Value(now),
+              ),
+            ),
+        throwsA(anything),
+        reason: 'الباركود فريد قيد تخزين',
+      );
+    });
+  });
+
+  test('ترحيلة 4→5: إعادة بناء items بإضافة id تُعيد بيانات القائمة كاملة '
+      'وتُبنى units وitem_barcodes جديدين (D-073/F-011)', () async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_v5_mig_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final dbPath = p.join(tempDir.path, 'migrate.db');
+    // قاعدة v4 خام: جدول items بالشكل القديم (sku مفتاح أساس، بلا id)
+    // كما يولده drift قبل الدفعة، وuser_version=4 — والصفوف الأخرى
+    // غير ضرورية للترحيلة المقصودة (createAll يبني الباقي).
+    final raw = sqlite3.open(dbPath);
+    raw.execute('CREATE TABLE "items" ('
+        '"sku" TEXT NOT NULL PRIMARY KEY,'
+        '"name" TEXT NOT NULL,'
+        '"category" TEXT NULL,'
+        '"kind" TEXT NOT NULL,'
+        '"base_unit_id" INTEGER NOT NULL,'
+        '"purchase_price_minor" INTEGER NOT NULL,'
+        '"sale_price_minor" INTEGER NOT NULL,'
+        '"price_currency_id" INTEGER NOT NULL,'
+        '"default_tax_id" INTEGER NULL,'
+        '"is_active" INTEGER NOT NULL DEFAULT 0,'
+        '"uuid" TEXT NOT NULL,'
+        '"created_at" INTEGER NOT NULL DEFAULT 0,'
+        '"updated_at" INTEGER NOT NULL DEFAULT 0,'
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)');
+    raw.execute("INSERT INTO items (sku, name, kind, base_unit_id, "
+        "purchase_price_minor, sale_price_minor, price_currency_id, "
+        "is_active, uuid) VALUES ('SKU-OLD', 'بضاعة قبل الترحيل', 'good', 1, "
+        "250000, 275000, 1, 1, 'uuid-old-1')");
+    raw.execute('PRAGMA user_version = 4');
+    raw.dispose();
+
+    final migrated = DiqqahDatabase(filePath: dbPath);
+    addTearDown(migrated.close);
+    // أول استخدام يثير الترقية 4→5 — createAll ثم إعادة البناء
+    await migrated.select(migrated.items).get();
+    expect(migrated.schemaVersion, 5);
+
+    final rows = await migrated.select(migrated.items).get();
+    expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');
+    expect(rows.first.sku, 'SKU-OLD');
+    expect(rows.first.name, 'بضاعة قبل الترحيل');
+    expect(rows.first.purchasePriceMinor, 250000);
+    expect(rows.first.id, greaterThan(0),
+        reason: 'D-073: المعرّف الآلي فيبقى من الترحيلة');
+    expect(rows.first.uuid, 'uuid-old-1', reason: 'الاصطلاح محفوظ بايتاً');
+
+    // والجداول الجديدة تعمل فوراً — إدراج وحدة وصنف على المخطط الجديد
+    final unitId = await migrated.insertUnit(name: 'قطعة');
+    final newId = await migrated.insertItem(
+      sku: 'SKU-NEW',
+      name: 'صنف بعد الترحيل',
+      kind: 'service',
+      baseUnitId: unitId,
+      purchasePriceMinor: 0,
+      salePriceMinor: 5000,
+      priceCurrencyId: 1,
+    );
+    expect(newId, greaterThan(0));
+    expect(await migrated.select(migrated.units).get(), hasLength(1));
   });
 }
