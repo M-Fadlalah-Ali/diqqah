@@ -237,7 +237,7 @@ void main() {
     expect(inv.totalDocMinor, 250000);
     expect(inv.totalBaseMinor, 250000);
     expect(inv.moveId, isNotNull);
-    expect(db.invoiceDisplayLabel(inv), 'فاتورة شراء ${f.year}/000001');
+    expect(invoiceDisplayLabel(inv), 'فاتورة شراء ${f.year}/000001');
 
     final acc113 = await accountIdByCode(db, '113');
     final acc211 = await accountIdByCode(db, '211');
@@ -417,7 +417,7 @@ void main() {
     final retInv = (await db.invoiceById(firstReturn))!;
     expect(retInv.state, 'posted');
     expect(retInv.number, '${f.year}/000001');
-    expect(db.invoiceDisplayLabel(retInv), 'مردود بيع ${f.year}/000001');
+    expect(invoiceDisplayLabel(retInv), 'مردود بيع ${f.year}/000001');
 
     // الدخول بلقطة كلفة خروج الأصل (25,000×2 = 50,000) والنظير صفر
     // لأن المتوسط على مخزون فارغ صفر — فالفرق كله على 58 (م-25/س-56)

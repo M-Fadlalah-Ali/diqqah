@@ -1562,159 +1562,6 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   Future<(int, int)> trialBalanceTotalsOf() async {
     return trialBalanceTotals(await postedLedgerLines());
   }
-}
-
-/// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
-/// بيانات لا نصوص جاهزة) وأوصافها العربية تخدم صفوف فشل التنفيذ حصراً؛
-/// الواجهة حرية صياغتها المعروضة.
-class LedgerValidationException implements Exception {
-  final List<MoveValidationError> errors;
-
-  const LedgerValidationException(this.errors);
-
-  @override
-  String toString() =>
-      'رفض مدقق الدفتر: ${errors.map(describeMoveValidationError).join('؛ ')}';
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// دفعة الفواتير — دفعة م1 الرابعة (س-51..س-60، D-079..D-082 معروضة):
-// جداول v7 تُدار SQL خاماً بنمط المُشغِّلات المجرَّب (D-079) — بلا كود
-// مولد: إدراجات صريحة آمنة التكرار، وحواجز القاعدة ثانية بعد فحص
-// المحرك (07 §2.2 نمط D-067)، والبذر فاحص الفراغ ذاته.
-// ═══════════════════════════════════════════════════════════════════
-
-/// صورة عملة قائمة (05 §3.5/F-120/D-070).
-class CurrencyRow {
-  final int id;
-  final String code;
-  final String name;
-  final int minorUnits;
-  final bool isBase;
-
-  const CurrencyRow({
-    required this.id,
-    required this.code,
-    required this.name,
-    required this.minorUnits,
-    required this.isBase,
-  });
-}
-
-/// صورة مستودع (05 §3.3) — المستودع الواحد في م1 ببنية تعددية.
-class WarehouseRow {
-  final int id;
-  final String name;
-  final bool isActive;
-
-  const WarehouseRow({
-    required this.id,
-    required this.name,
-    required this.isActive,
-  });
-}
-
-/// صورة صندوق نقدي (05 §3.3) — كل صندوق عملته واحدة، وحسابه الورقي
-/// تحت 111 (03 §3: الصندوق الرئيسي 1111 وكل صندوق جديد حسابه 111x).
-/// `account_id` إضافة تنفيذية لقاعدة 03 نفسها («يُنشأ معه حساب ورقي لكل
-/// صندوق») — 05 §3.3 يعدد الحقول الجوهرية لا الحصرية (D-079 معروض).
-class CashBoxRow {
-  final int id;
-  final String name;
-  final int currencyId;
-  final int accountId;
-  final int openingBalanceBaseMinor;
-
-  const CashBoxRow({
-    required this.id,
-    required this.name,
-    required this.currencyId,
-    required this.accountId,
-    required this.openingBalanceBaseMinor,
-  });
-}
-
-/// صورة فاتورة قائمة (05 §4.1) — للقراءة والتوثيق لا للقرار.
-class InvoiceDocument {
-  final int id;
-  final String kind;
-  final String number;
-  final int? partyId;
-  final int? cashBoxId;
-  final int? warehouseId;
-  final String invoiceDate;
-  final String? dueDate;
-  final int currencyId;
-  final int fxRate;
-  final int discountRate;
-  final int subtotalDocMinor;
-  final int discountDocMinor;
-  final int totalDocMinor;
-  final int totalBaseMinor;
-  final String state;
-  final int? moveId;
-  final int? originalInvoiceId;
-  final String? narration;
-
-  const InvoiceDocument({
-    required this.id,
-    required this.kind,
-    required this.number,
-    required this.partyId,
-    required this.cashBoxId,
-    required this.warehouseId,
-    required this.invoiceDate,
-    required this.dueDate,
-    required this.currencyId,
-    required this.fxRate,
-    required this.discountRate,
-    required this.subtotalDocMinor,
-    required this.discountDocMinor,
-    required this.totalDocMinor,
-    required this.totalBaseMinor,
-    required this.state,
-    required this.moveId,
-    required this.originalInvoiceId,
-    required this.narration,
-  });
-
-  bool get isCommitted =>
-      state == 'posted' || state == 'paid' || state == 'partially_paid';
-}
-
-/// صورة سطر فاتورة قائمة (05 §4.1) — مع مكافئه التوثيقي بعملة المستند
-/// (F-122/D-082: `line_total_doc_minor` بجانب `line_total_base_minor`).
-class InvoiceLineDocument {
-  final int id;
-  final int invoiceId;
-  final int itemId;
-  final int unitId;
-  final int factorAtEntry;
-  final int qty;
-  final int qtyBase;
-  final int unitPriceMinor;
-  final int discountMinor;
-  final int taxRate;
-  final int lineTotalDocMinor;
-  final int lineTotalBaseMinor;
-  final String uuid;
-
-  const InvoiceLineDocument({
-    required this.id,
-    required this.invoiceId,
-    required this.itemId,
-    required this.unitId,
-    required this.factorAtEntry,
-    required this.qty,
-    required this.qtyBase,
-    required this.unitPriceMinor,
-    required this.discountMinor,
-    required this.taxRate,
-    required this.lineTotalDocMinor,
-    required this.lineTotalBaseMinor,
-    required this.uuid,
-  });
-}
 
 /// إنشاء جداول الفواتير الثمانية (05 §3.3/§4/§5 + أعمدة الاصطلاح D-055)
 /// — IF NOT EXISTS فآمنة التكرار أي كان مسار الوصول (onCreate أو 6→7).
@@ -1975,30 +1822,6 @@ Future<void> _seedInvoiceBaseline() async {
         ],
       );
     }
-  }
-}
-
-// ─── محرك الفواتير: القراءة الداخلية والتحقق والتخطيط والترحيل ───
-
-/// قيمة مخزون محاكاة داخل التخطيط — تُقرأ مرة وتتطور بكل سطر على حدة
-/// فتطابق الكتابة المتسلسلة حرفاً (تكلفة الخروج بالترتيب — D-067).
-class _StockSim {
-  final int warehouseId;
-  final Map<int, (int, int)> _byItem = {};
-
-  _StockSim(this.warehouseId);
-
-  Future<(int, int)> of(int itemId) async {
-    final existing = _byItem[itemId];
-    if (existing != null) return existing;
-    final balance = await _stockBalanceTx(itemId, warehouseId);
-    _byItem[itemId] = balance;
-    return balance;
-  }
-
-  void apply(int itemId, int qtyDelta, int valueDelta) {
-    final current = _byItem[itemId] ?? (0, 0);
-    _byItem[itemId] = (current.$1 + qtyDelta, current.$2 + valueDelta);
   }
 }
 
@@ -2339,7 +2162,7 @@ Future<List<_StockLinePlan>> _planStockLines(
 ) async {
   final plans = <_StockLinePlan>[];
   if (draft.warehouseId == null) return plans;
-  final sim = _StockSim(draft.warehouseId!);
+  final sim = _StockSim(_stockBalanceTx, draft.warehouseId!);
   final origMoveQty = <int, int>{};
   final origMoveVal = <int, int>{};
   final returnedQty = <int, int>{};
@@ -3064,6 +2887,186 @@ Future<List<CurrencyRow>> currenciesOf() async {
         isBase: (r.data['is_base'] as int) == 1,
       ),
   ];
+}
+}
+
+/// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
+/// بيانات لا نصوص جاهزة) وأوصافها العربية تخدم صفوف فشل التنفيذ حصراً؛
+/// الواجهة حرية صياغتها المعروضة.
+class LedgerValidationException implements Exception {
+  final List<MoveValidationError> errors;
+
+  const LedgerValidationException(this.errors);
+
+  @override
+  String toString() =>
+      'رفض مدقق الدفتر: ${errors.map(describeMoveValidationError).join('؛ ')}';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// دفعة الفواتير — دفعة م1 الرابعة (س-51..س-60، D-079..D-082 معروضة):
+// جداول v7 تُدار SQL خاماً بنمط المُشغِّلات المجرَّب (D-079) — بلا كود
+// مولد: إدراجات صريحة آمنة التكرار، وحواجز القاعدة ثانية بعد فحص
+// المحرك (07 §2.2 نمط D-067)، والبذر فاحص الفراغ ذاته.
+// ═══════════════════════════════════════════════════════════════════
+
+/// صورة عملة قائمة (05 §3.5/F-120/D-070).
+class CurrencyRow {
+  final int id;
+  final String code;
+  final String name;
+  final int minorUnits;
+  final bool isBase;
+
+  const CurrencyRow({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.minorUnits,
+    required this.isBase,
+  });
+}
+
+/// صورة مستودع (05 §3.3) — المستودع الواحد في م1 ببنية تعددية.
+class WarehouseRow {
+  final int id;
+  final String name;
+  final bool isActive;
+
+  const WarehouseRow({
+    required this.id,
+    required this.name,
+    required this.isActive,
+  });
+}
+
+/// صورة صندوق نقدي (05 §3.3) — كل صندوق عملته واحدة، وحسابه الورقي
+/// تحت 111 (03 §3: الصندوق الرئيسي 1111 وكل صندوق جديد حسابه 111x).
+/// `account_id` إضافة تنفيذية لقاعدة 03 نفسها («يُنشأ معه حساب ورقي لكل
+/// صندوق») — 05 §3.3 يعدد الحقول الجوهرية لا الحصرية (D-079 معروض).
+class CashBoxRow {
+  final int id;
+  final String name;
+  final int currencyId;
+  final int accountId;
+  final int openingBalanceBaseMinor;
+
+  const CashBoxRow({
+    required this.id,
+    required this.name,
+    required this.currencyId,
+    required this.accountId,
+    required this.openingBalanceBaseMinor,
+  });
+}
+
+/// صورة فاتورة قائمة (05 §4.1) — للقراءة والتوثيق لا للقرار.
+class InvoiceDocument {
+  final int id;
+  final String kind;
+  final String number;
+  final int? partyId;
+  final int? cashBoxId;
+  final int? warehouseId;
+  final String invoiceDate;
+  final String? dueDate;
+  final int currencyId;
+  final int fxRate;
+  final int discountRate;
+  final int subtotalDocMinor;
+  final int discountDocMinor;
+  final int totalDocMinor;
+  final int totalBaseMinor;
+  final String state;
+  final int? moveId;
+  final int? originalInvoiceId;
+  final String? narration;
+
+  const InvoiceDocument({
+    required this.id,
+    required this.kind,
+    required this.number,
+    required this.partyId,
+    required this.cashBoxId,
+    required this.warehouseId,
+    required this.invoiceDate,
+    required this.dueDate,
+    required this.currencyId,
+    required this.fxRate,
+    required this.discountRate,
+    required this.subtotalDocMinor,
+    required this.discountDocMinor,
+    required this.totalDocMinor,
+    required this.totalBaseMinor,
+    required this.state,
+    required this.moveId,
+    required this.originalInvoiceId,
+    required this.narration,
+  });
+
+  bool get isCommitted =>
+      state == 'posted' || state == 'paid' || state == 'partially_paid';
+}
+
+/// صورة سطر فاتورة قائمة (05 §4.1) — مع مكافئه التوثيقي بعملة المستند
+/// (F-122/D-082: `line_total_doc_minor` بجانب `line_total_base_minor`).
+class InvoiceLineDocument {
+  final int id;
+  final int invoiceId;
+  final int itemId;
+  final int unitId;
+  final int factorAtEntry;
+  final int qty;
+  final int qtyBase;
+  final int unitPriceMinor;
+  final int discountMinor;
+  final int taxRate;
+  final int lineTotalDocMinor;
+  final int lineTotalBaseMinor;
+  final String uuid;
+
+  const InvoiceLineDocument({
+    required this.id,
+    required this.invoiceId,
+    required this.itemId,
+    required this.unitId,
+    required this.factorAtEntry,
+    required this.qty,
+    required this.qtyBase,
+    required this.unitPriceMinor,
+    required this.discountMinor,
+    required this.taxRate,
+    required this.lineTotalDocMinor,
+    required this.lineTotalBaseMinor,
+    required this.uuid,
+  });
+}
+
+// ─── محرك الفواتير: القراءة الداخلية والتحقق والتخطيط والترحيل ───
+
+/// قيمة مخزون محاكاة داخل التخطيط — تُقرأ مرة وتتطور بكل سطر على حدة
+/// فتطابق الكتابة المتسلسلة حرفاً (تكلفة الخروج بالترتيب — D-067).
+class _StockSim {
+  /// قارئ رصيد الصنف — يمرر من محرك الفواتير (نسخ دالة عضو الفئة) كي
+  /// يبقى الصنف أعلى المستوى بلا اعتماد على مثال القاعدة.
+  final Future<(int, int)> Function(int itemId, int warehouseId) readBalance;
+  final int warehouseId;
+  final Map<int, (int, int)> _byItem = {};
+
+  _StockSim(this.readBalance, this.warehouseId);
+
+  Future<(int, int)> of(int itemId) async {
+    final existing = _byItem[itemId];
+    if (existing != null) return existing;
+    final balance = await readBalance(itemId, warehouseId);
+    _byItem[itemId] = balance;
+    return balance;
+  }
+
+  void apply(int itemId, int qtyDelta, int valueDelta) {
+    final current = _byItem[itemId] ?? (0, 0);
+    _byItem[itemId] = (current.$1 + qtyDelta, current.$2 + valueDelta);
+  }
 }
 
 /// الصيغة المعروضة لرقم الفاتورة (م-44/D-071): «فاتورة بيع 2026/000001».

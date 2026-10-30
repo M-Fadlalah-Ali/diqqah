@@ -54,12 +54,13 @@ void main() {
         ],
       );
       final totals = computeInvoiceTotals(draft);
-      expect(totals.subtotalDocMinor, 75000 + 10000);
+      expect(totals.subtotalDocMinor, 90000,
+          reason: '75,000 (زيت بعد خصمه) + 15,000 (تغليف)');
       expect(totals.discountDocMinor, 0);
-      expect(totals.totalDocMinor, 85000);
+      expect(totals.totalDocMinor, 90000);
       expect(totals.lines[0].netDocMinor, 75000);
       expect(totals.lines[1].netDocMinor, 15000);
-      expect(totals.totalBaseMinor, 85000);
+      expect(totals.totalBaseMinor, 90000);
     });
     test('خصم فاتورة 10% على مجاميع كسرية — المجموع يستوي حرفاً', () {
       // 30,003 + 9,999 = 40,002؛ خصم 10% = 4,000 (4,000.2 → 4,000)
