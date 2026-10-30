@@ -2372,7 +2372,7 @@ Future<int> createInvoiceDraft(InvoiceDraft draft) async {
       'discount_rate, subtotal_doc_minor, discount_doc_minor, '
       'total_doc_minor, total_base_minor, state, move_id, '
       'original_invoice_id, narration, uuid, created_at, updated_at, '
-      "is_deleted) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+      "is_deleted) VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
       "'draft', NULL, ?, ?, ?, ?, ?, 0)",
       [
         draft.kind.storageValue,
