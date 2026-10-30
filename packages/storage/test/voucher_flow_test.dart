@@ -225,7 +225,7 @@ void main() {
         "INSERT INTO cash_movements (cash_box_id, kind, amount_minor, "
         "amount_base_minor, fx_rate, ref_doc_type, ref_doc_id, uuid) "
         "VALUES (?, 'transfer_out', 1000, 1000, 1000000, 'x', 1, 'g')",
-        [Variable.withInt(boxId)],
+        [boxId],
       ),
       throwsA(anything),
     );
@@ -331,6 +331,7 @@ void main() {
   test('س-64 قبض جزئي ثم تكميل مع فائض «رصيد مقدّم» وحاجزا المطابقة',
       () async {
     final f = await buildFixture(db);
+    await f.purchaseCredit(lines: [f.line(f.oilId, 10, 25000)]);
     final saleId = await f.saleCredit(lines: [f.line(f.oilId, 4, 40000)]);
     await f.receiptFromCustomer(
         amount: 100000,
@@ -459,7 +460,7 @@ void main() {
     // الحاجز الثاني: حساب معطل يرفض
     final acc549 = await accountIdByCode(db, '549');
     await db.customStatement('UPDATE accounts SET is_active = 0 WHERE id = ?',
-        [Variable.withInt(acc549)]);
+        [acc549]);
     expect(
         () => directPayment(acc549, 5000),
         throwsA(isA<VoucherValidationException>()));
@@ -480,6 +481,7 @@ void main() {
       () async {
     final f = await buildFixture(db, funded: false);
     final usdBoxId = await db.createCashBox(name: 'صندوق الدولار', currencyId: 2);
+    await f.purchaseCredit(lines: [f.line(f.oilId, 10, 25000)]);
     final acc44 = await accountIdByCode(db, '44');
     final acc55 = await accountIdByCode(db, '55');
     final acc112 = await accountIdByCode(db, '112');
@@ -564,7 +566,8 @@ void main() {
     expect(transferRows.data['state'], 'posted');
     expect(transferRows.data['number'], '${f.year}/000001');
     final lines = await moveLinesOf(db, transferRows.data['move_id'] as int);
-    expect(lines[0]['account_id'], await accountIdByCode(db, '1113'));
+    expect(lines[0]['account_id'], await accountIdByCode(db, '1112'),
+        reason: 'صندوق الفرع أُنشئ أولاً فيأخذ 1112 والدولاري يليه 1113');
     expect(lines[0]['debit_minor'], 100000);
     expect(lines[1]['account_id'], await accountIdByCode(db, '1111'));
     expect(lines[1]['credit_minor'], 100000);
@@ -672,7 +675,7 @@ void main() {
     await expectLater(
       db.customStatement(
         'UPDATE cash_adjustments SET amount_doc_minor = 1 WHERE id = ?',
-        [Variable.withInt(adjId)],
+        [adjId],
       ),
       throwsA(anything),
     );
@@ -681,6 +684,7 @@ void main() {
   test('الحواجز (المُشغِّلات): السند المرحّل ومطابقاته مجمدة والمسودة تُحذف',
       () async {
     final f = await buildFixture(db);
+    await f.purchaseCredit(lines: [f.line(f.oilId, 10, 25000)]);
     final saleId = await f.saleCredit(lines: [f.line(f.oilId, 4, 40000)]);
     final voucherId = await f.receiptFromCustomer(
         amount: 100000,
@@ -689,14 +693,14 @@ void main() {
     await expectLater(
       db.customStatement(
         'UPDATE vouchers SET amount_doc_minor = 1 WHERE id = ?',
-        [Variable.withInt(voucherId)],
+        [voucherId],
       ),
       throwsA(anything),
     );
     await expectLater(
       db.customStatement(
         'DELETE FROM vouchers WHERE id = ?',
-        [Variable.withInt(voucherId)],
+        [voucherId],
       ),
       throwsA(anything),
     );
@@ -704,7 +708,7 @@ void main() {
       db.customStatement(
         'UPDATE voucher_allocations SET applied_doc_minor = 1 '
         'WHERE voucher_id = ?',
-        [Variable.withInt(voucherId)],
+        [voucherId],
       ),
       throwsA(anything),
     );
@@ -720,7 +724,7 @@ void main() {
       db.customStatement(
         'INSERT INTO voucher_allocations (voucher_id, invoice_id, '
         "applied_doc_minor, applied_base_minor, uuid) VALUES (?, ?, 1000, 0, 'g')",
-        [Variable.withInt(voucherId), Variable.withInt(draftSale)],
+        [voucherId, draftSale],
       ),
       throwsA(anything),
     );
