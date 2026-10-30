@@ -558,7 +558,16 @@ class AppMeta extends Table {
 /// مُشغِّلات حواجز (منع سالب المخزون والصندوق، تجميد حركات المخزون
 /// والصندوق، تجميد الفاتورة المرحّلة وأسطرها، منع حذفها) + بذر
 /// العملتين SYP/USD (D-070/F-120) والمستودع الافتراضي والصندوق
-/// الرئيسي على 1111.
+/// والصندوق الرئيسي على 1111.
+///
+/// v8 (دفعة السندات والصندوق — س-61..س-70/D-083..D-087 معروضة):
+/// أربعة جداول جديدة خالصة (vouchers/voucher_allocations/
+/// box_transfers/cash_adjustments — 05 §4.2 + س-16/س-17) تُدار SQL
+/// خاماً بنمط D-079 + مُشغِّلات حواجزها (تجميد السند المرحّل
+/// ومطابقاته ومستندَي التحويل والتسوية، ومنع حذف المرحّل، ومنع
+/// مطابقة فاتورة مسودة، وتوسعة حاجز سالب الصندوق للخروج بالتحويل)
+/// + بذر تفعيل حسابَي فروق العملة 44/55 (F-123/D-085 معروضان) —
+/// ومحرك السندات والتحويل والتسوية كامل الفحص خلفياً.
 @DriftDatabase(tables: [
   Items,
   Roles,
@@ -608,7 +617,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -617,8 +626,11 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createLedgerTriggers();
           await _createInvoiceTables();
           await _createInvoiceTriggers();
+          await _createVoucherTables();
+          await _createVoucherTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
+          await _seedVoucherBaseline();
         },
         onUpgrade: (m, from, to) async {
           // 1→2: جداول التهيئة جديدة خالصة — createAll يبني الناقص بـ
@@ -757,6 +769,24 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               await _createInvoiceTriggers();
               await _seedAccountingBaseline();
               await _seedInvoiceBaseline();
+            }
+            // 7→8 (ومن إصدار أدنى مباشرة): دفعة السندات والصندوق
+            // (D-083..D-087 معروضة) — أربعة جداول جديدة خالصة SQL
+            // خاماً (نمط v7 المجرَّب: آمنة التكرار بـIF NOT EXISTS ولا
+            // مساس بجداول قائمة) ثم مُشغِّلات حواجزها — وتوسعة حاجز
+            // سالب الصندوق للخروج بالتحويل — ثم بذر تفعيل حسابَي
+            // فروق العملة (44/55 — F-123/D-085). البذر فاحص الحالة
+            // ذاته فآمن التكرار أي كان مسار الوصول.
+            if (version == 8) {
+              await m.createAll();
+              await _createLedgerTriggers();
+              await _createInvoiceTables();
+              await _createInvoiceTriggers();
+              await _createVoucherTables();
+              await _createVoucherTriggers();
+              await _seedAccountingBaseline();
+              await _seedInvoiceBaseline();
+              await _seedVoucherBaseline();
             }
           }
         },
@@ -1909,7 +1939,7 @@ Future<int> _cashBoxBalanceTx(int boxId) async {
   final rows = await customSelect(
     "SELECT (SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
     "WHERE id = ?1) + "
-    "(SELECT COALESCE(SUM(CASE WHEN kind = 'in' THEN amount_base_minor "
+    "(SELECT COALESCE(SUM(CASE WHEN kind IN ('in', 'transfer_in') THEN amount_base_minor "
     "ELSE -amount_base_minor END), 0) FROM cash_movements "
     "WHERE cash_box_id = ?1) AS balance",
     variables: [Variable.withInt(boxId)],
@@ -2863,6 +2893,1189 @@ Future<List<CurrencyRow>> currenciesOf() async {
       ),
   ];
 }
+
+  // ═══ دفعة السندات والصندوق (5) — س-61..س-70 / D-083..D-087 معروضة ═══
+  // المحرك على نمط دفعة الفواتير: المدقق البنيوي في المجال والفحوص
+  // المحركية هنا على ما خُزّن لا على ما قيل، والحاجز الثاني مُشغِّلات
+  // القاعدة، وكل ترحيل معاملة واحدة أي رفض يتراجع كله بما فيه العدّاد.
+
+  /// س-62: إنشاء صندوق جديد بحسابه الورقي 111x التالي (03 §3: «يُنشأ معه
+  /// حساب ورقي لكل صندوق جديد (1112, 1113...)» — D-086 معروض): حساب ورقي
+  /// مفعّل تحت 111 بعمته اسم الصندوق، وصندوق برصيد افتتاحي صفر وعملة
+  /// واحدة لا تتغير (سند كل صندوق بعملته).
+  Future<int> createCashBox({
+    required String name,
+    required int currencyId,
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw StateError('اسم الصندوق إلزامي');
+    }
+    final cur = await customSelect(
+      'SELECT id FROM currencies WHERE id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(currencyId)],
+    ).get();
+    if (cur.isEmpty) {
+      throw StateError('عملة الصندوق غير معروفة (س-03: «صندوق غير معرف»)');
+    }
+    final dup = await customSelect(
+      'SELECT id FROM cash_boxes WHERE name = ? AND is_deleted = 0',
+      variables: [Variable.withString(trimmed)],
+    ).get();
+    if (dup.isNotEmpty) {
+      throw StateError('اسم الصندوق «$trimmed» مستخدم سلفاً');
+    }
+    return transaction(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final maxRow = await customSelect(
+        "SELECT MAX(CAST(code AS INTEGER)) AS m FROM accounts "
+        "WHERE is_leaf = 1 AND code LIKE '111_'",
+      ).getSingle();
+      final nextCode = (maxRow.data['m'] as int? ?? 1110) + 1;
+      final parentId = await _accountIdByCodeTx('111');
+      final accountId = await into(accounts).insert(
+        AccountsCompanion.insert(
+          code: '$nextCode',
+          name: trimmed,
+          type: 'asset',
+          normalSide: 'debit',
+          parentId: Value(parentId),
+          isLeaf: true,
+          isActive: true,
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+      await customStatement(
+        'INSERT INTO cash_boxes (name, currency_id, account_id, '
+        'opening_balance_base_minor, uuid, created_at, updated_at, is_deleted) '
+        'VALUES (?, ?, ?, 0, ?, ?, ?, 0)',
+        [trimmed, currencyId, accountId, const Uuid().v4(), now, now],
+      );
+      return (await customSelect('SELECT last_insert_rowid() AS id')
+              .getSingle())
+          .data['id'] as int;
+    });
+  }
+
+  /// س-62: تعطيل صندوق آمن — بلا رصيد (03 §6-3: التعطيل آمن بلا أرصدة
+  /// قائمة) فيعطَّل حسابه الورقي فيختفي من الاختيار ولا يقيد عليه
+  /// (D-086 معروض).
+  Future<void> disableCashBox(int boxId) async {
+    final box = await _cashBoxByIdTx(boxId);
+    if (box == null) {
+      throw StateError('لا صندوق بالمعرف $boxId');
+    }
+    final balance = await _cashBoxBalanceTx(boxId);
+    if (balance != 0) {
+      throw StateError(
+          'الصندوق «${box.name}» برصيد قائم — تعطيله غير آمن (03 §6-3): '
+          'يُصفَّر أولاً بمستند قبض أو صرف أو تحويل أو تسوية');
+    }
+    await customStatement(
+      'UPDATE accounts SET is_active = 0, updated_at = ? WHERE id = ?',
+      [DateTime.now().millisecondsSinceEpoch, box.accountId],
+    );
+  }
+
+  /// س-63..س-67: إنشاء مسودة سند — المدقق البنيوي ثم الفحوص المحركية،
+  /// وصفوف المطابقة صفوف مسودة تُثبت مكافئاتها عند الترحيل (عرف المسودات
+  /// والترقيم لحظة الترحيل حصراً — 07 §1.9).
+  Future<int> createVoucherDraft(VoucherDraft draft) async {
+    return transaction(() async {
+      final errors =
+          await _collectVoucherErrors(draft, forPosting: false);
+      if (errors.isNotEmpty) {
+        throw VoucherValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await customStatement(
+        "INSERT INTO vouchers (kind, number, party_id, direct_account_id, "
+        "cash_box_id, voucher_date, currency_id, fx_rate, amount_doc_minor, "
+        "amount_base_minor, state, move_id, narration, uuid, created_at, "
+        "updated_at, is_deleted) "
+        "VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, 0)",
+        [
+          draft.kind.storageValue,
+          draft.partyId,
+          draft.directAccountId,
+          draft.cashBoxId,
+          draft.dateText,
+          draft.currencyId,
+          draft.fxRate,
+          draft.amountDocMinor,
+          convertToBaseMinor(draft.amountDocMinor, draft.fxRate),
+          draft.narration,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      final voucherId = (await customSelect('SELECT last_insert_rowid() AS id')
+              .getSingle())
+          .data['id'] as int;
+      await _replaceVoucherAllocationsTx(voucherId, draft.allocations, now);
+      await _recordVoucherEventTx(voucherId: voucherId, action: 'created');
+      return voucherId;
+    });
+  }
+
+  /// كتابة صفوف مطابقة السند — الإدراج والمسح معاً كي يوافق المدقق دائماً
+  /// ما خُزّن (المطابقات صفوف المسودة المعدَّلة قبل الترحيل).
+  Future<void> _replaceVoucherAllocationsTx(
+    int voucherId,
+    List<VoucherAllocationDraft> allocations,
+    int now,
+  ) async {
+    await customStatement(
+      'DELETE FROM voucher_allocations WHERE voucher_id = ?',
+      [voucherId],
+    );
+    for (final a in allocations) {
+      await customStatement(
+        'INSERT INTO voucher_allocations (voucher_id, invoice_id, '
+        'applied_doc_minor, applied_base_minor, uuid, created_at, updated_at, '
+        "is_deleted) VALUES (?, ?, ?, 0, ?, ?, ?, 0)",
+        [
+          voucherId,
+          a.invoiceId,
+          a.appliedDocMinor,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+    }
+  }
+
+  /// س-63..س-68: ترحيل السند — معاملة واحدة: الرقم من تسلسل نوعه ثم القيد
+  /// من دفتر النقدية (move_cash) بأرجل اللقطات ثم مكافئات المطابقة بلقطة
+  /// الفاتورة وآخر ما يغطيها يمتص الفارق (D-067 نمط) ثم الفائض «رصيداً
+  /// مقدّماً» وفرق اللقطات صرفاً محققاً على 44/55 (F-123/D-085 معروضان)
+  /// ثم حركة الصندوق ثم الحالة والرقم والقيد ثم اشتقاق حالات الفواتير
+  /// المُطابَقة آلياً (F-063/D-084 معروضان) ثم حدث «posted» بلقطة السند.
+  Future<int> postVoucher(int voucherId) async {
+    return transaction(() async {
+      final v = await _voucherRowTx(voucherId);
+      if (v == null) {
+        throw StateError('لا سند بالمعرف $voucherId');
+      }
+      if (v['state'] != 'draft') {
+        throw VoucherValidationException(
+            [VoucherStateNotDraft(v['state'] as String)]);
+      }
+      final allocRows = await _voucherAllocationsTx(voucherId);
+      final draft = _voucherDraftFromRows(v, allocRows);
+      final errors =
+          await _collectVoucherErrors(draft, forPosting: true);
+      if (errors.isNotEmpty) {
+        throw VoucherValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final year = yearOfIsoDate(draft.dateText);
+      final voucherNumber = formatDocumentNumber(year,
+          await _advanceSequenceWithinTx(voucherSequenceKind(draft.kind), year));
+      final journalId = await _journalIdByCodeTx('cash');
+      final acc112 = await _accountIdByCodeTx('112');
+      final acc211 = await _accountIdByCodeTx('211');
+      final acc44 = await _accountIdByCodeTx('44');
+      final acc55 = await _accountIdByCodeTx('55');
+      final box = (await _cashBoxByIdTx(draft.cashBoxId))!;
+      final totalDoc = draft.amountDocMinor;
+      final totalBase = convertToBaseMinor(totalDoc, draft.fxRate);
+
+      // مكافئ كل مطابقة بلقطة فاتورتها — وآخر ما يغطي الفاتورة يمتص فارق
+      // التقريب فمجموع مطابقاتها الأساسي يساوي قيمتها المسجلة حرفاً
+      // (D-084: لا غبار تقريب — نمط D-067).
+      final invCache = <int, InvoiceDocument>{};
+      final coverage =
+          await _coverageByInvoiceTx([for (final r in allocRows) r.invoiceId]);
+      var allocatedDocTotal = 0;
+      var allocatedBaseTotal = 0;
+      final baseByAllocationRow = <int, int>{};
+      for (final r in allocRows) {
+        final inv =
+            invCache[r.invoiceId] ??= (await _invoiceRowTx(r.invoiceId))!;
+        final remainingDoc = inv.totalDocMinor - (coverage[r.invoiceId]?.$1 ?? 0);
+        final int base;
+        if (r.appliedDocMinor >= remainingDoc) {
+          base = inv.totalBaseMinor - (coverage[r.invoiceId]?.$2 ?? 0);
+        } else {
+          base = convertToBaseMinor(r.appliedDocMinor, inv.fxRate);
+        }
+        baseByAllocationRow[r.id] = base;
+        allocatedDocTotal += r.appliedDocMinor;
+        allocatedBaseTotal += base;
+      }
+      final advanceDoc = totalDoc - allocatedDocTotal;
+      final advanceBase = convertToBaseMinor(advanceDoc, draft.fxRate);
+      // فرق اللقطات على المطبَّق: ربح 44 دائناً أو خسارة 55 مديناً —
+      // ولعملة الأساسية محايد صفراً حرفاً (D-085 معروض).
+      final fxDiff = totalBase - allocatedBaseTotal - advanceBase;
+
+      final docCur = draft.currencyId;
+      final lines = <MoveLineDraft>[];
+      if (draft.partyId != null) {
+        if (draft.kind.isReceipt) {
+          lines.add(MoveLineDraft(
+            accountId: box.accountId,
+            debitMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+          for (final r in allocRows) {
+            final inv = invCache[r.invoiceId]!;
+            lines.add(MoveLineDraft(
+              accountId: acc112,
+              creditMinor: baseByAllocationRow[r.id]!,
+              partyId: draft.partyId,
+              currencyId: inv.currencyId,
+              amountMinor: r.appliedDocMinor,
+              fxRate: inv.fxRate,
+            ));
+          }
+          if (advanceDoc > 0) {
+            lines.add(MoveLineDraft(
+              accountId: acc112,
+              creditMinor: advanceBase,
+              partyId: draft.partyId,
+              currencyId: docCur,
+              amountMinor: advanceDoc,
+              fxRate: draft.fxRate,
+            ));
+          }
+          if (fxDiff > 0) {
+            lines.add(MoveLineDraft(
+                accountId: acc44,
+                creditMinor: fxDiff,
+                currencyId: 1,
+                amountMinor: fxDiff));
+          } else if (fxDiff < 0) {
+            lines.add(MoveLineDraft(
+                accountId: acc55,
+                debitMinor: -fxDiff,
+                currencyId: 1,
+                amountMinor: -fxDiff));
+          }
+        } else {
+          for (final r in allocRows) {
+            final inv = invCache[r.invoiceId]!;
+            lines.add(MoveLineDraft(
+              accountId: acc211,
+              debitMinor: baseByAllocationRow[r.id]!,
+              partyId: draft.partyId,
+              currencyId: inv.currencyId,
+              amountMinor: r.appliedDocMinor,
+              fxRate: inv.fxRate,
+            ));
+          }
+          if (advanceDoc > 0) {
+            lines.add(MoveLineDraft(
+              accountId: acc211,
+              debitMinor: advanceBase,
+              partyId: draft.partyId,
+              currencyId: docCur,
+              amountMinor: advanceDoc,
+              fxRate: draft.fxRate,
+            ));
+          }
+          if (fxDiff > 0) {
+            lines.add(MoveLineDraft(
+                accountId: acc55,
+                debitMinor: fxDiff,
+                currencyId: 1,
+                amountMinor: fxDiff));
+          } else if (fxDiff < 0) {
+            lines.add(MoveLineDraft(
+                accountId: acc44,
+                creditMinor: -fxDiff,
+                currencyId: 1,
+                amountMinor: -fxDiff));
+          }
+          lines.add(MoveLineDraft(
+            accountId: box.accountId,
+            creditMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+        }
+      } else {
+        // السند بغير طرف على حسابه المباشر (س-13/س-15): ضخ رأس مال
+        // 311 ومسحوبات 321 ومصروفات 54x — بلا مطابقات ولا فروق صرفية.
+        final direct = draft.directAccountId!;
+        if (draft.kind.isReceipt) {
+          lines.add(MoveLineDraft(
+            accountId: box.accountId,
+            debitMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+          lines.add(MoveLineDraft(
+            accountId: direct,
+            creditMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+        } else {
+          lines.add(MoveLineDraft(
+            accountId: direct,
+            debitMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+          lines.add(MoveLineDraft(
+            accountId: box.accountId,
+            creditMinor: totalBase,
+            currencyId: docCur,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ));
+        }
+      }
+
+      final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+        journalId: journalId,
+        dateText: draft.dateText,
+        narration: draft.narration ?? draft.kind.label,
+        refDocType: 'voucher',
+        refDocId: voucherId,
+        lines: lines,
+      ));
+      await _postMoveWithinTx(moveId, sequenceKind: 'move_cash');
+
+      // مكافئات صفوف المطابقة تُكتب قبل تجميد السند كي لا يجمد المُشغِّل
+      // تحديثها (نمط الحواجز: الترتيب جزء من الصحة).
+      for (final r in allocRows) {
+        await customStatement(
+          'UPDATE voucher_allocations SET applied_base_minor = ?, '
+          'updated_at = ? WHERE id = ?',
+          [baseByAllocationRow[r.id]!, now, r.id],
+        );
+      }
+
+      // حركة الصندوق بمصدرها المعلن (05 §4.2): القبض «داخل» والصرف «خارج»
+      await customStatement(
+        "INSERT INTO cash_movements (cash_box_id, kind, amount_minor, "
+        "amount_base_minor, fx_rate, ref_doc_type, ref_doc_id, user_id, "
+        "uuid, created_at, updated_at, is_deleted) "
+        "VALUES (?, ?, ?, ?, ?, 'voucher', ?, NULL, ?, ?, ?, 0)",
+        [
+          box.id,
+          draft.kind.isReceipt ? 'in' : 'out',
+          totalDoc,
+          totalBase,
+          draft.fxRate,
+          voucherId,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+
+      await customStatement(
+        "UPDATE vouchers SET state = 'posted', number = ?, move_id = ?, "
+        'amount_base_minor = ?, updated_at = ? WHERE id = ?',
+        [voucherNumber, moveId, totalBase, now, voucherId],
+      );
+
+      // اشتقاق حالات الفواتير المُطابَقة آلياً بالمطابقات حصراً (F-063/
+      // D-084 معروضان): غطت صافيها «مدفوعة» وجزءاً منه «جزئية» — والسند
+      // صار مرحّلاً فتُحسب مطابقاته في التغطية.
+      for (final iid in invCache.keys) {
+        final inv = invCache[iid]!;
+        final covered = await _coveredDocSingleTx(iid);
+        final newState =
+            covered >= inv.totalDocMinor ? 'paid' : 'partially_paid';
+        await customStatement(
+          'UPDATE invoices SET state = ?, updated_at = ? WHERE id = ?',
+          [newState, now, iid],
+        );
+      }
+
+      await _recordVoucherEventTx(voucherId: voucherId, action: 'posted');
+      return voucherId;
+    });
+  }
+
+  /// حذف مسودة سند — المسودة حصراً وباللقطة الكاملة في سجل الأحداث
+  /// (نمط س-59)، والترقيم لحظة الترحيل فلا رقم يهدر (07 §1.9).
+  Future<void> deleteVoucherDraft(int voucherId) async {
+    return transaction(() async {
+      final v = await _voucherRowTx(voucherId);
+      if (v == null) return;
+      if (v['state'] != 'draft') {
+        throw VoucherValidationException(
+            [VoucherStateNotDraft(v['state'] as String)]);
+      }
+      final snapshot = await _voucherSnapshotTx(voucherId);
+      await customStatement(
+        'DELETE FROM voucher_allocations WHERE voucher_id = ?',
+        [voucherId],
+      );
+      await customStatement('DELETE FROM vouchers WHERE id = ?', [voucherId]);
+      await into(events).insert(
+        EventsCompanion.insert(
+          eventAt: DateTime.now().millisecondsSinceEpoch,
+          deviceId: await deviceId(),
+          entityType: 'voucher',
+          entityId: Value(voucherId),
+          action: 'draft_deleted',
+          payload: snapshot,
+          uuid: const Uuid().v4(),
+        ),
+      );
+    });
+  }
+
+  /// فحوص السند المحركية — المشتركة بين الإنشاء والترحيل: الفترة المفتوحة
+  /// عند الترحيل حصراً (المسودات على أي تاريخ — نمط الفواتير)، والصندوق
+  /// ونشاط حسابه وعملته، والحساب المباشر ورقياً نشطاً غير صندوق، وصفوف
+  /// المطابقة لفواتير الطرف المرحّلة المفتوحة بعملة السند (D-084 معروض).
+  Future<List<VoucherValidationError>> _collectVoucherErrors(
+    VoucherDraft draft, {
+    required bool forPosting,
+  }) async {
+    final errors = validateVoucherDraftStructure(draft);
+    if (errors.isNotEmpty) return errors;
+
+    if (forPosting) {
+      final period = findPeriodForDate(await ledgerPeriods(), draft.dateText);
+      if (period == null) {
+        errors.add(VoucherNoPeriod(draft.dateText));
+      } else if (!period.isOpen) {
+        errors.add(VoucherClosedPeriod(draft.dateText));
+      }
+    }
+
+    final box = await _cashBoxByIdTx(draft.cashBoxId);
+    if (box == null) {
+      errors.add(const VoucherBoxMissing());
+    } else {
+      if (!await _accountActiveTx(box.accountId)) {
+        errors.add(VoucherBoxInactive('${box.name} (حساب الصندوق)'));
+      }
+      if (box.currencyId != draft.currencyId) {
+        errors.add(const VoucherBoxCurrencyMismatch());
+      }
+    }
+
+    if (draft.directAccountId != null) {
+      final acc = await _accountByIdTx(draft.directAccountId!);
+      final label = acc == null
+          ? 'معرّف ${draft.directAccountId}'
+          : '${acc.$2} (${acc.$1})';
+      if (acc == null || !acc.$3 || !acc.$4) {
+        errors.add(VoucherDirectAccountNotLedgerable(label));
+      } else if (await _isBoxAccountTx(draft.directAccountId!)) {
+        errors.add(VoucherDirectAccountIsBox(label));
+      }
+    }
+
+    if (draft.partyId != null && errors.isEmpty) {
+      final expectedKind = draft.kind.isReceipt ? 'sale' : 'purchase';
+      final coverage = await _coverageByInvoiceTx(
+          [for (final a in draft.allocations) a.invoiceId]);
+      for (final a in draft.allocations) {
+        final inv = await _invoiceRowTx(a.invoiceId);
+        if (inv == null) {
+          errors.add(VoucherAllocationInvoiceUnknown(a.invoiceId));
+          continue;
+        }
+        if (inv.state == 'draft') {
+          errors.add(
+              VoucherAllocationInvoiceNotCommitted(a.invoiceId, inv.state));
+          continue;
+        }
+        if (inv.state == 'paid') {
+          errors.add(VoucherAllocationInvoicePaid(a.invoiceId));
+          continue;
+        }
+        if (inv.partyId != draft.partyId) {
+          errors.add(VoucherAllocationWrongParty(a.invoiceId));
+          continue;
+        }
+        if (inv.kind != expectedKind) {
+          errors.add(VoucherAllocationWrongKind(a.invoiceId));
+          continue;
+        }
+        if (inv.currencyId != draft.currencyId) {
+          errors.add(VoucherAllocationCurrencyMismatch(a.invoiceId));
+          continue;
+        }
+        final remaining = inv.totalDocMinor - (coverage[a.invoiceId]?.$1 ?? 0);
+        if (a.appliedDocMinor > remaining) {
+          errors.add(VoucherAllocationExceedsRemaining(
+              a.invoiceId, invoiceDisplayLabel(inv), remaining));
+        }
+      }
+    }
+    return errors;
+  }
+
+  /// س-63: التوزيع الآلي بالأقدمية على فواتير الطرف المفتوحة بعملة السند
+  /// (02 §8/س-12) — اقتراح معدَّل قبل الترحيل لا قرار نهائي.
+  Future<List<VoucherAllocationDraft>> proposeVoucherAllocations({
+    required VoucherKind kind,
+    required int partyId,
+    required int currencyId,
+    required int amountDocMinor,
+  }) async {
+    final open = await openInvoicesForParty(
+        kind: kind, partyId: partyId, currencyId: currencyId);
+    return proposeOldestAllocations(
+        amountDocMinor: amountDocMinor, openInvoices: open);
+  }
+
+  /// فواتير الطرف المفتوحة (المرحّلة غير المغطاة كلياً بمطابقات السندات
+  /// المرحّلة) بعملة السند — مرشحات التوزيع الآلي (المسودات مقترحات
+  /// لا تُحسب).
+  Future<List<OpenInvoiceCandidate>> openInvoicesForParty({
+    required VoucherKind kind,
+    required int partyId,
+    required int currencyId,
+  }) async {
+    final docKind = kind.isReceipt ? 'sale' : 'purchase';
+    final rows = await customSelect(
+      "SELECT id, number, invoice_date, due_date, total_doc_minor "
+      "FROM invoices WHERE party_id = ?1 AND kind = ?2 AND currency_id = ?3 "
+      "AND state IN ('posted', 'partially_paid') AND is_deleted = 0 "
+      "ORDER BY COALESCE(due_date, '9999-12-31'), invoice_date, number",
+      variables: [
+        Variable.withInt(partyId),
+        Variable.withString(docKind),
+        Variable.withInt(currencyId),
+      ],
+    ).get();
+    final out = <OpenInvoiceCandidate>[];
+    for (final r in rows) {
+      final covered = await _coveredDocSingleTx(r.data['id'] as int);
+      final remaining = (r.data['total_doc_minor'] as int) - covered;
+      if (remaining <= 0) continue;
+      out.add(OpenInvoiceCandidate(
+        invoiceId: r.data['id'] as int,
+        remainingDocMinor: remaining,
+        dateText: r.data['invoice_date'] as String,
+        dueDateText: r.data['due_date'] as String?,
+        number: r.data['number'] as String,
+      ));
+    }
+    return out;
+  }
+
+  /// س-69: إنشاء مسودة تحويل بين صندوقين (س-16/F-068) — والفحوص المحركية
+  /// كاملة: صندوقان مختلفان بنفس العملة وحساباهما نشطان ورصيد المرسل
+  /// يكفي (منع السالب الموحد — 05 §7-2).
+  Future<int> createCashTransferDraft(CashTransferDraft draft) async {
+    return transaction(() async {
+      final errors = await _collectTransferErrors(draft, forPosting: false);
+      if (errors.isNotEmpty) {
+        throw CashTransferValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await customStatement(
+        "INSERT INTO box_transfers (number, from_box_id, to_box_id, "
+        "transfer_date, currency_id, fx_rate, amount_doc_minor, "
+        "amount_base_minor, state, move_id, narration, uuid, created_at, "
+        "updated_at, is_deleted) "
+        "VALUES ('', ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, 0)",
+        [
+          draft.fromBoxId,
+          draft.toBoxId,
+          draft.dateText,
+          draft.currencyId,
+          draft.fxRate,
+          draft.amountDocMinor,
+          convertToBaseMinor(draft.amountDocMinor, draft.fxRate),
+          draft.narration,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      final transferId = (await customSelect('SELECT last_insert_rowid() AS id')
+              .getSingle())
+          .data['id'] as int;
+      await _recordDocEventTx(
+        entityType: 'box_transfer',
+        table: 'box_transfers',
+        entityId: transferId,
+        action: 'created',
+      );
+      return transferId;
+    });
+  }
+
+  /// س-69: ترحيل التحويل — قيد متوازن بسطرين «صندوق المستلم مدين / صندوق
+  /// المرسل دائن» يجسد القيدين المتكاملين (خروج/دخول) بلا حساب وسيط ولا
+  /// رصيد معلق (D-087 معروض — توازن الطرفين لحظياً معيار F-068)، وحركتا
+  /// صندوق بمرجعية المستند المتبادلة، والرقم من تسلسل «box_transfer».
+  Future<int> postCashTransfer(int transferId) async {
+    return transaction(() async {
+      final t = await _transferRowTx(transferId);
+      if (t == null) {
+        throw StateError('لا تحويل بالمعرف $transferId');
+      }
+      if (t['state'] != 'draft') {
+        throw CashTransferValidationException(
+            [TransferStateNotDraft(t['state'] as String)]);
+      }
+      final draft = CashTransferDraft(
+        dateText: t['transfer_date'] as String,
+        fromBoxId: t['from_box_id'] as int,
+        toBoxId: t['to_box_id'] as int,
+        amountDocMinor: t['amount_doc_minor'] as int,
+        currencyId: t['currency_id'] as int,
+        fxRate: t['fx_rate'] as int,
+        narration: t['narration'] as String?,
+      );
+      final errors = await _collectTransferErrors(draft, forPosting: true);
+      if (errors.isNotEmpty) {
+        throw CashTransferValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final year = yearOfIsoDate(draft.dateText);
+      final number = formatDocumentNumber(year,
+          await _advanceSequenceWithinTx('box_transfer', year));
+      final journalId = await _journalIdByCodeTx('cash');
+      final fromBox = (await _cashBoxByIdTx(draft.fromBoxId))!;
+      final toBox = (await _cashBoxByIdTx(draft.toBoxId))!;
+      final totalDoc = draft.amountDocMinor;
+      final totalBase = convertToBaseMinor(totalDoc, draft.fxRate);
+
+      final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+        journalId: journalId,
+        dateText: draft.dateText,
+        narration: draft.narration ?? 'تحويل بين صناديق',
+        refDocType: 'box_transfer',
+        refDocId: transferId,
+        lines: [
+          MoveLineDraft(
+            accountId: toBox.accountId,
+            debitMinor: totalBase,
+            currencyId: draft.currencyId,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ),
+          MoveLineDraft(
+            accountId: fromBox.accountId,
+            creditMinor: totalBase,
+            currencyId: draft.currencyId,
+            amountMinor: totalDoc,
+            fxRate: draft.fxRate,
+          ),
+        ],
+      ));
+      await _postMoveWithinTx(moveId, sequenceKind: 'move_cash');
+
+      // حركتا الصندوق بمرجعية متبادلة عبر مرجع المستند المشترك (03 §4)
+      for (final entry in [
+        (fromBox.id, 'transfer_out'),
+        (toBox.id, 'transfer_in'),
+      ]) {
+        await customStatement(
+          "INSERT INTO cash_movements (cash_box_id, kind, amount_minor, "
+          "amount_base_minor, fx_rate, ref_doc_type, ref_doc_id, user_id, "
+          "uuid, created_at, updated_at, is_deleted) "
+          "VALUES (?, ?, ?, ?, ?, 'box_transfer', ?, NULL, ?, ?, ?, 0)",
+          [
+            entry.$1,
+            entry.$2,
+            totalDoc,
+            totalBase,
+            draft.fxRate,
+            transferId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+      }
+
+      await customStatement(
+        "UPDATE box_transfers SET state = 'posted', number = ?, move_id = ?, "
+        'updated_at = ? WHERE id = ?',
+        [number, moveId, now, transferId],
+      );
+      await _recordDocEventTx(
+        entityType: 'box_transfer',
+        table: 'box_transfers',
+        entityId: transferId,
+        action: 'posted',
+      );
+      return transferId;
+    });
+  }
+
+  /// فحوص التحويل المحركية — الصندوقان موجودان نشطا الحساب وبنفس العملة
+  /// ورصيد المرسل يكفي (س-16/§10.1).
+  Future<List<CashTransferValidationError>> _collectTransferErrors(
+    CashTransferDraft draft, {
+    required bool forPosting,
+  }) async {
+    final errors = validateCashTransferStructure(draft);
+    if (errors.isNotEmpty) return errors;
+
+    if (forPosting) {
+      final period = findPeriodForDate(await ledgerPeriods(), draft.dateText);
+      if (period == null) {
+        errors.add(TransferNoPeriod(draft.dateText));
+      } else if (!period.isOpen) {
+        errors.add(TransferClosedPeriod(draft.dateText));
+      }
+    }
+
+    final fromBox = await _cashBoxByIdTx(draft.fromBoxId);
+    final toBox = await _cashBoxByIdTx(draft.toBoxId);
+    if (fromBox == null || toBox == null) {
+      errors.add(const TransferBoxMissing());
+      return errors;
+    }
+    if (!await _accountActiveTx(fromBox.accountId)) {
+      errors.add(TransferBoxInactive('${fromBox.name} (المرسل)'));
+    }
+    if (!await _accountActiveTx(toBox.accountId)) {
+      errors.add(TransferBoxInactive('${toBox.name} (المستلم)'));
+    }
+    if (fromBox.currencyId != toBox.currencyId) {
+      errors.add(const TransferCurrencyMismatch());
+    }
+    final amountBase = convertToBaseMinor(draft.amountDocMinor, draft.fxRate);
+    final balance = await _cashBoxBalanceTx(draft.fromBoxId);
+    if (balance < amountBase) {
+      errors.add(TransferSenderInsufficient(balance, amountBase));
+    }
+    return errors;
+  }
+
+  /// س-70: إنشاء مسودة تسوية صندوق (س-17/F-067) — والفرق صفر لا يولّد
+  /// تسوية أصلاً فالمبلغ موجب ببنية المسودة، والسبب نصي إلزامي.
+  Future<int> createCashAdjustmentDraft(CashAdjustmentDraft draft) async {
+    return transaction(() async {
+      final errors = await _collectAdjustmentErrors(draft, forPosting: false);
+      if (errors.isNotEmpty) {
+        throw CashAdjustmentValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await customStatement(
+        "INSERT INTO cash_adjustments (number, cash_box_id, adjustment_date, "
+        "direction, currency_id, fx_rate, amount_doc_minor, "
+        "amount_base_minor, reason, state, move_id, uuid, created_at, "
+        "updated_at, is_deleted) "
+        "VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, 0)",
+        [
+          draft.cashBoxId,
+          draft.dateText,
+          draft.direction.storageValue,
+          draft.currencyId,
+          draft.fxRate,
+          draft.amountDocMinor,
+          convertToBaseMinor(draft.amountDocMinor, draft.fxRate),
+          draft.reason.trim(),
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      final adjustmentId =
+          (await customSelect('SELECT last_insert_rowid() AS id').getSingle())
+              .data['id'] as int;
+      await _recordDocEventTx(
+        entityType: 'cash_adjustment',
+        table: 'cash_adjustments',
+        entityId: adjustmentId,
+        action: 'created',
+      );
+      return adjustmentId;
+    });
+  }
+
+  /// س-70: ترحيل التسوية — العجز: 57 مدين / الصندوق دائن والزيادة:
+  /// الصندوق مدين / 57 دائن (الحساب الواحد للعجز والزيادة — س8/F-067)،
+  /// وحركة الصندوق بمصدرها والرقم من تسلسل «cash_adjustment».
+  Future<int> postCashAdjustment(int adjustmentId) async {
+    return transaction(() async {
+      final a = await _adjustmentRowTx(adjustmentId);
+      if (a == null) {
+        throw StateError('لا تسوية بالمعرف $adjustmentId');
+      }
+      if (a['state'] != 'draft') {
+        throw CashAdjustmentValidationException(
+            [AdjustmentStateNotDraft(a['state'] as String)]);
+      }
+      final draft = CashAdjustmentDraft(
+        dateText: a['adjustment_date'] as String,
+        cashBoxId: a['cash_box_id'] as int,
+        currencyId: a['currency_id'] as int,
+        fxRate: a['fx_rate'] as int,
+        direction:
+            CashAdjustmentDirection.fromStorage(a['direction'] as String),
+        amountDocMinor: a['amount_doc_minor'] as int,
+        reason: a['reason'] as String? ?? '',
+      );
+      final errors = await _collectAdjustmentErrors(draft, forPosting: true);
+      if (errors.isNotEmpty) {
+        throw CashAdjustmentValidationException(errors);
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final year = yearOfIsoDate(draft.dateText);
+      final number = formatDocumentNumber(year,
+          await _advanceSequenceWithinTx('cash_adjustment', year));
+      final journalId = await _journalIdByCodeTx('cash');
+      final acc57 = await _accountIdByCodeTx('57');
+      final box = (await _cashBoxByIdTx(draft.cashBoxId))!;
+      final totalDoc = draft.amountDocMinor;
+      final totalBase = convertToBaseMinor(totalDoc, draft.fxRate);
+      final isShortage = draft.direction == CashAdjustmentDirection.shortage;
+
+      final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+        journalId: journalId,
+        dateText: draft.dateText,
+        narration: 'تسوية صندوق — ${draft.direction.label}: ${draft.reason.trim()}',
+        refDocType: 'cash_adjustment',
+        refDocId: adjustmentId,
+        lines: [
+          if (isShortage)
+            MoveLineDraft(
+              accountId: acc57,
+              debitMinor: totalBase,
+              currencyId: 1,
+              amountMinor: totalBase,
+            )
+          else
+            MoveLineDraft(
+              accountId: box.accountId,
+              debitMinor: totalBase,
+              currencyId: draft.currencyId,
+              amountMinor: totalDoc,
+              fxRate: draft.fxRate,
+            ),
+          if (isShortage)
+            MoveLineDraft(
+              accountId: box.accountId,
+              creditMinor: totalBase,
+              currencyId: draft.currencyId,
+              amountMinor: totalDoc,
+              fxRate: draft.fxRate,
+            )
+          else
+            MoveLineDraft(
+              accountId: acc57,
+              creditMinor: totalBase,
+              currencyId: 1,
+              amountMinor: totalBase,
+            ),
+        ],
+      ));
+      await _postMoveWithinTx(moveId, sequenceKind: 'move_cash');
+
+      await customStatement(
+        "INSERT INTO cash_movements (cash_box_id, kind, amount_minor, "
+        "amount_base_minor, fx_rate, ref_doc_type, ref_doc_id, user_id, "
+        "uuid, created_at, updated_at, is_deleted) "
+        "VALUES (?, ?, ?, ?, ?, 'cash_adjustment', ?, NULL, ?, ?, ?, 0)",
+        [
+          box.id,
+          isShortage ? 'out' : 'in',
+          totalDoc,
+          totalBase,
+          draft.fxRate,
+          adjustmentId,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+
+      await customStatement(
+        "UPDATE cash_adjustments SET state = 'posted', number = ?, "
+        'move_id = ?, updated_at = ? WHERE id = ?',
+        [number, moveId, now, adjustmentId],
+      );
+      await _recordDocEventTx(
+        entityType: 'cash_adjustment',
+        table: 'cash_adjustments',
+        entityId: adjustmentId,
+        action: 'posted',
+      );
+      return adjustmentId;
+    });
+  }
+
+  /// فحوص التسوية المحركية — الصندوق موجود وحسابه نشط وعملته عملة التسوية.
+  Future<List<CashAdjustmentValidationError>> _collectAdjustmentErrors(
+    CashAdjustmentDraft draft, {
+    required bool forPosting,
+  }) async {
+    final errors = validateCashAdjustmentStructure(draft);
+    if (errors.isNotEmpty) return errors;
+
+    if (forPosting) {
+      final period = findPeriodForDate(await ledgerPeriods(), draft.dateText);
+      if (period == null) {
+        errors.add(AdjustmentNoPeriod(draft.dateText));
+      } else if (!period.isOpen) {
+        errors.add(AdjustmentClosedPeriod(draft.dateText));
+      }
+    }
+
+    final box = await _cashBoxByIdTx(draft.cashBoxId);
+    if (box == null) {
+      errors.add(const AdjustmentBoxMissing());
+    } else {
+      if (!await _accountActiveTx(box.accountId)) {
+        errors.add(AdjustmentBoxInactive('${box.name} (حساب الصندوق)'));
+      }
+      if (box.currencyId != draft.currencyId) {
+        errors.add(const AdjustmentBoxCurrencyMismatch());
+      }
+    }
+    return errors;
+  }
+
+  // ─── قراءات السندات وأدواتها الداخلية ───
+
+  Future<Map<String, Object?>?> _voucherRowTx(int id) async {
+    final rows = await customSelect(
+      'SELECT * FROM vouchers WHERE id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(id)],
+    ).get();
+    return rows.isEmpty ? null : rows.first.data;
+  }
+
+  Future<List<Map<String, Object?>>> _voucherAllocationsTx(int voucherId) async {
+    final rows = await customSelect(
+      'SELECT * FROM voucher_allocations WHERE voucher_id = ? '
+      'AND is_deleted = 0 ORDER BY id',
+      variables: [Variable.withInt(voucherId)],
+    ).get();
+    return [for (final r in rows) r.data];
+  }
+
+  Future<Map<String, Object?>?> _transferRowTx(int id) async {
+    final rows = await customSelect(
+      'SELECT * FROM box_transfers WHERE id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(id)],
+    ).get();
+    return rows.isEmpty ? null : rows.first.data;
+  }
+
+  Future<Map<String, Object?>?> _adjustmentRowTx(int id) async {
+    final rows = await customSelect(
+      'SELECT * FROM cash_adjustments WHERE id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(id)],
+    ).get();
+    return rows.isEmpty ? null : rows.first.data;
+  }
+
+  /// إعادة بناء مسودة السند من صفوفها — التحقق على ما خُزّن لا على ما قيل
+  /// (نمط الفواتير: لا ثقة بالمدخلات بعد كتابتها).
+  VoucherDraft _voucherDraftFromRows(
+    Map<String, Object?> v,
+    List<Map<String, Object?>> allocs,
+  ) {
+    return VoucherDraft(
+      kind: VoucherKind.fromStorage(v['kind'] as String),
+      dateText: v['voucher_date'] as String,
+      partyId: v['party_id'] as int?,
+      directAccountId: v['direct_account_id'] as int?,
+      cashBoxId: v['cash_box_id'] as int,
+      currencyId: v['currency_id'] as int,
+      fxRate: v['fx_rate'] as int,
+      amountDocMinor: v['amount_doc_minor'] as int,
+      narration: v['narration'] as String?,
+      allocations: [
+        for (final a in allocs)
+          VoucherAllocationDraft(
+            invoiceId: a['invoice_id'] as int,
+            appliedDocMinor: a['applied_doc_minor'] as int,
+          ),
+      ],
+    );
+  }
+
+  /// تغطية الفواتير بمطابقات السندات المرحّلة حصراً — (مطبَّق بعملة
+  /// الفاتورة، مكافؤه الأساسي) لكل فاتورة من المطلوبة.
+  Future<Map<int, (int, int)>> _coverageByInvoiceTx(
+      List<int> invoiceIds) async {
+    if (invoiceIds.isEmpty) return {};
+    final rows = await customSelect(
+      'SELECT va.invoice_id AS iid, '
+      'COALESCE(SUM(va.applied_doc_minor), 0) AS doc, '
+      'COALESCE(SUM(va.applied_base_minor), 0) AS base '
+      'FROM voucher_allocations va JOIN vouchers v ON v.id = va.voucher_id '
+      "WHERE v.state = 'posted' AND v.is_deleted = 0 AND va.is_deleted = 0 "
+      'AND va.invoice_id IN (${invoiceIds.join(',')}) '
+      'GROUP BY va.invoice_id',
+    ).get();
+    return {
+      for (final r in rows)
+        r.data['iid'] as int: (
+          (r.data['doc'] as int?) ?? 0,
+          (r.data['base'] as int?) ?? 0,
+        )
+    };
+  }
+
+  Future<int> _coveredDocSingleTx(int invoiceId) async {
+    final rows = await customSelect(
+      'SELECT COALESCE(SUM(va.applied_doc_minor), 0) AS c '
+      'FROM voucher_allocations va JOIN vouchers v ON v.id = va.voucher_id '
+      "WHERE va.invoice_id = ?1 AND v.state = 'posted' "
+      'AND v.is_deleted = 0 AND va.is_deleted = 0',
+      variables: [Variable.withInt(invoiceId)],
+    ).get();
+    return rows.first.data['c'] as int;
+  }
+
+  Future<(String, String, bool, bool)?> _accountByIdTx(int id) async {
+    final rows = await customSelect(
+      'SELECT code, name, is_leaf, is_active FROM accounts WHERE id = ?',
+      variables: [Variable.withInt(id)],
+    ).get();
+    if (rows.isEmpty) return null;
+    final d = rows.first.data;
+    return (
+      d['code'] as String,
+      d['name'] as String,
+      (d['is_leaf'] as int) == 1,
+      (d['is_active'] as int) == 1,
+    );
+  }
+
+  Future<bool> _accountActiveTx(int accountId) async {
+    final rows = await customSelect(
+      'SELECT is_active FROM accounts WHERE id = ?',
+      variables: [Variable.withInt(accountId)],
+    ).get();
+    return rows.isNotEmpty && (rows.first.data['is_active'] as int) == 1;
+  }
+
+  Future<bool> _isBoxAccountTx(int accountId) async {
+    final rows = await customSelect(
+      'SELECT id FROM cash_boxes WHERE account_id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(accountId)],
+    ).get();
+    return rows.isNotEmpty;
+  }
+
+  Future<String> _voucherSnapshotTx(int voucherId) async {
+    final v = (await _voucherRowTx(voucherId))!;
+    final allocs = await _voucherAllocationsTx(voucherId);
+    return jsonEncode(<String, Object?>{
+      'id': v['id'],
+      'kind': v['kind'],
+      'number': v['number'],
+      'party_id': v['party_id'],
+      'direct_account_id': v['direct_account_id'],
+      'cash_box_id': v['cash_box_id'],
+      'date': v['voucher_date'],
+      'currency_id': v['currency_id'],
+      'fx_rate': v['fx_rate'],
+      'amount_doc_minor': v['amount_doc_minor'],
+      'amount_base_minor': v['amount_base_minor'],
+      'state': v['state'],
+      'move_id': v['move_id'],
+      'narration': v['narration'],
+      'allocations': [
+        for (final a in allocs)
+          <String, Object?>{
+            'invoice_id': a['invoice_id'],
+            'applied_doc_minor': a['applied_doc_minor'],
+            'applied_base_minor': a['applied_base_minor'],
+          },
+      ],
+    });
+  }
+
+  Future<void> _recordVoucherEventTx({
+    required int voucherId,
+    required String action,
+  }) async {
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: DateTime.now().millisecondsSinceEpoch,
+        deviceId: await deviceId(),
+        entityType: 'voucher',
+        entityId: Value(voucherId),
+        action: action,
+        payload: await _voucherSnapshotTx(voucherId),
+        uuid: const Uuid().v4(),
+      ),
+    );
+  }
+
+  /// حدث عام لمستندَي التحويل والتسوية — لقطة الصف الكامل (F-173 نمط).
+  Future<void> _recordDocEventTx({
+    required String entityType,
+    required String table,
+    required int entityId,
+    required String action,
+  }) async {
+    final rows = await customSelect(
+      'SELECT * FROM $table WHERE id = ?',
+      variables: [Variable.withInt(entityId)],
+    ).get();
+    final payload = jsonEncode(rows.isEmpty ? <String, Object?>{} : rows.first.data);
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: DateTime.now().millisecondsSinceEpoch,
+        deviceId: await deviceId(),
+        entityType: entityType,
+        entityId: Value(entityId),
+        action: action,
+        payload: payload,
+        uuid: const Uuid().v4(),
+      ),
+    );
+  }
+
+  /// قراءة سند قائم — التخزين يقرأ ولا يحسب (نمط القلب).
+  Future<VoucherDocument?> voucherById(int id) async {
+    final v = await _voucherRowTx(id);
+    if (v == null) return null;
+    return VoucherDocument(
+      id: v['id'] as int,
+      kind: v['kind'] as String,
+      number: v['number'] as String,
+      partyId: v['party_id'] as int?,
+      directAccountId: v['direct_account_id'] as int?,
+      cashBoxId: v['cash_box_id'] as int,
+      voucherDate: v['voucher_date'] as String,
+      currencyId: v['currency_id'] as int,
+      fxRate: v['fx_rate'] as int,
+      amountDocMinor: v['amount_doc_minor'] as int,
+      amountBaseMinor: v['amount_base_minor'] as int,
+      state: v['state'] as String,
+      moveId: v['move_id'] as int?,
+      narration: v['narration'] as String?,
+    );
+  }
+
+  Future<List<VoucherAllocationDocument>> voucherAllocationsOf(
+      int voucherId) async {
+    final rows = await _voucherAllocationsTx(voucherId);
+    return [
+      for (final a in rows)
+        VoucherAllocationDocument(
+          id: a['id'] as int,
+          voucherId: a['voucher_id'] as int,
+          invoiceId: a['invoice_id'] as int,
+          appliedDocMinor: a['applied_doc_minor'] as int,
+          appliedBaseMinor: a['applied_base_minor'] as int,
+        ),
+    ];
+  }
+
+  /// مجموع مطابقات فاتورة من السندات المرحّلة بعملة الفاتورة — بذرة
+  /// الاشتقاق والقراءة (F-063/D-084 معروضان).
+  Future<int> invoiceCoveredDocMinor(int invoiceId) =>
+      _coveredDocSingleTx(invoiceId);
 }
 
 /// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
@@ -3075,4 +4288,278 @@ String invoiceDisplayLabel(InvoiceDocument invoice) {
   final label =
       sequenceKindLabels[invoiceSequenceKind(kind)] ?? kind.label;
   return '$label ${invoice.number}';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// دفعة السندات والصندوق — دفعة م1 الخامسة (س-61..س-70، D-083..D-087
+// معروضة): جداول v8 الأربعة تُدار SQL خاماً بنمط D-079 المجرَّب — بلا
+// كود مولد: إدراجات صريحة آمنة التكرار، وحواجز القاعدة ثانية بعد فحص
+// المحرك (07 §2.2 نمط D-067) بما فيها توسعة حاجز سالب الصندوق للخروج
+// بالتحويل، والبذر فاحص الحالة ذاته.
+// ═══════════════════════════════════════════════════════════════════
+
+/// جداول دفعة السندات (05 §4.2 + س-16/س-17): السند وصفوف مطابقته
+/// (تشغيلية جزء لا يتجزأ من السند — م-21/D-042) ومستندا التحويل
+/// والتسوية برقمهما المستقل (D-083 معروض). الأعمدة التنفيذية:
+/// `applied_doc_minor` على المطابقة بعملة الفاتورة (D-084 معروض)
+/// و`number`/`state`/`move_id` على المستندات الأربعة بنمط الفواتير.
+Future<void> _createVoucherTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "vouchers" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"kind" TEXT NOT NULL, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"party_id" INTEGER NULL, '
+        '"direct_account_id" INTEGER NULL, '
+        '"cash_box_id" INTEGER NOT NULL, '
+        '"voucher_date" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"narration" TEXT NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "voucher_allocations" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"voucher_id" INTEGER NOT NULL, '
+        '"invoice_id" INTEGER NOT NULL, '
+        '"applied_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"applied_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "box_transfers" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"from_box_id" INTEGER NOT NULL, '
+        '"to_box_id" INTEGER NOT NULL, '
+        '"transfer_date" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"narration" TEXT NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "cash_adjustments" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"cash_box_id" INTEGER NOT NULL, '
+        '"adjustment_date" TEXT NOT NULL, '
+        '"direction" TEXT NOT NULL, '
+        '"currency_id" INTEGER NOT NULL DEFAULT 1, '
+        '"fx_rate" INTEGER NOT NULL, '
+        '"amount_doc_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"amount_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"reason" TEXT NOT NULL DEFAULT \'\', '
+        '"state" TEXT NOT NULL DEFAULT \'draft\', '
+        '"move_id" INTEGER NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
+/// المُشغِّلات الحواجز لجداول السندات — الحاجز الثاني المختبَر بعد فحص
+/// المحرك (نمط D-067): تجميد السند المرحّل وصفوف مطابقاته ومستندَي
+/// التحويل والتسوية، ومنع حذف المرحّل، ومنع مطابقة فاتورة مسودة،
+/// وتوسعة حاجز سالب الصندوق لتشمل الخروج بالتحويل (D-083 معروض).
+Future<void> _createVoucherTriggers() async {
+  const triggers = <String>[
+    // توسيع حاجز سالب الصندوق (05 §7-2): الخروج بالتحويل خروج فعلي من
+    // الصندوق يقبضه الحاجز ذاته — والداخل بالتحويل دخول لا حاجز عليه.
+    // إعادة تعريف موثقة للنسخة المجرَّبة بشرط أوسع وتوازن يشمل transfer_in.
+    'DROP TRIGGER IF EXISTS trg_cash_no_negative',
+    "CREATE TRIGGER trg_cash_no_negative "
+        "BEFORE INSERT ON cash_movements FOR EACH ROW "
+        "WHEN NEW.kind IN ('out', 'transfer_out') AND ("
+        "(SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
+        " WHERE id = NEW.cash_box_id)"
+        " + (SELECT COALESCE(SUM(CASE WHEN kind IN ('in', 'transfer_in') "
+        "THEN amount_base_minor ELSE -amount_base_minor END), 0) "
+        "FROM cash_movements WHERE cash_box_id = NEW.cash_box_id)"
+        " - NEW.amount_base_minor < 0) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'رصيد الصندوق لا يكفي — منع السالب الموحد "
+        "(05 §7-2)'); END",
+    // تجميد السند المرحّل — ما رُحّل لا يعدل (07 §1.3/05 §7-4) والتصحيح
+    // بمطابقة تكميلية (س-12) أو مستند معاكس
+    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_posted_frozen "
+        "BEFORE UPDATE ON vouchers FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.kind IS NOT OLD.kind OR "
+        "NEW.number IS NOT OLD.number OR "
+        "COALESCE(NEW.party_id,-1) IS NOT COALESCE(OLD.party_id,-1) OR "
+        "COALESCE(NEW.direct_account_id,-1) IS NOT "
+        "COALESCE(OLD.direct_account_id,-1) OR "
+        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
+        "NEW.voucher_date IS NOT OLD.voucher_date OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'السند المرحّل لا تعدل — التصحيح بمطابقة "
+        "تكميلية أو مستند معاكس (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_vouchers_no_delete_posted "
+        "BEFORE DELETE ON vouchers FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'السند المرحّل لا يحذف (05 §7-4)'); END",
+    // صفوف مطابقة السند المرحّل مجمدة — والمسودة تُعدَّل بحرية قبل الترحيل
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_insert "
+        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = NEW.voucher_id) "
+        "<> 'draft' "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تضاف — التصحيح "
+        "بمطابقة تكميلية (س-12)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_update "
+        "BEFORE UPDATE ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
+        "= 'posted' "
+        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تعدل'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_frozen_delete "
+        "BEFORE DELETE ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM vouchers WHERE id = OLD.voucher_id) "
+        "= 'posted' "
+        "BEGIN SELECT RAISE(ABORT, 'مطابقات السند المرحّل لا تحذف'); END",
+    // حاجز ثالث: لا مطابقة على فاتورة مسودة حتى لو تسللت بمعاملة خارجية
+    "CREATE TRIGGER IF NOT EXISTS trg_voucher_allocations_no_draft_invoice "
+        "BEFORE INSERT ON voucher_allocations FOR EACH ROW "
+        "WHEN (SELECT state FROM invoices WHERE id = NEW.invoice_id) "
+        "= 'draft' "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'لا مطابقة على فاتورة مسودة — تُرحَّل أولاً'); "
+        "END",
+    // تجميد التحويل المرحّل — قيد الطرفين لحظي لا مساس به (F-068)
+    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_posted_frozen "
+        "BEFORE UPDATE ON box_transfers FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.number IS NOT OLD.number OR "
+        "NEW.from_box_id IS NOT OLD.from_box_id OR "
+        "NEW.to_box_id IS NOT OLD.to_box_id OR "
+        "NEW.transfer_date IS NOT OLD.transfer_date OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'التحويل المرحّل لا تعدل (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_box_transfers_no_delete_posted "
+        "BEFORE DELETE ON box_transfers FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'التحويل المرحّل لا يحذف (05 §7-4)'); END",
+    // تجميد التسوية المرحّلة — مستند موثق مرقّم لا يعدل (س-17)
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_posted_frozen "
+        "BEFORE UPDATE ON cash_adjustments FOR EACH ROW "
+        "WHEN OLD.state = 'posted' AND ("
+        "NEW.number IS NOT OLD.number OR "
+        "NEW.cash_box_id IS NOT OLD.cash_box_id OR "
+        "NEW.adjustment_date IS NOT OLD.adjustment_date OR "
+        "NEW.direction IS NOT OLD.direction OR "
+        "NEW.currency_id IS NOT OLD.currency_id OR "
+        "NEW.fx_rate IS NOT OLD.fx_rate OR "
+        "NEW.amount_doc_minor IS NOT OLD.amount_doc_minor OR "
+        "NEW.amount_base_minor IS NOT OLD.amount_base_minor OR "
+        "NEW.reason IS NOT OLD.reason OR "
+        "COALESCE(NEW.move_id,-1) IS NOT COALESCE(OLD.move_id,-1)) "
+        "BEGIN "
+        "SELECT RAISE(ABORT, 'التسوية المرحّلة لا تعدل (07 §1.3)'); END",
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_adjustments_no_delete_posted "
+        "BEFORE DELETE ON cash_adjustments FOR EACH ROW "
+        "WHEN OLD.state <> 'draft' "
+        "BEGIN SELECT RAISE(ABORT, 'التسوية المرحّلة لا تحذف (05 §7-4)'); END",
+  ];
+  for (final sql in triggers) {
+    await customStatement(sql);
+  }
+}
+
+/// بذر دفعة السندات (س-61): تفعيل حسابَي فروق العملة الجاهزين معطلين
+/// (44 أرباحها و55 خسائرها — F-123/D-085 معروضان: تفعيل إعداداً بلا
+/// واجهة إعدادات بعد، نتيجة تقديم D-070 لتعدد العملات إلى م1-نواة).
+/// البذر فاحص الحالة ذاته فآمن التكرار.
+Future<void> _seedVoucherBaseline() async {
+  await customStatement(
+      "UPDATE accounts SET is_active = 1 "
+      "WHERE code IN ('44', '55') AND is_active = 0");
+}
+
+/// صورة سند قائم للقراءة (05 §4.2) — للقراءة والتوثيق لا للقرار.
+class VoucherDocument {
+  final int id;
+  final String kind;
+  final String number;
+  final int? partyId;
+
+  /// الحساب المباشر للسند بغير طرف (س-13/س-15).
+  final int? directAccountId;
+  final int cashBoxId;
+  final String voucherDate;
+  final int currencyId;
+  final int fxRate;
+  final int amountDocMinor;
+  final int amountBaseMinor;
+  final String state;
+  final int? moveId;
+  final String? narration;
+
+  const VoucherDocument({
+    required this.id,
+    required this.kind,
+    required this.number,
+    required this.partyId,
+    required this.directAccountId,
+    required this.cashBoxId,
+    required this.voucherDate,
+    required this.currencyId,
+    required this.fxRate,
+    required this.amountDocMinor,
+    required this.amountBaseMinor,
+    required this.state,
+    required this.moveId,
+    required this.narration,
+  });
+}
+
+/// صورة صف مطابقة قائم (05 §4.2 + D-084 معروض): المطبَّق بعملة الفاتورة
+/// وبلقطة الفاتورة فتصفو الذمة حرفاً.
+class VoucherAllocationDocument {
+  final int id;
+  final int voucherId;
+  final int invoiceId;
+  final int appliedDocMinor;
+  final int appliedBaseMinor;
+
+  const VoucherAllocationDocument({
+    required this.id,
+    required this.voucherId,
+    required this.invoiceId,
+    required this.appliedDocMinor,
+    required this.appliedBaseMinor,
+  });
+}
+
+/// الصيغة المعروضة لرقم السند (م-44/D-071): «سند قبض 2026/000001».
+String voucherDisplayLabel(VoucherDocument voucher) {
+  final kind = VoucherKind.fromStorage(voucher.kind);
+  final label =
+      sequenceKindLabels[voucherSequenceKind(kind)] ?? kind.label;
+  return '$label ${voucher.number}';
 }

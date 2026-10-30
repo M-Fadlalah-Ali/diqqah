@@ -257,6 +257,11 @@ const Map<String, String> sequenceKindLabels = {
   'invoice_purchase': 'فاتورة شراء',
   'invoice_sale_return': 'مردود بيع',
   'invoice_purchase_return': 'مردود شراء',
+  // دفعة السندات والصندوق (5) — أسماء النوع الكامل للعرض (م-44)
+  'voucher_receipt': 'سند قبض',
+  'voucher_payment': 'سند صرف',
+  'box_transfer': 'تحويل بين صناديق',
+  'cash_adjustment': 'تسوية صندوق',
 };
 
 /// صورة حساب قائم للفهرسة والتحقق — بلا أي اعتماد تخزين أو واجهة.

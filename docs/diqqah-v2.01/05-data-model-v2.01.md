@@ -92,10 +92,11 @@
 
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
-| `voucher` | kind(`receipt/payment`), number, party_id, cash_box_id, voucher_date, amount_minor, currency_id, fx_rate, state, move_id | سند قبض/صرف؛ السداد الجزئي طبيعي |
-| `voucher_allocation` | voucher_id, invoice_id, applied_base_minor | **مصالحة الذمم**: توزيع السداد على فواتير محددة (يدوياً أو آلياً بالأقدمية مع إمكانية التعديل)؛ ويجوز أن يبقى سند بلا صفوف مطابقة مؤقتاً = «رصيد مقدّم» على الذمة يُطابق لاحقاً (س5). **تشغيلية جزء من السند الذي ولّده — تُزامن معه ولا تُعاد بناؤها كمشتقة** (08 §3؛ م-21/D-042) |
-| `cash_movement` | cash_box_id, kind(`in/out/transfer_in/transfer_out`), amount_minor, ref_doc_type, ref_doc_id, user_id | كل حركة صندوق مرجعها مستند مصدر (سند أو فاتورة نقدية أو تحويل)؛ ومكافؤها الأساسي ولقطته `amount_base_minor`/`fx_rate` (F-122/D-082 معروضة) |
-| `box_transfer` | from_box_id, to_box_id, amount_minor, state, move_id | تحويل بين صندوقين بقيدين متكاملين |
+| `voucher` | kind(`receipt/payment`), number, party_id, cash_box_id, voucher_date, amount_minor, currency_id, fx_rate, state, move_id | سند قبض/صرف؛ السداد الجزئي طبيعي — والتنفيذ (D-083 معروض): `vouchers` بالجمع بنمط الجداول القائمة، والمبلغ بمعمّيه `amount_doc_minor`/`amount_base_minor`، والحساب المباشر للسند بغير طرف `direct_account_id` (311/321/54x — س-13/س-15) والوصف `narration` |
+| `voucher_allocation` | voucher_id, invoice_id, applied_base_minor | **مصالحة الذمم**: توزيع السداد على فواتير محددة (يدوياً أو آلياً بالأقدمية مع إمكانية التعديل)؛ ويجوز أن يبقى سند بلا صفوف مطابقة مؤقتاً = «رصيد مقدّم» على الذمة يُطابق لاحقاً (س5). **تشغيلية جزء من السند الذي ولّده — تُزامن معه ولا تُعاد بناؤها كمشتقة** (08 §3؛ م-21/D-042) — والتنفيذ (D-084 معروض): عمود تنفيذي `applied_doc_minor` بجانب المفاهيمي — المطبَّق بعملة الفاتورة ومكافؤه بلقطة فاتورتها وآخر ما يغطيها يمتص فارق التقريب |
+| `cash_movement` | cash_box_id, kind(`in/out/transfer_in/transfer_out`), amount_minor, ref_doc_type, ref_doc_id, user_id | كل حركة صندوق مرجعها مستند مصدر (سند أو فاتورة نقدية أو تحويل)؛ ومكافؤها الأساسي ولقطته `amount_base_minor`/`fx_rate` (F-122/D-082 معروضة) — وحاجز السالب الموسّع (D-083 معروض) يمنع نزول الصندوق بكل خروج فعلي شمل `transfer_out` |
+| `box_transfer` | from_box_id, to_box_id, amount_minor, state, move_id | تحويل بين صندوقين بقيدين متكاملين — والتنفيذ (D-083/D-087 معروضان): `box_transfers` بمستند مستقل مرقّم وقيد سطرين يجسدهما بلا حساب وسيط وحركتا صندوق بمرجعية متبادلة، والعملة الواحدة على الطرفين (س-69) |
+| `cash_adjustment` | cash_box_id, adjustment_date, direction(`shortage/overage`), amount_minor, reason, state, move_id | تسوية الصندوق: العجز مدين به على 57 والزيادة دائنة به (س8/F-067) وسبب نصي إلزامي والفرق صفر لا يولّد مستنداً (س-17 — والتنفيذ `cash_adjustments` ضمن v8/D-083 معروض) |
 
 ### 4.3 المخزون
 
