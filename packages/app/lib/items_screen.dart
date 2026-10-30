@@ -230,7 +230,8 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       );
 
   Future<void> _save() async {
-    debugPrint('SAVE: enter _saving=$_saving'); // تشخيص س30 مؤقت
+    debugPrint('SAVE: enter _saving=$_saving name="${_name.text}" '
+        'sku="${_sku.text}" unit=$_unitId kind=${_kind.storageValue}'); // تشخيص س30
     if (_saving) return;
     setState(() => _saving = true);
     try {
@@ -251,7 +252,8 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         existing: ItemUniquenessIndex.build(rows.map(_asExisting)),
         excludeItemId: widget.existing?.id,
       );
-      debugPrint('SAVE: errors=${errors.length}'); // تشخيص س30 مؤقت
+      debugPrint('SAVE: errors=${errors.length} '
+          '${errors.map((e) => e.runtimeType).toList()}'); // تشخيص س30
       if (errors.isNotEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context)
