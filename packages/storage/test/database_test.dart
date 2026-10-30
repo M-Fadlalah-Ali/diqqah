@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
+import 'package:drift/drift.dart' show Value;
 
 void main() {
   late DiqqahDatabase db;

@@ -436,7 +436,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
             children: [
               Expanded(
                 child: DropdownButtonFormField<int>(
-                  value: _unitId,
+                  initialValue: _unitId,
                   decoration: InputDecoration(
                     labelText: 'الوحدة الأساسية *',
                     helperText: _units.isEmpty
