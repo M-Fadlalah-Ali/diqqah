@@ -803,7 +803,6 @@ void main() {
     final invId = (await db.customSelect(
       "SELECT id FROM invoices WHERE kind = 'purchase'",
     ).getSingle()).data['id'] as int;
-    final moveId = (await db.invoiceById(invId))!.moveId!;
     final stockMoveId = (await db.customSelect(
       'SELECT id FROM stock_moves',
     ).getSingle()).data['id'] as int;
