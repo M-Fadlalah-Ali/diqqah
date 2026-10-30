@@ -665,11 +665,11 @@ void main() {
     final f = await buildFixture(db);
     // مسودة فوق فترة ستقفل — الإدخال مشروع والترحيل لا (نمط القيود)
     final draftId = await db.createInvoiceDraft(InvoiceDraft(
-      kind: InvoiceKind.sale,
+      kind: InvoiceKind.purchase,
       dateText: f.date,
-      partyId: f.customerId,
+      partyId: f.supplierId,
       warehouseId: f.warehouseId,
-      lines: [f.line(f.oilId, 1, 40000)],
+      lines: [f.line(f.oilId, 1, 25000)],
     ));
     await (db.update(db.periods)).write(const PeriodsCompanion(
       state: Value('closed'),
@@ -686,11 +686,11 @@ void main() {
 
     // تاريخ خارج كل الفترات — والمرفوض لا يلمس العدّاد
     final outsideDraft = await db.createInvoiceDraft(InvoiceDraft(
-      kind: InvoiceKind.sale,
+      kind: InvoiceKind.purchase,
       dateText: '${f.year + 1}-06-15',
-      partyId: f.customerId,
+      partyId: f.supplierId,
       warehouseId: f.warehouseId,
-      lines: [f.line(f.oilId, 1, 40000)],
+      lines: [f.line(f.oilId, 1, 25000)],
     ));
     caught = null;
     try {
@@ -702,7 +702,7 @@ void main() {
     expect((caught as InvoiceValidationException).errors
         .whereType<InvoiceNoPeriod>(), isNotEmpty);
     final seq = await db.customSelect(
-      "SELECT COUNT(*) AS c FROM sequences WHERE kind = 'invoice_sale'",
+      "SELECT COUNT(*) AS c FROM sequences WHERE kind = 'invoice_purchase'",
     ).getSingle();
     expect(seq.data['c'], 0,
         reason: 'المحاولة المرفوضة لا تصدر رقماً (07 §1.9)');
@@ -800,6 +800,9 @@ void main() {
       () async {
     final f = await buildFixture(db);
     await f.purchaseCredit(lines: [f.line(f.oilId, 10, 25000)]);
+    // بيع خدمة نقدي كي تولد حركة صندوق يفحص عليها تجميد الحذف — بلا مساس
+    // المخزون كي تبقى أرقام الحواجز المخزنية كما هي
+    await f.saleCash(lines: [f.line(f.serviceId, 1, 15000)]);
     final invId = (await db.customSelect(
       "SELECT id FROM invoices WHERE kind = 'purchase'",
     ).getSingle()).data['id'] as int;

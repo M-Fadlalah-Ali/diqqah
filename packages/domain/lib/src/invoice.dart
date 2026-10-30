@@ -295,9 +295,13 @@ InvoiceTotals computeInvoiceTotals(InvoiceDraft draft) {
       shareDoc = subtotal == 0
           ? 0
           : roundHalfAwayFromZeroRatio(gross[i] * discount, subtotal);
-      shareBase = totalDoc == 0
+      // نصيب السطر من الصافي الأساسي يوزع بنسبة قيمته الخام على مجموع
+      // القيم الخام (subtotal) لا على الصافي — وإلا فليرةً (حيث الأساسي
+      // يساوي الصافي) يصير التوزيع محايداً وينزلق الخصم كله للسطر الأخير
+      // (علة CI 2026-10-30 — س32).
+      shareBase = subtotal == 0
           ? 0
-          : roundHalfAwayFromZeroRatio(gross[i] * totalBase, totalDoc);
+          : roundHalfAwayFromZeroRatio(gross[i] * totalBase, subtotal);
     }
     discountGiven += shareDoc;
     baseGiven += shareBase;

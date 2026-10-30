@@ -93,6 +93,9 @@ void main() {
         sumBase += l.baseMinor;
       }
       expect(sumBase, totals.totalBaseMinor);
+      // نصيب السطر الأساسي توزيع نسبي لا محايد (علة س32): زيت 27,003
+      expect(totals.lines[0].baseMinor, 27003);
+      expect(totals.lines[1].baseMinor, 8999);
     });
     test('هدية بسعر صفر لا تفسد التوزيع', () {
       final draft = InvoiceDraft(
