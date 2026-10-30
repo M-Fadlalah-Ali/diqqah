@@ -170,7 +170,14 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // زر الحذف غير موجود أصلاً (س-33)
+    // بطاقة التعديل أطول من الشاشة: زر التعطيل آخر الأبناء فيبني عند
+    // التمرير فقط (قائمة Sliver كسولة حتى داخل مدى الذاكرة المؤقتة) —
+    // سحبة تُدخله مدى البناء ثم يُلمس (فشل CI 2026-10-30: 0 widget قبل السحبة)
+    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // زر الحذف غير موجود أصلاً (س-33) — وبعد التمرير أقوى: كل الأبناء مبنيون
     expect(find.textContaining('حذف'), findsNothing);
     await tester.tap(find.text('تعطيل الطرف'));
     await tester.pump();
@@ -181,10 +188,13 @@ void main() {
     expect(find.text('معطّل'), findsOneWidget);
     expect(find.text('محمد الخالدي (0053)'), findsOneWidget);
 
-    // إعادة التفعيل من البطاقة نفسها
+    // إعادة التفعيل من البطاقة نفسها — وبالسحبة نفسها لزر أسفل الشاشة
     await tester.tap(find.text('محمد الخالدي (0053)'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('إعادة تفعيل الطرف'));
     await tester.pump();
@@ -245,9 +255,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    await tester.tap(find.text('الاثنان معاً'));
+    // ملصق النوع المزدوج «عميل ومورد معاً» حرفاً من مجال الأطراف (لا
+    // «الاثنان معاً» — نص التوثيق لا نص الواجهة — فشل CI 2026-10-30:
+    // 0 widget) وقربه حقل الائتمان أسفل الشاشة: سحبة تُدخل الاثنين مدى
+    // البناء ثم يُلمس الشريحة ويُكتب الحد
+    await tester.drag(find.byType(ListView).last, const Offset(0, -260));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('عميل ومورد معاً'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.enterText(find.byType(TextFormField).at(1), 'شركة الرحمة');
     await tester.enterText(find.byType(TextFormField).last, '5000');
