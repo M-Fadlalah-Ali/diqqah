@@ -271,8 +271,9 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
                 TextField(
                   controller: _name,
                   decoration: const InputDecoration(
-                      labelText:
-                          'اسم الصندوق (يُنشأ معه حسابه الورقي 111x آلياً)'),
+                      labelText: 'اسم الصندوق',
+                      helperText:
+                          'يُنشأ معه حسابه الورقي 111x التالي آلياً (D-086)'),
                 ),
                 DropdownButtonFormField<int>(
                   initialValue: _currencyId,
