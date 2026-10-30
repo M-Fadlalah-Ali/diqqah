@@ -260,12 +260,35 @@ void main() {
       toText: '${f.year - 1}-12-31',
     );
     expect(empty, isEmpty);
+
+    // ═══ س-84 تقرير المشتريات المستقل (دفعة 6-ب) — بمرآة الحركة البيعية ═══
+    final purchases = await db.purchasesMovementReport(
+      fromText: '${f.year}-01-01',
+      toText: '${f.year}-12-31',
+    );
+    expect(purchases, hasLength(1));
+    expect(purchases.single.qtyPurchasedBase, 10,
+        reason: 'شراء 10×10,000 الآجل من الدورة المعروفة');
+    expect(purchases.single.purchasesValueBaseMinor, 100000);
+    expect(purchases.single.qtyReturnedBase, 0);
+    expect(purchases.single.netValueBaseMinor, 100000,
+        reason: 'الصافي مشتق لا مخزن');
+    // ومدى لا يشمل الشهر يعطي صفر صفوف لا خطأ
+    final emptyPurchases = await db.purchasesMovementReport(
+      fromText: '${f.year - 1}-01-01',
+      toText: '${f.year - 1}-12-31',
+    );
+    expect(emptyPurchases, isEmpty);
   });
 
   test('مدقق المدى يرفض المدى المقلوب قبل لمس القاعدة', () async {
     final year = await seededYear(db);
     await expectLater(
       db.salesMovementReport(fromText: '$year-05-10', toText: '$year-05-01'),
+      throwsA(isA<ReportValidationException>()),
+    );
+    await expectLater(
+      db.purchasesMovementReport(fromText: '$year-05-10', toText: '$year-05-01'),
       throwsA(isA<ReportValidationException>()),
     );
   });
@@ -469,4 +492,34 @@ void main() {
       throwsA(predicate((e) => e.toString().contains('فترة مقفلة'))),
     );
   });
+
+  test('س-84 تقرير المشتريات: شراء ومردود شراء والصافي مشتق', () async {
+    final f = await buildFixture(db);
+    final purchaseId =
+        await f.purchaseCredit(lines: [f.line(f.oilId, 10, 10000)]);
+    // مردود 3 من الشراء بسعره الأصلي — فالقيمة الدفترية الخارجة تساوي
+    // قيمة السطر ولا فرق على 58 (س-05: المردود بسعر التكلفة ذاتها هنا)
+    final returnId = await db.createInvoiceDraft(InvoiceDraft(
+      kind: InvoiceKind.purchaseReturn,
+      dateText: f.date,
+      partyId: f.supplierId,
+      warehouseId: f.warehouseId,
+      originalInvoiceId: purchaseId,
+      lines: [f.line(f.oilId, 3, 10000)],
+    ));
+    await db.postInvoice(returnId);
+
+    final rows = await db.purchasesMovementReport(
+      fromText: '${f.year}-01-01',
+      toText: '${f.year}-12-31',
+    );
+    expect(rows, hasLength(1));
+    expect(rows.single.qtyPurchasedBase, 10);
+    expect(rows.single.purchasesValueBaseMinor, 100000);
+    expect(rows.single.qtyReturnedBase, 3);
+    expect(rows.single.returnsValueBaseMinor, 30000);
+    expect(rows.single.netQtyBase, 7);
+    expect(rows.single.netValueBaseMinor, 70000);
+  });
+
 }

@@ -206,4 +206,33 @@ void main() {
           isEmpty);
     });
   });
+  group('المشتريات النقية (س-84) — buildPurchasesMovementReport', () {
+    test('الصافي مشتق شراءً − مردوداً كمّةً وقيمة والفرز بالكود', () {
+      final rows = buildPurchasesMovementReport([
+        PurchasesMovementRawRow(
+            itemId: 1,
+            sku: 'OIL',
+            name: 'زيت',
+            qtyPurchasedBase: 10,
+            purchasesValueBaseMinor: 100000,
+            qtyReturnedBase: 3,
+            returnsValueBaseMinor: 30000),
+        PurchasesMovementRawRow(
+            itemId: 2,
+            sku: 'AAA',
+            name: 'أول صنف',
+            qtyPurchasedBase: 2,
+            purchasesValueBaseMinor: 5000,
+            qtyReturnedBase: 0,
+            returnsValueBaseMinor: 0),
+      ]);
+      expect(rows.map((r) => r.sku).toList(), ['AAA', 'OIL'],
+          reason: 'الفرز المعجمي بالكود بمرآة الحركة البيعية');
+      expect(rows.last.netQtyBase, 7);
+      expect(rows.last.netValueBaseMinor, 70000);
+      expect(rows.first.netQtyBase, 2);
+      expect(rows.first.netValueBaseMinor, 5000);
+    });
+  });
+
 }

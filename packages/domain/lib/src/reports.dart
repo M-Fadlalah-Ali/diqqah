@@ -15,6 +15,9 @@
 /// - المدى الزمني للسير بالمدى: نص ISO «YYYY-MM-DD» حصراً (D-077) وفرزه
 ///   المعجمي زمني صحيح — والمدقق هنا يرفض التاريخ الفاسد والمدى المقلوب
 ///   قبل أن يلمس القاعدة أصلاً.
+/// - المشتريات المستقل (س-84، دفعة 6-ب) بمرآة الحركة البيعية ذاتها:
+///   شراء ومردود شراء بمدى تاريخ والصافي مشتق — تنفيذ لوعد D-089
+///   «تقرير المشتريات المستقل مع واجهات التقارير».
 library;
 
 import 'invoice.dart' show roundHalfAwayFromZeroRatio;
@@ -341,6 +344,84 @@ List<SalesMovementRow> buildSalesMovementReport(
   return rows;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 6. المشتريات — التقرير المستقل (س-84، دفعة 6-ب) — شراء ومردود شراء
+//     بمدى تاريخ بمرآة الحركة البيعية (س-75) ذاتها، والصافي مشتق لا
+//     مخزن: حركة الشراء ظاهرة في المخزون والميزان أصلاً (D-089)، وهذا
+//     التقرير يجعلها مقروءة بذاتها بلا تفكيك القيود.
+// ═══════════════════════════════════════════════════════════════════
+
+/// الخام: تجميع أسطر الفواتير المرحّلة لصنف بمدى تاريخ (الشراء وردّه
+/// بكمياته وقيمه بالأساسية — القيم المردودة بمقدارها الموجب كما تُخزن).
+class PurchasesMovementRawRow {
+  final int itemId;
+  final String sku;
+  final String name;
+  final int qtyPurchasedBase;
+  final int purchasesValueBaseMinor;
+  final int qtyReturnedBase;
+  final int returnsValueBaseMinor;
+
+  const PurchasesMovementRawRow({
+    required this.itemId,
+    required this.sku,
+    required this.name,
+    required this.qtyPurchasedBase,
+    required this.purchasesValueBaseMinor,
+    required this.qtyReturnedBase,
+    required this.returnsValueBaseMinor,
+  });
+}
+
+/// صف حركة شراء — والصافي مشتق هنا لا مخزن: شراء − مردود كمّةً وقيمة
+/// (نمط الصافي البيعي ذاته — لا رقمان مخزنان يختلفان أبداً).
+class PurchasesMovementRow {
+  final int itemId;
+  final String sku;
+  final String name;
+  final int qtyPurchasedBase;
+  final int purchasesValueBaseMinor;
+  final int qtyReturnedBase;
+  final int returnsValueBaseMinor;
+
+  const PurchasesMovementRow({
+    required this.itemId,
+    required this.sku,
+    required this.name,
+    required this.qtyPurchasedBase,
+    required this.purchasesValueBaseMinor,
+    required this.qtyReturnedBase,
+    required this.returnsValueBaseMinor,
+  });
+
+  int get netQtyBase => qtyPurchasedBase - qtyReturnedBase;
+
+  int get netValueBaseMinor =>
+      purchasesValueBaseMinor - returnsValueBaseMinor;
+}
+
+/// صياغة حركة الشراء: صفوف بترتيب الكود — بمرآة بناء الحركة البيعية
+/// حرفاً فتقرأ الدفعتان بلسان واحد.
+List<PurchasesMovementRow> buildPurchasesMovementReport(
+  List<PurchasesMovementRawRow> raws,
+) {
+  final rows = [
+    for (final raw in raws)
+      PurchasesMovementRow(
+        itemId: raw.itemId,
+        sku: raw.sku,
+        name: raw.name,
+        qtyPurchasedBase: raw.qtyPurchasedBase,
+        purchasesValueBaseMinor: raw.purchasesValueBaseMinor,
+        qtyReturnedBase: raw.qtyReturnedBase,
+        returnsValueBaseMinor: raw.returnsValueBaseMinor,
+      ),
+  ];
+  rows.sort((a, b) => a.sku.compareTo(b.sku));
+  return rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
 // مدقق المدى الزمني — الحرس الأول قبل أن يلمس التقرير القاعدة.
 // ═══════════════════════════════════════════════════════════════════

@@ -4603,6 +4603,55 @@ Future<List<SalesMovementRow>> salesMovementReport({
   ]);
 }
 
+/// تقرير المشتريات المستقل (س-84، دفعة 6-ب) — شراء ومردود شراء مرحّلان
+/// بمدى تاريخ تنفيذاً لوعد D-089 «تقرير المشتريات المستقل مع واجهات
+/// التقارير» — بمرآة salesMovementReport ذاتها وبفلتر قيم **التخزين**
+/// `purchase`/`purchase_return` لا قيم التسلسل (درس «قيمتان لنوع واحد»
+/// س34)، ومدقق المدى حرسها الأول.
+Future<List<PurchasesMovementRow>> purchasesMovementReport({
+  required String fromText,
+  required String toText,
+}) async {
+  final errors = validateReportRange(fromText, toText);
+  if (errors.isNotEmpty) {
+    throw ReportValidationException(errors);
+  }
+  final rows = await customSelect(
+    'SELECT il.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    "SUM(CASE WHEN inv.kind = 'purchase' "
+    'THEN il.qty_base ELSE 0 END) AS qty_purchased, '
+    "SUM(CASE WHEN inv.kind = 'purchase' "
+    'THEN il.line_total_base_minor ELSE 0 END) AS purchases_value, '
+    "SUM(CASE WHEN inv.kind = 'purchase_return' "
+    'THEN il.qty_base ELSE 0 END) AS qty_returned, '
+    "SUM(CASE WHEN inv.kind = 'purchase_return' "
+    'THEN il.line_total_base_minor ELSE 0 END) AS returns_value '
+    'FROM invoice_lines il '
+    'JOIN invoices inv ON inv.id = il.invoice_id '
+    'JOIN items i ON i.id = il.item_id '
+    "WHERE inv.state <> 'draft' AND inv.is_deleted = 0 "
+    'AND il.is_deleted = 0 '
+    'AND inv.invoice_date >= ?1 AND inv.invoice_date <= ?2 '
+    'GROUP BY il.item_id ORDER BY i.sku',
+    variables: [
+      Variable.withString(fromText),
+      Variable.withString(toText),
+    ],
+  ).get();
+  return buildPurchasesMovementReport([
+    for (final r in rows)
+      PurchasesMovementRawRow(
+        itemId: r.data['item_id'] as int,
+        sku: r.data['sku'] as String,
+        name: r.data['name'] as String,
+        qtyPurchasedBase: r.data['qty_purchased'] as int,
+        purchasesValueBaseMinor: r.data['purchases_value'] as int,
+        qtyReturnedBase: r.data['qty_returned'] as int,
+        returnsValueBaseMinor: r.data['returns_value'] as int,
+      ),
+  ]);
+}
+
 Future<void> _createClosingTriggers() async {
   // ═══ حواجز الإقفال الثالثة (دفعة 6 — ترحيلة v9): المجال يفحص فترة
   // التاريخ (MoveClosedPeriod وأخواتها الأربع) والمحرك يمنع قبل أي كتابة

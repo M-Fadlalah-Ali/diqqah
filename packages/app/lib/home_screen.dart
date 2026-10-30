@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'settings_screen.dart';
 import 'parties_screen.dart';
 import 'items_screen.dart';
+import 'reports_screen.dart';
 
 /// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل. الوحدات ومراحل
 /// توفرها من جدول النطاق (01 §5) حرفاً، والإعدادات متاحة فوراً بعد
@@ -24,7 +25,8 @@ class HomeScreen extends StatelessWidget {
   /// (اسم الوحدة، مرحلة التوفر في 01، متاحة الآن؟) — إظهار الواقع لا وعود
   /// مبكرة. الإعدادات متاحة فوراً بعد التهيئة (س-01)، والأطراف فُتحت بدفعة
   /// م1 الأولى (F-020..F-023، س-29..س-35) والأصناف بدفعتها الثانية
-  /// (F-030/F-031، س-36..س-41) — البقية في مفرغها.
+  /// (F-030/F-031، س-36..س-41) والتقارير اليومية بدفعتها السادسة وواجهاتها
+  /// (F-189..F-195، دفعتا 6 و6-ب) — البقية في مفرغها.
   static const List<(String, String, bool)> _modules = [
     ('الأطراف', 'متاحة الآن — بطاقة الأطراف والبحث الجامع (F-020..F-023)', true),
     ('الأصناف', 'متاحة الآن — بطاقة الصنف والوحدات الأساسية (F-030/F-031)', true),
@@ -37,7 +39,7 @@ class HomeScreen extends StatelessWidget {
     ('الدفتر المحاسبي', 'الإصدار 1 — الأساس', false),
     ('العملات', 'الإصدار 1 (واحدة) → 3 (متعددة + فروق)', false),
     ('الصلاحيات', 'الإصدار 1', false),
-    ('التقارير اليومية', 'الإصدار 1', false),
+    ('التقارير اليومية', 'متاحة الآن — التقارير الست والفترات والإقفال (F-189..F-195)', true),
     ('المزامنة', 'الإصدار 4', false),
     ('الإعدادات', 'متاحة الآن — النسخ الاحتياطي والاستعادة (F-012/F-013)', true),
   ];
@@ -63,7 +65,9 @@ class HomeScreen extends StatelessWidget {
                           ? Icons.people_outline
                           : title == 'الأصناف'
                               ? Icons.inventory_2_outlined
-                              : Icons.settings_outlined,
+                              : title == 'التقارير اليومية'
+                                  ? Icons.query_stats
+                                  : Icons.settings_outlined,
                 ),
                 title: Text(title),
                 subtitle: Text(enabled ? stage : 'معطلة — متاح في $stage'),
@@ -71,16 +75,19 @@ class HomeScreen extends StatelessWidget {
                 onTap: enabled
                     ? () {
                         // الأطراف (دفعة م1 (1)) والأصناف (دفعة م1 (2))
-                        // وحدات مفتوحة — والبقية الإعدادات وحدها حتى دفعاتها.
+                        // والتقارير اليومية (دفعتا م1 (6) و(6-ب)) وحدات
+                        // مفتوحة — والبقية الإعدادات وحدها حتى دفعاتها.
                         final Widget target = title == 'الأطراف'
                             ? PartiesScreen(db: db)
                             : title == 'الأصناف'
                                 ? ItemsScreen(db: db)
-                                : SettingsScreen(
-                                    db: db,
-                                    dbPath: dbPath,
-                                    onRestored: onRestored,
-                                  );
+                                : title == 'التقارير اليومية'
+                                    ? ReportsScreen(db: db)
+                                    : SettingsScreen(
+                                        db: db,
+                                        dbPath: dbPath,
+                                        onRestored: onRestored,
+                                      );
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(builder: (_) => target),
                         );
