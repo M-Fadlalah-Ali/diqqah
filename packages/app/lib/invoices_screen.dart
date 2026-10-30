@@ -28,7 +28,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   String? _kind;
   Future<List<InvoiceListRow>>? _rows;
 
-  static const List<(String?, String)> _kindChoices = [
+  static final List<(String?, String)> _kindChoices = [
     (null, 'كل الأنواع'),
     (InvoiceKind.purchase.storageValue, InvoiceKind.purchase.label),
     (InvoiceKind.sale.storageValue, InvoiceKind.sale.label),
@@ -276,7 +276,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _items = items.where((i) => i.isActive).toList();
       _unitNames = {for (final u in units) u.id: u.name};
       // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط.
-      _boxId = _boxes.isEmpty ? null : _boxes.first.id;
+      _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
       _warehouseId = _warehouses.isEmpty ? null : _warehouses.first.id;
       final base =
           _currencies.where((c) => c.isBase).toList();
@@ -475,7 +475,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     items: [
                       for (final b in _boxes)
                         DropdownMenuItem<int>(
-                            value: b.id,
+                            value: b.boxId,
                             child: Text('${b.name} (${b.currencyCode})')),
                     ],
                     onChanged: (value) => setState(() => _boxId = value),

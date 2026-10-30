@@ -450,7 +450,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
       _parties = parties.where((p) => p.isActive).toList();
       _accounts = accounts.where((a) => a.isActive && a.isLeaf).toList();
       _currencies = currencies;
-      _boxId = _boxes.isEmpty ? null : _boxes.first.id;
+      _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
     });
   }
 
@@ -469,7 +469,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   /// عملة الصندوق المختار — سند الصندوق بعملته حصراً (D-086 معتمد).
   CashBoxReportRow? get _box {
     for (final b in _boxes) {
-      if (b.id == _boxId) return b;
+      if (b.boxId == _boxId) return b;
     }
     return null;
   }
@@ -492,13 +492,6 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
       .where((p) =>
           p.kind == (_kind.isReceipt ? 'customer' : 'supplier'))
       .toList();
-
-  CurrencyRow _currencyOf(CashBoxReportRow box, List<CurrencyRow> currencies) {
-    for (final c in currencies) {
-      if (c.code == box.currencyCode) return c;
-    }
-    return currencies.first;
-  }
 
   /// الفواتير المفتوحة للطرف بعملة الصندوق — وحقول المطابقة تُبنى
   /// من جديد عند كل تحميل (المسودات مقترحات لا تُحسب).
@@ -743,7 +736,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                   items: [
                     for (final b in _boxes)
                       DropdownMenuItem<int>(
-                          value: b.id,
+                          value: b.boxId,
                           child: Text('${b.name} (${b.currencyCode})')),
                   ],
                   onChanged: (value) {
@@ -764,7 +757,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                   decoration: const InputDecoration(
                       labelText: 'المبلغ بوحدة صغرى'),
                 ),
-                if (box != null && !_currencyOf(box!).isBase)
+                if (box != null && !_currencyOf(box).isBase)
                   TextField(
                     controller: _fx,
                     keyboardType: TextInputType.number,
@@ -874,14 +867,14 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
     setState(() {
       _boxes = boxes;
       _currencies = currencies;
-      _fromBoxId = _boxes.isEmpty ? null : _boxes.first.id;
-      _toBoxId = _boxes.length < 2 ? null : _boxes[1].id;
+      _fromBoxId = _boxes.isEmpty ? null : _boxes.first.boxId;
+      _toBoxId = _boxes.length < 2 ? null : _boxes[1].boxId;
     });
   }
 
   CashBoxReportRow? get _fromBox {
     for (final b in _boxes) {
-      if (b.id == _fromBoxId) return b;
+      if (b.boxId == _fromBoxId) return b;
     }
     return null;
   }
@@ -994,7 +987,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   items: [
                     for (final b in _boxes)
                       DropdownMenuItem<int>(
-                          value: b.id,
+                          value: b.boxId,
                           child: Text('${b.name} (${b.currencyCode})')),
                   ],
                   onChanged: (value) => setState(() => _fromBoxId = value),
@@ -1006,7 +999,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   items: [
                     for (final b in _boxes)
                       DropdownMenuItem<int>(
-                          value: b.id,
+                          value: b.boxId,
                           child: Text('${b.name} (${b.currencyCode})')),
                   ],
                   onChanged: (value) => setState(() => _toBoxId = value),
@@ -1085,7 +1078,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
-      _boxId = _boxes.isEmpty ? null : _boxes.first.id;
+      _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
     });
   }
 
@@ -1180,7 +1173,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
                   items: [
                     for (final b in _boxes)
                       DropdownMenuItem<int>(
-                          value: b.id,
+                          value: b.boxId,
                           child: Text('${b.name} (${b.currencyCode})')),
                   ],
                   onChanged: (value) => setState(() => _boxId = value),

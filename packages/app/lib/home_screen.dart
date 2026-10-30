@@ -7,7 +7,6 @@ import 'parties_screen.dart';
 import 'items_screen.dart';
 import 'reports_screen.dart';
 import 'invoices_screen.dart';
-import 'vouchers_screen.dart';
 import 'boxes_screen.dart';
 import 'roles_screen.dart';
 

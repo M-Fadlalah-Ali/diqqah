@@ -57,7 +57,7 @@ class _RolesScreenState extends State<RolesScreen> {
                   style: Theme.of(context).textTheme.bodyMedium),
             ),
           ),
-          if (_errors != null) Text(_errors!),
+          if (_errors != null) Text(_errors!.join('\n')),
           Text('الأدوار', style: Theme.of(context).textTheme.titleMedium),
           if (roles == null)
             const Center(child: CircularProgressIndicator())

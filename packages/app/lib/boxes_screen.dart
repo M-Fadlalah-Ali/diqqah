@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'reports_screen.dart' show formatMinorAmount;
+import 'vouchers_screen.dart';
 
 /// شاشة الصناديق — دفعة (6-ج) واجهات الإدخال (س-93، D-095 معروض):
 /// القائمة من تقرير الصناديق لحظياً (الرصيد بمعادلة الصندوق ذاتها)،
@@ -69,7 +71,7 @@ class _BoxesScreenState extends State<BoxesScreen> {
     );
     if (confirmed != true) return;
     try {
-      await widget.db.disableCashBox(box.id);
+      await widget.db.disableCashBox(box.boxId);
       if (!mounted) return;
       setState(() => _notice =
           'عُطّل الصندوق «${box.name}» وحسابه ${box.accountCode} معه');
@@ -85,7 +87,21 @@ class _BoxesScreenState extends State<BoxesScreen> {
   Widget build(BuildContext context) {
     final rows = _rows;
     return Scaffold(
-      appBar: AppBar(title: const Text('الصناديق')),
+      appBar: AppBar(
+        title: const Text('الصناديق'),
+        // مدخل السندات والتحويلات والتسويات — حركتها حركة الصناديق،
+        // والوحدة ليست بنداً مستقلاً بالهيكلية (D-094 معروض).
+        actions: [
+          IconButton(
+            tooltip: 'السندات والتحويلات والتسويات',
+            icon: const Icon(Icons.receipt_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                  builder: (_) => VouchersScreen(db: widget.db)),
+            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNew,
         icon: const Icon(Icons.account_balance_wallet_outlined),
@@ -109,7 +125,7 @@ class _BoxesScreenState extends State<BoxesScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
                 padding: const EdgeInsets.all(12),
-                child: Text(_errors!,
+                child: Text(_errors!.join('\n'),
                     style: TextStyle(
                         color: Theme.of(context)
                             .colorScheme
@@ -165,7 +181,7 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
   final TextEditingController _name = TextEditingController();
   int _currencyId = 1;
   List<CurrencyRow> _currencies = [];
-  String? _errors;
+  List<String>? _errors;
   bool _busy = false;
 
   @override
@@ -233,7 +249,7 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
                     margin: const EdgeInsets.only(bottom: 12),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: Text(_errors!,
+                      child: Text(_errors!.join('\n'),
                           style: TextStyle(
                               color: Theme.of(context)
                                   .colorScheme
