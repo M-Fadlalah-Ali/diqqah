@@ -281,6 +281,18 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
+    // تشخيص س30 مؤقت — يُزال بعد حسم العلة
+    debugPrint('DIAG screens: ItemsScreen=${find.byType(ItemsScreen).evaluate().length} '
+        'ItemEditScreen=${find.byType(ItemEditScreen).evaluate().length}');
+    for (final t in tester.widgetList<Text>(find.byType(Text))) {
+      final s = t.data ?? t.textSpan?.toPlainText() ?? '<span>';
+      debugPrint('DIAG text: $s');
+    }
+    final rowsDiag = await db.select(db.items).get();
+    for (final r in rowsDiag) {
+      debugPrint('DIAG row: id=${r.id} sku=${r.sku} name=${r.name} '
+          'kind=${r.kind} unit=${r.baseUnitId} active=${r.isActive}');
+    }
     expect(find.text('زيت ممتاز (100)'), findsOneWidget);
 
     // س-40: فتح البطاقة ثانية ثم التعطيل — بشارة وبلا حذف
