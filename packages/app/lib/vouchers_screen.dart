@@ -179,7 +179,7 @@ Widget _tabList<T>(BuildContext context, AsyncSnapshot<List<T>> snapshot,
 class _VouchersTab extends StatefulWidget {
   final DiqqahDatabase db;
 
-  const _VouchersTab({required this.db});
+  const _VouchersTab({super.key, required this.db});
 
   @override
   State<_VouchersTab> createState() => _VouchersTabState();
@@ -253,7 +253,7 @@ class _VouchersTabState extends State<_VouchersTab>
 class _TransfersTab extends StatefulWidget {
   final DiqqahDatabase db;
 
-  const _TransfersTab({required this.db});
+  const _TransfersTab({super.key, required this.db});
 
   @override
   State<_TransfersTab> createState() => _TransfersTabState();
@@ -326,7 +326,7 @@ class _TransfersTabState extends State<_TransfersTab>
 class _AdjustmentsTab extends StatefulWidget {
   final DiqqahDatabase db;
 
-  const _AdjustmentsTab({required this.db});
+  const _AdjustmentsTab({super.key, required this.db});
 
   @override
   State<_AdjustmentsTab> createState() => _AdjustmentsTabState();
