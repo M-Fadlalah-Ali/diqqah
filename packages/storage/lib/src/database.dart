@@ -1825,331 +1825,6 @@ Future<void> _seedInvoiceBaseline() async {
   }
 }
 
-/// خطة سطر مخزني داخل فاتورة — قيمه محسوبة مقدماً فالكتابة تكرر
-/// المحاكاة حرفاً ولا تعيد الحساب (لا فجوة بين الفحص والتنفيذ).
-class _StockLinePlan {
-  final int lineIndex;
-  final int itemId;
-  final int qtyBase;
-
-  /// قيمة حركة المخزون ودلتا الرصيد القيمية: دخول الشراء صافي السطر،
-  /// خروج البيع تكلفته المحمولة، دخول مردود البيع لقطة الأصل (م-25)،
-  /// خروج مردود الشراء القيمة الدفترية الجارية (D-067).
-  final int stockValueMinor;
-
-  /// نظير سطر التكلفة 51: تكلفة البيع أو المتوسط الجاري للمردود —
-  /// والفرق بينه وبين [stockValueMinor] يجمع على 58 فروق التكلفة.
-  final int counterpartMinor;
-
-  const _StockLinePlan({
-    required this.lineIndex,
-    required this.itemId,
-    required this.qtyBase,
-    required this.stockValueMinor,
-    required this.counterpartMinor,
-  });
-}
-
-Future<Map<String, Object?>?> _itemByIdTx(int id) async {
-  final rows = await customSelect(
-    'SELECT id, sku, name, kind, base_unit_id, is_active FROM items '
-    'WHERE id = ? AND is_deleted = 0',
-    variables: [Variable.withInt(id)],
-  ).get();
-  return rows.isEmpty ? null : rows.first.data;
-}
-
-Future<CashBoxRow?> _cashBoxByIdTx(int id) async {
-  final rows = await customSelect(
-    'SELECT id, name, currency_id, account_id, opening_balance_base_minor '
-    'FROM cash_boxes WHERE id = ? AND is_deleted = 0',
-    variables: [Variable.withInt(id)],
-  ).get();
-  if (rows.isEmpty) return null;
-  final d = rows.first.data;
-  return CashBoxRow(
-    id: d['id'] as int,
-    name: d['name'] as String,
-    currencyId: d['currency_id'] as int,
-    accountId: d['account_id'] as int,
-    openingBalanceBaseMinor: d['opening_balance_base_minor'] as int,
-  );
-}
-
-Future<WarehouseRow?> _warehouseByIdTx(int id) async {
-  final rows = await customSelect(
-    'SELECT id, name, is_active FROM warehouses '
-    'WHERE id = ? AND is_deleted = 0',
-    variables: [Variable.withInt(id)],
-  ).get();
-  if (rows.isEmpty) return null;
-  final d = rows.first.data;
-  return WarehouseRow(
-    id: d['id'] as int,
-    name: d['name'] as String,
-    isActive: (d['is_active'] as int) == 1,
-  );
-}
-
-/// الحساب بالكود من الدليل المزروع (03 §4: أكواد خريطة العمليات) —
-/// الغياب يرمي صريحاً لأن الدليل إعداد والكود المعتمد مرجع الخريطة.
-Future<int> _accountIdByCodeTx(String code) async {
-  final rows = await customSelect(
-    'SELECT id FROM accounts WHERE code = ?',
-    variables: [Variable.withString(code)],
-  ).get();
-  if (rows.isEmpty) {
-    throw StateError('حساب الدليل بالكود $code غير موجود — الدليل إعداد '
-        'وأكواد خريطة العمليات (03 §4) مرجع المحرك');
-  }
-  return rows.first.data['id'] as int;
-}
-
-Future<int> _journalIdByCodeTx(String code) async {
-  final rows = await customSelect(
-    'SELECT id FROM journals WHERE code = ?',
-    variables: [Variable.withString(code)],
-  ).get();
-  if (rows.isEmpty) {
-    throw StateError('الدفتر بالكود $code غير موجود من البذر (05 §3.4)');
-  }
-  return rows.first.data['id'] as int;
-}
-
-/// رصيد صنف في مستودعه (كمية، قيمة) — مصدر الترصيد القيمة الإجمالية
-/// (D-067) والغائب صفر.
-Future<(int, int)> _stockBalanceTx(int itemId, int warehouseId) async {
-  final rows = await customSelect(
-    'SELECT qty_base, total_value_minor FROM stock_balances '
-    'WHERE item_id = ? AND warehouse_id = ?',
-    variables: [Variable.withInt(itemId), Variable.withInt(warehouseId)],
-  ).get();
-  if (rows.isEmpty) return (0, 0);
-  final d = rows.first.data;
-  return (d['qty_base'] as int, d['total_value_minor'] as int);
-}
-
-/// رصيد صندوق بالأساسية: الافتتاحي + الداخل − الخارج (05 §5).
-Future<int> _cashBoxBalanceTx(int boxId) async {
-  final rows = await customSelect(
-    "SELECT (SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
-    "WHERE id = ?1) + "
-    "(SELECT COALESCE(SUM(CASE WHEN kind = 'in' THEN amount_base_minor "
-    "ELSE -amount_base_minor END), 0) FROM cash_movements "
-    "WHERE cash_box_id = ?1) AS balance",
-    variables: [Variable.withInt(boxId)],
-  ).get();
-  return rows.first.data['balance'] as int;
-}
-
-/// كمية الأصل لكل صنف (مجموع أسطره — التكرار مشروع فيتجمّع).
-Future<Map<int, int>> _origQtyByItemTx(int originalInvoiceId) async {
-  final rows = await customSelect(
-    'SELECT item_id, SUM(qty_base) AS q FROM invoice_lines '
-    'WHERE invoice_id = ? GROUP BY item_id',
-    variables: [Variable.withInt(originalInvoiceId)],
-  ).get();
-  return {for (final r in rows) r.data['item_id'] as int: r.data['q'] as int};
-}
-
-/// كمية المردودات المرحّلة للأصل لكل صنف بنوعها (س-05/س-11: المتبقي
-/// من الأصل مطروحاً منه مردوداته).
-Future<Map<int, int>> _returnedQtyByItemTx(
-  int originalInvoiceId,
-  String returnKindValue,
-) async {
-  final rows = await customSelect(
-    'SELECT il.item_id AS item_id, SUM(il.qty_base) AS q '
-    'FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id '
-    "WHERE i.original_invoice_id = ?1 AND i.kind = ?2 AND i.state <> 'draft' "
-    'GROUP BY il.item_id',
-    variables: [
-      Variable.withInt(originalInvoiceId),
-      Variable.withString(returnKindValue),
-    ],
-  ).get();
-  return {for (final r in rows) r.data['item_id'] as int: r.data['q'] as int};
-}
-
-/// حركات خروج الأصل لكل صنف (كمية، قيمة) — مصدر لقطة التكلفة لمردود
-/// البيع (م-25: «لقطة تكلفة خروج الأصل المخزنة في حركة الخروج»).
-Future<(Map<int, int>, Map<int, int>)> _originalOutMovesByItemTx(
-  int originalInvoiceId,
-) async {
-  final rows = await customSelect(
-    "SELECT item_id, SUM(-qty_base) AS q, SUM(value_base_minor) AS v "
-    "FROM stock_moves WHERE ref_doc_type = 'invoice' AND ref_doc_id = ?1 "
-    'AND qty_base < 0 GROUP BY item_id',
-    variables: [Variable.withInt(originalInvoiceId)],
-  ).get();
-  final qty = <int, int>{};
-  final value = <int, int>{};
-  for (final r in rows) {
-    qty[r.data['item_id'] as int] = r.data['q'] as int;
-    value[r.data['item_id'] as int] = r.data['v'] as int;
-  }
-  return (qty, value);
-}
-
-/// قيم الاستعادة الممنوحة سلفاً لمردودات أصل بيع (دخول المخزون) لكل
-/// صنف — كي يمتص آخر مردود ما تبقى من قيمة الأصل بلا غبار (D-067).
-Future<Map<int, int>> _returnedRestoreByItemTx(int originalInvoiceId) async {
-  final rows = await customSelect(
-    "SELECT sm.item_id AS item_id, SUM(sm.value_base_minor) AS v "
-    "FROM stock_moves sm JOIN invoices i ON i.id = sm.ref_doc_id "
-    "WHERE sm.ref_doc_type = 'invoice' AND i.original_invoice_id = ?1 "
-    "AND i.kind = 'sale_return' AND sm.qty_base > 0 GROUP BY sm.item_id",
-    variables: [Variable.withInt(originalInvoiceId)],
-  ).get();
-  return {for (final r in rows) r.data['item_id'] as int: r.data['v'] as int};
-}
-
-Future<InvoiceDocument?> _invoiceRowTx(int id) async {
-  final rows = await customSelect(
-    'SELECT id, kind, number, party_id, cash_box_id, warehouse_id, '
-    'invoice_date, due_date, currency_id, fx_rate, discount_rate, '
-    'subtotal_doc_minor, discount_doc_minor, total_doc_minor, '
-    'total_base_minor, state, move_id, original_invoice_id, narration '
-    'FROM invoices WHERE id = ? AND is_deleted = 0',
-    variables: [Variable.withInt(id)],
-  ).get();
-  if (rows.isEmpty) return null;
-  final d = rows.first.data;
-  return InvoiceDocument(
-    id: d['id'] as int,
-    kind: d['kind'] as String,
-    number: d['number'] as String,
-    partyId: d['party_id'] as int?,
-    cashBoxId: d['cash_box_id'] as int?,
-    warehouseId: d['warehouse_id'] as int?,
-    invoiceDate: d['invoice_date'] as String,
-    dueDate: d['due_date'] as String?,
-    currencyId: d['currency_id'] as int,
-    fxRate: d['fx_rate'] as int,
-    discountRate: d['discount_rate'] as int,
-    subtotalDocMinor: d['subtotal_doc_minor'] as int,
-    discountDocMinor: d['discount_doc_minor'] as int,
-    totalDocMinor: d['total_doc_minor'] as int,
-    totalBaseMinor: d['total_base_minor'] as int,
-    state: d['state'] as String,
-    moveId: d['move_id'] as int?,
-    originalInvoiceId: d['original_invoice_id'] as int?,
-    narration: d['narration'] as String?,
-  );
-}
-
-Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
-  final rows = await customSelect(
-    'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, qty, '
-    'qty_base, unit_price_minor, discount_minor, tax_rate, '
-    'line_total_doc_minor, line_total_base_minor, uuid '
-    'FROM invoice_lines WHERE invoice_id = ? ORDER BY id',
-    variables: [Variable.withInt(invoiceId)],
-  ).get();
-  return [
-    for (final r in rows)
-      InvoiceLineDocument(
-        id: r.data['id'] as int,
-        invoiceId: r.data['invoice_id'] as int,
-        itemId: r.data['item_id'] as int,
-        unitId: r.data['unit_id'] as int,
-        factorAtEntry: r.data['factor_at_entry'] as int,
-        qty: r.data['qty'] as int,
-        qtyBase: r.data['qty_base'] as int,
-        unitPriceMinor: r.data['unit_price_minor'] as int,
-        discountMinor: r.data['discount_minor'] as int,
-        taxRate: r.data['tax_rate'] as int,
-        lineTotalDocMinor: r.data['line_total_doc_minor'] as int,
-        lineTotalBaseMinor: r.data['line_total_base_minor'] as int,
-        uuid: r.data['uuid'] as String,
-      ),
-  ];
-}
-
-/// لقطة الفاتورة الكاملة JSON للسجل (07 §2.3/D-067) — تُكتب لحظة الحدث.
-Future<String> _invoiceSnapshotTx(int invoiceId) async {
-  final inv = (await _invoiceRowTx(invoiceId))!;
-  final lines = await _invoiceLinesTx(invoiceId);
-  return jsonEncode(<String, Object?>{
-    'id': inv.id,
-    'kind': inv.kind,
-    'number': inv.number,
-    'party_id': inv.partyId,
-    'cash_box_id': inv.cashBoxId,
-    'warehouse_id': inv.warehouseId,
-    'date': inv.invoiceDate,
-    'due_date': inv.dueDate,
-    'currency_id': inv.currencyId,
-    'fx_rate': inv.fxRate,
-    'discount_rate': inv.discountRate,
-    'total_doc_minor': inv.totalDocMinor,
-    'total_base_minor': inv.totalBaseMinor,
-    'state': inv.state,
-    'move_id': inv.moveId,
-    'original_invoice_id': inv.originalInvoiceId,
-    'lines': [
-      for (final l in lines)
-        <String, Object?>{
-          'item_id': l.itemId,
-          'unit_id': l.unitId,
-          'qty_base': l.qtyBase,
-          'unit_price_minor': l.unitPriceMinor,
-          'discount_minor': l.discountMinor,
-          'line_total_doc_minor': l.lineTotalDocMinor,
-          'line_total_base_minor': l.lineTotalBaseMinor,
-          'uuid': l.uuid,
-        }
-    ],
-  });
-}
-
-Future<void> _recordInvoiceEventTx({
-  required int invoiceId,
-  required String action,
-  String? payload,
-}) async {
-  await into(events).insert(
-    EventsCompanion.insert(
-      eventAt: DateTime.now().millisecondsSinceEpoch,
-      deviceId: await deviceId(),
-      entityType: 'invoice',
-      entityId: Value(invoiceId),
-      action: action,
-      payload: payload ?? await _invoiceSnapshotTx(invoiceId),
-      uuid: const Uuid().v4(),
-    ),
-  );
-}
-
-/// إعادة بناء مسودة الفاتورة من صفوفها — التحقق على ما خُزّن لا على ما
-/// قيل (07 §1.1: لا ثقة بالمدخلات بعد كتابتها).
-InvoiceDraft _draftFromRows(InvoiceDocument inv, List<InvoiceLineDocument> lines) {
-  return InvoiceDraft(
-    kind: InvoiceKind.fromStorage(inv.kind),
-    dateText: inv.invoiceDate,
-    dueDateText: inv.dueDate,
-    partyId: inv.partyId,
-    cashBoxId: inv.cashBoxId,
-    warehouseId: inv.warehouseId,
-    currencyId: inv.currencyId,
-    fxRate: inv.fxRate,
-    discountRate: inv.discountRate,
-    originalInvoiceId: inv.originalInvoiceId,
-    narration: inv.narration,
-    lines: [
-      for (final l in lines)
-        InvoiceLineDraft(
-          itemId: l.itemId,
-          unitId: l.unitId,
-          qtyBase: l.qtyBase,
-          unitPriceMinor: l.unitPriceMinor,
-          discountMinor: l.discountMinor,
-          taxRate: l.taxRate,
-        ),
-    ],
-  );
-}
-
 /// تخطيط الأسطر المخزنية لكل أنواع الفواتير — بضاعة حصراً (الخدمة بلا
 /// مخزون ولا تكلفة — س-08): دخول الشراء صافي السطر، خروج البيع ومردود
 /// الشراء بالمتوسط الجاري المتسلسل (D-067)، ودخول مردود البيع بلقطة
@@ -3067,6 +2742,331 @@ class _StockSim {
     final current = _byItem[itemId] ?? (0, 0);
     _byItem[itemId] = (current.$1 + qtyDelta, current.$2 + valueDelta);
   }
+}
+
+/// خطة سطر مخزني داخل فاتورة — قيمه محسوبة مقدماً فالكتابة تكرر
+/// المحاكاة حرفاً ولا تعيد الحساب (لا فجوة بين الفحص والتنفيذ).
+class _StockLinePlan {
+  final int lineIndex;
+  final int itemId;
+  final int qtyBase;
+
+  /// قيمة حركة المخزون ودلتا الرصيد القيمية: دخول الشراء صافي السطر،
+  /// خروج البيع تكلفته المحمولة، دخول مردود البيع لقطة الأصل (م-25)،
+  /// خروج مردود الشراء القيمة الدفترية الجارية (D-067).
+  final int stockValueMinor;
+
+  /// نظير سطر التكلفة 51: تكلفة البيع أو المتوسط الجاري للمردود —
+  /// والفرق بينه وبين [stockValueMinor] يجمع على 58 فروق التكلفة.
+  final int counterpartMinor;
+
+  const _StockLinePlan({
+    required this.lineIndex,
+    required this.itemId,
+    required this.qtyBase,
+    required this.stockValueMinor,
+    required this.counterpartMinor,
+  });
+}
+
+Future<Map<String, Object?>?> _itemByIdTx(int id) async {
+  final rows = await customSelect(
+    'SELECT id, sku, name, kind, base_unit_id, is_active FROM items '
+    'WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(id)],
+  ).get();
+  return rows.isEmpty ? null : rows.first.data;
+}
+
+Future<CashBoxRow?> _cashBoxByIdTx(int id) async {
+  final rows = await customSelect(
+    'SELECT id, name, currency_id, account_id, opening_balance_base_minor '
+    'FROM cash_boxes WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(id)],
+  ).get();
+  if (rows.isEmpty) return null;
+  final d = rows.first.data;
+  return CashBoxRow(
+    id: d['id'] as int,
+    name: d['name'] as String,
+    currencyId: d['currency_id'] as int,
+    accountId: d['account_id'] as int,
+    openingBalanceBaseMinor: d['opening_balance_base_minor'] as int,
+  );
+}
+
+Future<WarehouseRow?> _warehouseByIdTx(int id) async {
+  final rows = await customSelect(
+    'SELECT id, name, is_active FROM warehouses '
+    'WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(id)],
+  ).get();
+  if (rows.isEmpty) return null;
+  final d = rows.first.data;
+  return WarehouseRow(
+    id: d['id'] as int,
+    name: d['name'] as String,
+    isActive: (d['is_active'] as int) == 1,
+  );
+}
+
+/// الحساب بالكود من الدليل المزروع (03 §4: أكواد خريطة العمليات) —
+/// الغياب يرمي صريحاً لأن الدليل إعداد والكود المعتمد مرجع الخريطة.
+Future<int> _accountIdByCodeTx(String code) async {
+  final rows = await customSelect(
+    'SELECT id FROM accounts WHERE code = ?',
+    variables: [Variable.withString(code)],
+  ).get();
+  if (rows.isEmpty) {
+    throw StateError('حساب الدليل بالكود $code غير موجود — الدليل إعداد '
+        'وأكواد خريطة العمليات (03 §4) مرجع المحرك');
+  }
+  return rows.first.data['id'] as int;
+}
+
+Future<int> _journalIdByCodeTx(String code) async {
+  final rows = await customSelect(
+    'SELECT id FROM journals WHERE code = ?',
+    variables: [Variable.withString(code)],
+  ).get();
+  if (rows.isEmpty) {
+    throw StateError('الدفتر بالكود $code غير موجود من البذر (05 §3.4)');
+  }
+  return rows.first.data['id'] as int;
+}
+
+/// رصيد صنف في مستودعه (كمية، قيمة) — مصدر الترصيد القيمة الإجمالية
+/// (D-067) والغائب صفر.
+Future<(int, int)> _stockBalanceTx(int itemId, int warehouseId) async {
+  final rows = await customSelect(
+    'SELECT qty_base, total_value_minor FROM stock_balances '
+    'WHERE item_id = ? AND warehouse_id = ?',
+    variables: [Variable.withInt(itemId), Variable.withInt(warehouseId)],
+  ).get();
+  if (rows.isEmpty) return (0, 0);
+  final d = rows.first.data;
+  return (d['qty_base'] as int, d['total_value_minor'] as int);
+}
+
+/// رصيد صندوق بالأساسية: الافتتاحي + الداخل − الخارج (05 §5).
+Future<int> _cashBoxBalanceTx(int boxId) async {
+  final rows = await customSelect(
+    "SELECT (SELECT COALESCE(opening_balance_base_minor, 0) FROM cash_boxes "
+    "WHERE id = ?1) + "
+    "(SELECT COALESCE(SUM(CASE WHEN kind = 'in' THEN amount_base_minor "
+    "ELSE -amount_base_minor END), 0) FROM cash_movements "
+    "WHERE cash_box_id = ?1) AS balance",
+    variables: [Variable.withInt(boxId)],
+  ).get();
+  return rows.first.data['balance'] as int;
+}
+
+/// كمية الأصل لكل صنف (مجموع أسطره — التكرار مشروع فيتجمّع).
+Future<Map<int, int>> _origQtyByItemTx(int originalInvoiceId) async {
+  final rows = await customSelect(
+    'SELECT item_id, SUM(qty_base) AS q FROM invoice_lines '
+    'WHERE invoice_id = ? GROUP BY item_id',
+    variables: [Variable.withInt(originalInvoiceId)],
+  ).get();
+  return {for (final r in rows) r.data['item_id'] as int: r.data['q'] as int};
+}
+
+/// كمية المردودات المرحّلة للأصل لكل صنف بنوعها (س-05/س-11: المتبقي
+/// من الأصل مطروحاً منه مردوداته).
+Future<Map<int, int>> _returnedQtyByItemTx(
+  int originalInvoiceId,
+  String returnKindValue,
+) async {
+  final rows = await customSelect(
+    'SELECT il.item_id AS item_id, SUM(il.qty_base) AS q '
+    'FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id '
+    "WHERE i.original_invoice_id = ?1 AND i.kind = ?2 AND i.state <> 'draft' "
+    'GROUP BY il.item_id',
+    variables: [
+      Variable.withInt(originalInvoiceId),
+      Variable.withString(returnKindValue),
+    ],
+  ).get();
+  return {for (final r in rows) r.data['item_id'] as int: r.data['q'] as int};
+}
+
+/// حركات خروج الأصل لكل صنف (كمية، قيمة) — مصدر لقطة التكلفة لمردود
+/// البيع (م-25: «لقطة تكلفة خروج الأصل المخزنة في حركة الخروج»).
+Future<(Map<int, int>, Map<int, int>)> _originalOutMovesByItemTx(
+  int originalInvoiceId,
+) async {
+  final rows = await customSelect(
+    "SELECT item_id, SUM(-qty_base) AS q, SUM(value_base_minor) AS v "
+    "FROM stock_moves WHERE ref_doc_type = 'invoice' AND ref_doc_id = ?1 "
+    'AND qty_base < 0 GROUP BY item_id',
+    variables: [Variable.withInt(originalInvoiceId)],
+  ).get();
+  final qty = <int, int>{};
+  final value = <int, int>{};
+  for (final r in rows) {
+    qty[r.data['item_id'] as int] = r.data['q'] as int;
+    value[r.data['item_id'] as int] = r.data['v'] as int;
+  }
+  return (qty, value);
+}
+
+/// قيم الاستعادة الممنوحة سلفاً لمردودات أصل بيع (دخول المخزون) لكل
+/// صنف — كي يمتص آخر مردود ما تبقى من قيمة الأصل بلا غبار (D-067).
+Future<Map<int, int>> _returnedRestoreByItemTx(int originalInvoiceId) async {
+  final rows = await customSelect(
+    "SELECT sm.item_id AS item_id, SUM(sm.value_base_minor) AS v "
+    "FROM stock_moves sm JOIN invoices i ON i.id = sm.ref_doc_id "
+    "WHERE sm.ref_doc_type = 'invoice' AND i.original_invoice_id = ?1 "
+    "AND i.kind = 'sale_return' AND sm.qty_base > 0 GROUP BY sm.item_id",
+    variables: [Variable.withInt(originalInvoiceId)],
+  ).get();
+  return {for (final r in rows) r.data['item_id'] as int: r.data['v'] as int};
+}
+
+Future<InvoiceDocument?> _invoiceRowTx(int id) async {
+  final rows = await customSelect(
+    'SELECT id, kind, number, party_id, cash_box_id, warehouse_id, '
+    'invoice_date, due_date, currency_id, fx_rate, discount_rate, '
+    'subtotal_doc_minor, discount_doc_minor, total_doc_minor, '
+    'total_base_minor, state, move_id, original_invoice_id, narration '
+    'FROM invoices WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(id)],
+  ).get();
+  if (rows.isEmpty) return null;
+  final d = rows.first.data;
+  return InvoiceDocument(
+    id: d['id'] as int,
+    kind: d['kind'] as String,
+    number: d['number'] as String,
+    partyId: d['party_id'] as int?,
+    cashBoxId: d['cash_box_id'] as int?,
+    warehouseId: d['warehouse_id'] as int?,
+    invoiceDate: d['invoice_date'] as String,
+    dueDate: d['due_date'] as String?,
+    currencyId: d['currency_id'] as int,
+    fxRate: d['fx_rate'] as int,
+    discountRate: d['discount_rate'] as int,
+    subtotalDocMinor: d['subtotal_doc_minor'] as int,
+    discountDocMinor: d['discount_doc_minor'] as int,
+    totalDocMinor: d['total_doc_minor'] as int,
+    totalBaseMinor: d['total_base_minor'] as int,
+    state: d['state'] as String,
+    moveId: d['move_id'] as int?,
+    originalInvoiceId: d['original_invoice_id'] as int?,
+    narration: d['narration'] as String?,
+  );
+}
+
+Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
+  final rows = await customSelect(
+    'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, qty, '
+    'qty_base, unit_price_minor, discount_minor, tax_rate, '
+    'line_total_doc_minor, line_total_base_minor, uuid '
+    'FROM invoice_lines WHERE invoice_id = ? ORDER BY id',
+    variables: [Variable.withInt(invoiceId)],
+  ).get();
+  return [
+    for (final r in rows)
+      InvoiceLineDocument(
+        id: r.data['id'] as int,
+        invoiceId: r.data['invoice_id'] as int,
+        itemId: r.data['item_id'] as int,
+        unitId: r.data['unit_id'] as int,
+        factorAtEntry: r.data['factor_at_entry'] as int,
+        qty: r.data['qty'] as int,
+        qtyBase: r.data['qty_base'] as int,
+        unitPriceMinor: r.data['unit_price_minor'] as int,
+        discountMinor: r.data['discount_minor'] as int,
+        taxRate: r.data['tax_rate'] as int,
+        lineTotalDocMinor: r.data['line_total_doc_minor'] as int,
+        lineTotalBaseMinor: r.data['line_total_base_minor'] as int,
+        uuid: r.data['uuid'] as String,
+      ),
+  ];
+}
+
+/// لقطة الفاتورة الكاملة JSON للسجل (07 §2.3/D-067) — تُكتب لحظة الحدث.
+Future<String> _invoiceSnapshotTx(int invoiceId) async {
+  final inv = (await _invoiceRowTx(invoiceId))!;
+  final lines = await _invoiceLinesTx(invoiceId);
+  return jsonEncode(<String, Object?>{
+    'id': inv.id,
+    'kind': inv.kind,
+    'number': inv.number,
+    'party_id': inv.partyId,
+    'cash_box_id': inv.cashBoxId,
+    'warehouse_id': inv.warehouseId,
+    'date': inv.invoiceDate,
+    'due_date': inv.dueDate,
+    'currency_id': inv.currencyId,
+    'fx_rate': inv.fxRate,
+    'discount_rate': inv.discountRate,
+    'total_doc_minor': inv.totalDocMinor,
+    'total_base_minor': inv.totalBaseMinor,
+    'state': inv.state,
+    'move_id': inv.moveId,
+    'original_invoice_id': inv.originalInvoiceId,
+    'lines': [
+      for (final l in lines)
+        <String, Object?>{
+          'item_id': l.itemId,
+          'unit_id': l.unitId,
+          'qty_base': l.qtyBase,
+          'unit_price_minor': l.unitPriceMinor,
+          'discount_minor': l.discountMinor,
+          'line_total_doc_minor': l.lineTotalDocMinor,
+          'line_total_base_minor': l.lineTotalBaseMinor,
+          'uuid': l.uuid,
+        }
+    ],
+  });
+}
+
+Future<void> _recordInvoiceEventTx({
+  required int invoiceId,
+  required String action,
+  String? payload,
+}) async {
+  await into(events).insert(
+    EventsCompanion.insert(
+      eventAt: DateTime.now().millisecondsSinceEpoch,
+      deviceId: await deviceId(),
+      entityType: 'invoice',
+      entityId: Value(invoiceId),
+      action: action,
+      payload: payload ?? await _invoiceSnapshotTx(invoiceId),
+      uuid: const Uuid().v4(),
+    ),
+  );
+}
+
+/// إعادة بناء مسودة الفاتورة من صفوفها — التحقق على ما خُزّن لا على ما
+/// قيل (07 §1.1: لا ثقة بالمدخلات بعد كتابتها).
+InvoiceDraft _draftFromRows(InvoiceDocument inv, List<InvoiceLineDocument> lines) {
+  return InvoiceDraft(
+    kind: InvoiceKind.fromStorage(inv.kind),
+    dateText: inv.invoiceDate,
+    dueDateText: inv.dueDate,
+    partyId: inv.partyId,
+    cashBoxId: inv.cashBoxId,
+    warehouseId: inv.warehouseId,
+    currencyId: inv.currencyId,
+    fxRate: inv.fxRate,
+    discountRate: inv.discountRate,
+    originalInvoiceId: inv.originalInvoiceId,
+    narration: inv.narration,
+    lines: [
+      for (final l in lines)
+        InvoiceLineDraft(
+          itemId: l.itemId,
+          unitId: l.unitId,
+          qtyBase: l.qtyBase,
+          unitPriceMinor: l.unitPriceMinor,
+          discountMinor: l.discountMinor,
+          taxRate: l.taxRate,
+        ),
+    ],
+  );
 }
 
 /// الصيغة المعروضة لرقم الفاتورة (م-44/D-071): «فاتورة بيع 2026/000001».
