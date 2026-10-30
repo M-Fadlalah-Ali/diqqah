@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
@@ -229,6 +230,299 @@ class Parties extends Table {
       boolean().withDefault(const Constant(false)).named('is_deleted')();
 }
 
+/// دليل الحسابات — 05 §3.4 `account` + 03 كاملاً: «الدليل إعداد لا كود»
+/// (07 §1.6) — الصفوف تُزرع من الدليل الافتراضي المعتمد (م-10/م-11/م-13/
+/// م-15) ويعدلها المالك من الشاشة دون أي برمجة، والتقارير من `type` لا
+/// من الاسم أو الكود.
+///
+/// - الورقية وحدها تقيد (`is_leaf`) والحساب الأب يعرض مجمّع أبنائه (03 §1-2).
+/// - `normal_side` مستقل عن النوع لقبول العكسية (42 مردودات المبيعات
+///   income مدينها — 32/321 المسحوبات equity مدينها — 53 مردودات
+///   المشتريات expense دائنها — 03 §1-4).
+/// - `parent_id` يحيل بالمعرف — الأصل الهرمي من أكواد 03 كما هي.
+/// - المعطل يبقى بتاريخه وأرصدته سليمة، ولا حذف لحساب له حركة (03 §1-3).
+class Accounts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  TextColumn get code => text().unique()();
+
+  TextColumn get name => text()();
+
+  /// asset / liability / equity / income / expense (03 §2)
+  TextColumn get type => text()();
+
+  /// debit / credit — اتجاه يزيد الرصيد الطبيعي
+  TextColumn get normalSide => text().named('normal_side')();
+
+  IntColumn get parentId => integer().nullable().named('parent_id')();
+
+  BoolColumn get isLeaf => boolean().named('is_leaf')();
+
+  BoolColumn get isActive => boolean().named('is_active')();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// الدفاتر — 05 §3.4 `journal`: كل قيد يصدر عن دفتر من هذه. الخمسة
+/// تُزرع منذ اليوم الأول بنيةً جاهزة (D-076 معروض) — دفاتر sales/purchase/
+/// cash/stock تدخل حيز العمل مع مستنداتها في دفعاتها (الفواتير دفعة 4،
+/// والصندوق دفعة 5)، و`general` قيود الدفعة (3) اليدوية.
+class Journals extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  TextColumn get code => text().unique()();
+
+  TextColumn get name => text()();
+
+  /// sales / purchase / cash / stock / general (05 §3.4)
+  TextColumn get kind => text()();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// السنوات المالية — 05 §3.4 `fiscal_year`: سنة ميلادية واحدة مفتوحة
+/// غالباً (D-017). تُزرع سنة «الآن» عند التثبيت بأفتراضيها الشهري.
+class FiscalYears extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  TextColumn get name => text()();
+
+  TextColumn get startDateText => text().named('start_date_text')();
+
+  TextColumn get endDateText => text().named('end_date_text')();
+
+  /// open / closed — إقفالها مع دفعة التقارير والإغلاق (6)
+  TextColumn get state => text()();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// الفترات المالية — 05 §3.4 `period`: شهرية افتراضياً ويمكن أسبوعاً أو
+/// ربعاً أو الاقتصار على الإقفال اليدوي (D-027). الفترة المقفلة تتجمد:
+/// لا ترحيل فيها (07 §1.5) — الفحص بالمحرك (validateMoveForPosting).
+class Periods extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get fiscalYearId => integer().named('fiscal_year_id')();
+
+  TextColumn get startDateText => text().named('start_date_text')();
+
+  TextColumn get endDateText => text().named('end_date_text')();
+
+  /// open / closed
+  TextColumn get state => text()();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// القيود — 05 §3.4 `move`: آلة الحالة صريحة (07 §1.2) مسودة ← مرحّل
+/// بلا رجوع، وما رُحّل لا يعدل ولا يحذف أبداً (07 §1.3 — مُشغِّلات
+/// القاعدة حاجزها الثاني، 07 §2.2 نمط D-067).
+///
+/// - `date_text` تواريخ العملية نص ISO «YYYY-MM-DD» حصراً — فرزها
+///   المعجمي زمني صحيح (D-077 معروض)، والميلادي أساس التخزين حصراً (F-167).
+/// - `number` نص الرقم المُصدَر «2026/000001» (سنة/رقم مبطن 6) — والمسودة
+///   بلا رقم («»): الترقيم لحظة الترحيل حصراً فلا رقم يُصدر ولا يُعاد (07 §1.9).
+///   الصيغة الكاملة المعروضة «قيد عام 2026/000001» تولّد للعرض ب
+///   formatSequenceLabel (م-44 — الاسم الكامل بلا بادئة مختصرة).
+/// - `period_id` يُكتب عند الترحيل بعد فحص الفترة المفتوحة — فالمسودة
+///   القائمة فوق شهر مقفل تبقى معلقة لا مرحّلة.
+/// - `ref_doc_type/ref_doc_id` مرجع المستند المولد للقيد (05 §2) — القيد
+///   العكس يُحيل قيدَ الأصل (07 §1.3) بقيمة «move».
+/// - البنية الجاهزة منذ اليوم الأول (درس D-075): لا إعادة هيكلة لاحقاً.
+class Moves extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get journalId => integer().named('journal_id')();
+
+  IntColumn get periodId => integer().nullable().named('period_id')();
+
+  TextColumn get dateText => text().named('date_text')();
+
+  /// draft / posted (07 §1.2)
+  TextColumn get state => text()();
+
+  TextColumn get number => text()();
+
+  TextColumn get narration => text().nullable()();
+
+  TextColumn get refDocType => text().nullable().named('ref_doc_type')();
+
+  IntColumn get refDocId => integer().nullable().named('ref_doc_id')();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// أسطر القيود — 05 §3.4 `move_line`: الحساب ورقي حصراً، والسطر جهة
+/// واحدة (مدين أو دائن) بمبالغ وحدات صغرى صحيحة (07 §2.1).
+///
+/// - `party_id` للذمم على حسابي السيطرة 112/211 (اصطلاح م-14).
+/// - `currency_id`/`amount_minor`/`fx_rate` بنية العملات جاهزة منذ اليوم
+///   الأول (07 §1.7): القيود اليدوية في م1 بالعملة الأساسية المعتمدة
+///   (المعرف 1 — اصطلاح D-066/D-017) بلا سعر؛ وقيود الدولار مع مستنداتها
+///   (الفواتير دفعة 4) بلقطة سعرها. `fx_rate` عدد صحيح مكبَّر (اصطلاح
+///   exchange_rate في 05 §3.5).
+/// - `ref_stock_move_id` الالتزام التنفيذي لربط المخزون بالدفتر (07 §3.1
+///   — م-27 مؤكد): يُملأ من حركة المخزون المولدة لسطر التكلفة عند ترحيل
+///   الفواتير، بلا أي إعادة هيكلة لاحقاً.
+/// - لا تعديل ولا حذف ولا إدراج على أسطر قيد مرحّل — ثلاثة مُشغِّلات
+///   (07 §2.2/F-055): الحاجز الثاني مختبَر لا نية موثقة.
+class MoveLines extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get moveId => integer().named('move_id')();
+
+  IntColumn get accountId => integer().named('account_id')();
+
+  IntColumn get debitMinor =>
+      integer().withDefault(const Constant(0)).named('debit_minor')();
+
+  IntColumn get creditMinor =>
+      integer().withDefault(const Constant(0)).named('credit_minor')();
+
+  IntColumn get partyId => integer().nullable().named('party_id')();
+
+  IntColumn get currencyId =>
+      integer().withDefault(const Constant(1)).named('currency_id')();
+
+  IntColumn get amountMinor =>
+      integer().nullable().named('amount_minor')();
+
+  IntColumn get fxRate => integer().nullable().named('fx_rate')();
+
+  IntColumn get refStockMoveId =>
+      integer().nullable().named('ref_stock_move_id')();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// الترقيم المركزي — 05 §5 `sequence`: تسلسل سنوي لكل نوع مستند، والأرقام
+/// المُصدَرة لا تُعاد أبداً (07 §1.9/D-071). المُصدَر عند الترحيل حصراً
+/// داخل المعاملة ذاتها (07 §2.4 — فلا رقم يُصدر بقيد لم يكتب).
+///
+/// مفتاحه المركب (kind, year) — وسُعّت كامل أعمدة الاصطلاح (D-055) لأرقامه
+/// بيانات أعمال تُزامن مستقبلاً ولا مفاتيح نظام (عكس إعفاء app_meta).
+/// ترقيم قيود المستندات المولدة (فواتير/سندات) أنواعه الخاصة بدفعاتها —
+/// نوع الدفعة (3): `move_general` للقيود اليدوية (D-076 معروض).
+class Sequences extends Table {
+  TextColumn get kind => text()();
+
+  IntColumn get year => integer()();
+
+  IntColumn get lastNumber => integer().named('last_number')();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+
+  @override
+  Set<Column> get primaryKey => {kind, year};
+}
+
+/// سجل الأحداث — 05 §5/07 §2.3 (D-067): جدول مصدر كامل بصفة «لقطة كاملة»
+/// للكيان عند كل تغيير — append-only لا يُعدل ولا يُحذف ولا يُعاد بناؤه
+/// من غيره، وهو أساس التدقيق والمزامنة لاحقاً (المرحلة 4 نقل أحداث مرتبة).
+///
+/// **إفصاح موثق**: هذا الجدول كان حاكماً «من اليوم الأول» (07 §2.3) وغاب
+/// عن ترحيلات م0 ودفعتَي م1 السابقتين بلا عمليات محاسبية تُسجَّل أصلاً —
+/// دفعة القلب أول عملية قيدية ففتح هذا الجدول معها (D-076): كل إنشاء
+/// مسودة وترحيل وحذف مسودة وإنشاء عكس يحمل لقطته الكاملة بـ`payload`
+/// (JSON) وحدثه يُكتب في معاملة العملية ذاتها فلا حدث بلا عملية ولا
+/// عملية بلا حدث.
+class Events extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get eventAt => integer().named('event_at')();
+
+  /// صاحب العملية — من جلسة الدخول لاحقاً؛ الخلفية البحتة الآن بلا مستخدم
+  IntColumn get userId => integer().nullable().named('user_id')();
+
+  TextColumn get deviceId => text().named('device_id')();
+
+  /// move / (invoice، voucher… في دفعاتها)
+  TextColumn get entityType => text().named('entity_type')();
+
+  IntColumn get entityId => integer().nullable().named('entity_id')();
+
+  /// created / posted / reversal_created / draft_deleted
+  TextColumn get action => text()();
+
+  /// لقطة الكيان الكاملة JSON عند وقوع الحدث (07 §2.3)
+  TextColumn get payload => text()();
+
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
 /// مفاتيح النظام — موطن `device_id` (F-015) وسائر مفاتيح التهيئة.
 /// معفاة من اصطلاح «كل جدول» قراراً موثقاً (D-055): مفاتيح نظام
 /// لا سجلات أعمال — لا مزامنة ولا حذف منطقي لها.
@@ -241,7 +535,7 @@ class AppMeta extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// قاعدة دِقَّة — نسخة المخطط 5.
+/// قاعدة دِقَّة — نسخة المخطط 6.
 ///
 /// 1 = items فقط (جلسة م0 الأولى). 2 = التهيئة: roles / app_users / app_meta
 /// (س-01: F-014/F-015). 3 = اصطلاح «كل جدول» (05 §2، D-055): uuid عالمي +
@@ -250,9 +544,30 @@ class AppMeta extends Table {
 /// الأولى: D-062..D-066، س-29..س-35). 5 = دفعة م1 الثانية (الأصناف:
 /// D-073..D-075، س-36..س-41): إضافة `id` التلقائي لجدول items بإعادة
 /// بناء آمنة موثقة (الدرس الموكول من ملاحظة الجدول نفسه)، وجدولا units
-/// وitem_barcodes جديدان خالصان (F-031/F-035). كل تغيير مخطط قادم يضيف
-/// إصداراً وترحيلة — لا تعديل رجعي على إصدار منشور (F-011).
-@DriftDatabase(tables: [Items, Roles, AppUsers, AppMeta, Parties, Units, ItemBarcodes])
+/// وitem_barcodes جديدان خالصان (F-031/F-035). 6 = دفعة م1 الثالثة (قلب
+/// الدفتر: D-076..D-078 معروضة، س-42..س-50): ثمانية جداول جديدة خالصة
+/// (accounts/journals/fiscal_years/periods/moves/move_lines/sequences/
+/// events — 05 §3.4/§5) + ستة مُشغِّلات حواجز (توازن الترحيل وتجميد
+/// المرحّل — 07 §2.2) + بذر الدليل الافتراضي (03 §3) والدفاتر الخمسة
+/// وسنة «الآن» بفتراتها الشهرية. كل تغيير مخطط قادم يضيف إصداراً
+/// وترحيلة — لا تعديل رجعي على إصدار منشور (F-011).
+@DriftDatabase(tables: [
+  Items,
+  Roles,
+  AppUsers,
+  AppMeta,
+  Parties,
+  Units,
+  ItemBarcodes,
+  Accounts,
+  Journals,
+  FiscalYears,
+  Periods,
+  Moves,
+  MoveLines,
+  Sequences,
+  Events,
+])
 class DiqqahDatabase extends _$DiqqahDatabase {
   /// التشغيل العادي: ملف القاعدة الوحيد (أساس النسخ الاحتياطي الكامل F-012).
   /// ملف الجيل السابق «heseb.db» يتبنّى آلياً عند أول فتح (D-053 —
@@ -285,12 +600,14 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
+          await _createLedgerTriggers();
+          await _seedAccountingBaseline();
         },
         onUpgrade: (m, from, to) async {
           // 1→2: جداول التهيئة جديدة خالصة — createAll يبني الناقص بـ
@@ -404,6 +721,17 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                 await customStatement(
                     'ALTER TABLE "items_new_v5" RENAME TO "items"');
               }
+            }
+            // 5→6 (ومن إصدار أدنى مباشرة): دفعة القلب — جداول الدفتر
+            // الثمانية جديدة خالصة فـcreateAll يبنيها (نمط v2/v4 المجرّب)
+            // بلا أي مساس بجداول قائمة، ثم المُشغِّلات الحواجز (07 §2.2
+            // نمط D-067) ثم بذر خط القاعدة المحاسبي (03 §3 + الدفاتر +
+            // سنة «الآن»). البذر فاحص الفراغ ذاته فآمنة التكرار أي كان
+            // مسار الوصول (5→6 أو 1→6 مباشرة حيث onCreate زرعها سلفاً).
+            if (version == 6) {
+              await m.createAll();
+              await _createLedgerTriggers();
+              await _seedAccountingBaseline();
             }
           }
         },
@@ -655,4 +983,544 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       ),
     );
   }
+
+  // ─────────────────────────────────────────────────────────────────
+  // قلب الدفتر — دفعة م1 الثالثة (س-42..س-50، D-076..D-078 معروضة):
+  // المُشغِّلات الحواجز + البذر + المحرك (مسودة/ترحيل/عكس/حذف مسودة)
+  // + القارئات النقية التي تمرر الحساب للمجال (التخزين يحفظ ولا يقرر).
+  // ─────────────────────────────────────────────────────────────────
+
+  /// المُشغِّلات الحواجز (07 §2.2 نمط D-067 — الحاجز الثاني المختبَر):
+  /// (1) التوازن والحد الأدنى للأسطر عند الانتقال إلى «مرحّل»، (2) تجميد
+  /// القيد المرحّل حقلاً حقلاً، (3) منع حذفه، و(4..6) تجميد أسطره إدراجاً
+  /// وتعديلاً وحذفاً (F-055). الرمي RAISE(ABORT) يتراجع المعاملة كاملة
+  /// فلا حالة وسطى (07 §2.4). IF NOT EXISTS فآمنة التكرار أي كان مسار
+  /// الوصول (onCreate أو ترحيلة 5→6).
+  Future<void> _createLedgerTriggers() async {
+    const triggers = <String>[
+      "CREATE TRIGGER IF NOT EXISTS trg_moves_post_balance "
+          "BEFORE UPDATE ON moves FOR EACH ROW "
+          "WHEN NEW.state = 'posted' AND OLD.state <> 'posted' "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'قيد غير متوازن: مجموع المدين لا يساوي "
+          "مجموع الدائن') "
+          "WHERE (SELECT COALESCE(SUM(debit_minor),0) FROM move_lines "
+          "WHERE move_id = NEW.id) <> "
+          "(SELECT COALESCE(SUM(credit_minor),0) FROM move_lines "
+          "WHERE move_id = NEW.id); "
+          "SELECT RAISE(ABORT, 'قيد مرحّل بأسطر أقل من اثنين') "
+          "WHERE (SELECT COUNT(*) FROM move_lines WHERE move_id = NEW.id) "
+          "< 2; "
+          "END",
+      "CREATE TRIGGER IF NOT EXISTS trg_moves_posted_frozen "
+          "BEFORE UPDATE ON moves FOR EACH ROW "
+          "WHEN OLD.state = 'posted' AND ("
+          "NEW.journal_id IS NOT OLD.journal_id OR "
+          "NEW.date_text IS NOT OLD.date_text OR "
+          "NEW.state IS NOT OLD.state OR "
+          "NEW.number IS NOT OLD.number OR "
+          "COALESCE(NEW.narration,'') IS NOT COALESCE(OLD.narration,'') OR "
+          "COALESCE(NEW.ref_doc_type,'') IS NOT "
+          "COALESCE(OLD.ref_doc_type,'') OR "
+          "COALESCE(NEW.ref_doc_id,-1) IS NOT COALESCE(OLD.ref_doc_id,-1) OR "
+          "COALESCE(NEW.period_id,-1) IS NOT COALESCE(OLD.period_id,-1)) "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'القيد المرحّل لا يعدل — التصحيح بقيد عكس'); "
+          "END",
+      "CREATE TRIGGER IF NOT EXISTS trg_moves_no_delete_posted "
+          "BEFORE DELETE ON moves FOR EACH ROW "
+          "WHEN OLD.state = 'posted' "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'القيد المرحّل لا يحذف — التصحيح بقيد عكس'); "
+          "END",
+      "CREATE TRIGGER IF NOT EXISTS trg_move_lines_frozen_insert "
+          "BEFORE INSERT ON move_lines FOR EACH ROW "
+          "WHEN (SELECT state FROM moves WHERE id = NEW.move_id) = 'posted' "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'أسطر القيد المرحّل لا تضاف'); END",
+      "CREATE TRIGGER IF NOT EXISTS trg_move_lines_frozen_update "
+          "BEFORE UPDATE ON move_lines FOR EACH ROW "
+          "WHEN (SELECT state FROM moves WHERE id = NEW.move_id) = 'posted' "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'أسطر القيد المرحّل لا تعدل'); END",
+      "CREATE TRIGGER IF NOT EXISTS trg_move_lines_frozen_delete "
+          "BEFORE DELETE ON move_lines FOR EACH ROW "
+          "WHEN (SELECT state FROM moves WHERE id = OLD.move_id) = 'posted' "
+          "BEGIN "
+          "SELECT RAISE(ABORT, 'أسطر القيد المرحّل لا تحذف'); END",
+    ];
+    for (final sql in triggers) {
+      await customStatement(sql);
+    }
+  }
+
+  /// بذر خط القاعدة المحاسبي (س-42): الدليل الافتراضي حرفاً من 03 §3
+  /// («الدليل إعداد لا كود» — 07 §1.6)، والدفاتر الخمسة بنيةً جاهزة
+  /// (D-076)، وسنة «الآن» بفتراتها الشهرية الافتراضية المفتوحة (D-027).
+  /// كل شطر فاحص الفراغ ذاته فالبذر آمن التكرار، والترتيب الهرمي للدليل
+  /// (كل أب يسبق أبناءه — كما في 03) هو ما يجعل خريطة الأكواد تصلح أباً.
+  Future<void> _seedAccountingBaseline() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final existingAccounts = await select(accounts).get();
+    if (existingAccounts.isEmpty) {
+      final codeToId = <String, int>{};
+      for (final spec in defaultChartOfAccounts) {
+        assert(
+            spec.parentCode == null || codeToId.containsKey(spec.parentCode),
+            'ترتيب الدليل الهرمي: كل أب يسبق أبناءه (${spec.code})');
+        final id = await into(accounts).insert(
+          AccountsCompanion.insert(
+            code: spec.code,
+            name: spec.name,
+            type: spec.type.name,
+            normalSide: spec.effectiveNormalSide.name,
+            parentId:
+                Value(spec.parentCode == null ? null : codeToId[spec.parentCode!]),
+            isLeaf: spec.isLeaf,
+            isActive: spec.isActive,
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+        codeToId[spec.code] = id;
+      }
+    }
+    final existingJournals = await select(journals).get();
+    if (existingJournals.isEmpty) {
+      for (final spec in defaultJournals) {
+        await into(journals).insert(
+          JournalsCompanion.insert(
+            code: spec.code,
+            name: spec.name,
+            kind: spec.kind.name,
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    }
+    final existingYears = await select(fiscalYears).get();
+    if (existingYears.isEmpty) {
+      final year = DateTime.now().year;
+      final yearId = await into(fiscalYears).insert(
+        FiscalYearsCompanion.insert(
+          name: year.toString(),
+          startDateText: '$year-01-01',
+          endDateText: '$year-12-31',
+          state: 'open',
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+      for (var month = 1; month <= 12; month++) {
+        final mm = month.toString().padLeft(2, '0');
+        final lastDay = DateTime(year, month + 1, 0).day;
+        await into(periods).insert(
+          PeriodsCompanion.insert(
+            fiscalYearId: yearId,
+            startDateText: '$year-$mm-01',
+            endDateText: '$year-$mm-${lastDay.toString().padLeft(2, '0')}',
+            state: 'open',
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    }
+  }
+
+  /// لقطة القيد الكاملة JSON للسجل (07 §2.3/D-067) — تُكتب لحظة الحدث
+  /// فتحفظ الحالة كما كانت لا كما صارت.
+  Future<String> _moveSnapshot(int moveId) async {
+    final moveRow =
+        await (select(moves)..where((t) => t.id.equals(moveId))).getSingle();
+    final lineRows =
+        await (select(moveLines)..where((t) => t.moveId.equals(moveId))).get();
+    return jsonEncode(<String, Object?>{
+      'id': moveRow.id,
+      'uuid': moveRow.uuid,
+      'journal_id': moveRow.journalId,
+      'date': moveRow.dateText,
+      'state': moveRow.state,
+      'number': moveRow.number,
+      'narration': moveRow.narration,
+      'ref_doc_type': moveRow.refDocType,
+      'ref_doc_id': moveRow.refDocId,
+      'lines': [
+        for (final l in lineRows)
+          <String, Object?>{
+            'account_id': l.accountId,
+            'debit_minor': l.debitMinor,
+            'credit_minor': l.creditMinor,
+            'party_id': l.partyId,
+            'uuid': l.uuid,
+          }
+      ],
+    });
+  }
+
+  Future<void> _recordMoveEvent({
+    required int moveId,
+    required String action,
+    String? payload,
+  }) async {
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: DateTime.now().millisecondsSinceEpoch,
+        deviceId: await deviceId(),
+        entityType: 'move',
+        entityId: Value(moveId),
+        action: action,
+        payload: payload ?? await _moveSnapshot(moveId),
+        uuid: const Uuid().v4(),
+      ),
+    );
+  }
+
+  /// س-43: إنشاء قيد مسودة متوازن — المدقق حرس التخزين الثاني بعد مدقق
+  /// الواجهة: لا مسار يكتب قيداً غير مدقق (07 §1.1). القيد وأسطره وحدثه
+  /// («created» بلقطته) معاملة واحدة (07 §2.4).
+  Future<int> createMoveDraft({
+    required int journalId,
+    required String dateText,
+    String? narration,
+    String? refDocType,
+    int? refDocId,
+    required List<MoveLineDraft> lines,
+  }) async {
+    final draft = MoveDraft(
+      journalId: journalId,
+      dateText: dateText,
+      narration: narration,
+      refDocType: refDocType,
+      refDocId: refDocId,
+      lines: lines,
+    );
+    final errors =
+        validateMoveDraft(draft, index: LedgerAccountIndex.build(
+            await allLedgerAccounts()));
+    if (errors.isNotEmpty) {
+      throw LedgerValidationException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return transaction(() async {
+      final moveId = await into(moves).insert(
+        MovesCompanion.insert(
+          journalId: journalId,
+          dateText: dateText,
+          state: 'draft',
+          number: '',
+          narration: Value(narration),
+          refDocType: Value(refDocType),
+          refDocId: Value(refDocId),
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+      for (final line in lines) {
+        await into(moveLines).insert(
+          MoveLinesCompanion.insert(
+            moveId: moveId,
+            accountId: line.accountId,
+            debitMinor: Value(line.debitMinor),
+            creditMinor: Value(line.creditMinor),
+            partyId: Value(line.partyId),
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+      await _recordMoveEvent(moveId: moveId, action: 'created');
+      return moveId;
+    });
+  }
+
+  /// س-46/س-47: ترحيل المسودة — المحرك الحاكم (07 §1.1): المدقق الحاكم
+  /// (قواعد المسودة + الفترة المفتوحة — 07 §1.5)، والترقيم المركزي داخل
+  /// المعاملة ذاتها فلا رقم يُصدر بلا قيد مكتوب (07 §1.9/§2.4)، والحاجز
+  /// الثاني مُشغِّلات القاعدة تتحقق عند كتابة الحالة، وأي رفض يتراجع كل
+  /// شيء. والحدث «posted» بلقطة القيد المرحّل في المعاملة نفسها.
+  Future<int> postMove(int moveId) async {
+    return transaction(() async {
+      final moveRow = await (select(moves)
+            ..where((t) => t.id.equals(moveId)))
+          .getSingleOrNull();
+      if (moveRow == null) {
+        throw StateError('لا قيد بالمعرف $moveId');
+      }
+      if (moveRow.state == 'posted') {
+        throw StateError(
+            'القيد مرحّل أصلاً — الآلة مسودة ← مرحّل بلا رجوع (07 §1.2)');
+      }
+      final lineRows = await (select(moveLines)
+            ..where((t) => t.moveId.equals(moveId)))
+          .get();
+      final draft = MoveDraft(
+        journalId: moveRow.journalId,
+        dateText: moveRow.dateText,
+        narration: moveRow.narration,
+        refDocType: moveRow.refDocType,
+        refDocId: moveRow.refDocId,
+        lines: [
+          for (final l in lineRows)
+            MoveLineDraft(
+              accountId: l.accountId,
+              partyId: l.partyId,
+              debitMinor: l.debitMinor,
+              creditMinor: l.creditMinor,
+            )
+        ],
+      );
+      final index =
+          LedgerAccountIndex.build(await allLedgerAccounts());
+      // كل الفترات لا المفتوحة حصراً — كي يميز المدقق فترةً مقفلة
+      // (MoveClosedPeriod) عن تاريخ بلا فترة (MoveNoPeriod): رسالة
+      // المالك الصادقة تختلف بين الحالتين (07 §1.5).
+      final periodInfos = await ledgerPeriods();
+      final errors = validateMoveForPosting(
+        draft,
+        index: index,
+        periods: periodInfos,
+      );
+      if (errors.isNotEmpty) {
+        throw LedgerValidationException(errors);
+      }
+      final period = findPeriodForDate(periodInfos, moveRow.dateText)!;
+
+      // الترقيم المركزي داخل المعاملة ذاتها (07 §1.9) — الأرقام المُصدَرة
+      // لا تُعاد أبداً: العدّاد يزحف عند الترحيل الناجح حصراً.
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final year = yearOfIsoDate(moveRow.dateText);
+      final seqRow = await (select(sequences)
+            ..where((t) =>
+                t.kind.equals(ledgerMoveSequenceKind) &
+                t.year.equals(year)))
+          .getSingleOrNull();
+      final nextNumber =
+          seqRow == null ? 1 : nextSequenceNumber(seqRow.lastNumber);
+      if (seqRow == null) {
+        await into(sequences).insert(
+          SequencesCompanion.insert(
+            kind: ledgerMoveSequenceKind,
+            year: year,
+            lastNumber: nextNumber,
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      } else {
+        await (update(sequences)
+              ..where((t) =>
+                  t.kind.equals(ledgerMoveSequenceKind) &
+                  t.year.equals(year)))
+            .write(SequencesCompanion(
+          lastNumber: Value(nextNumber),
+          updatedAt: Value(now),
+        ));
+      }
+      final numberText =
+          '$year/${nextNumber.toString().padLeft(6, '0')}';
+
+      // الحاجز الثاني (07 §2.2): المُشغِّلات تفحص التوازن والأسطر عند
+      // كتابة الحالة — ورفضها ABORT يتراجع المعاملة كاملة بما فيه العدّاد.
+      await (update(moves)..where((t) => t.id.equals(moveId))).write(
+        MovesCompanion(
+          state: const Value('posted'),
+          number: Value(numberText),
+          periodId: Value(period.id),
+          updatedAt: Value(now),
+        ),
+      );
+      await _recordMoveEvent(moveId: moveId, action: 'posted');
+      return moveId;
+    });
+  }
+
+  /// س-48: مسودة العكس لقيد مرحّل (07 §1.3) — الأسطر نفسها بجانبين
+  /// متقابلين، والوصف الافتراضي «عكس قيد 2026/000001» والمرجع محفوظ
+  /// (ref_doc_type='move'). تُنشأ مسودةً بكل حواجز الإنشاء ثم يرحّلها
+  /// المحرك نفسه (postMove) فلا مسار عكس بلا فحص. وأي محاولة عكس قيد
+  /// غير مرحّل رفض صريح — العكس للمرحّل وحده.
+  Future<int> createReversalDraft(
+    int postedMoveId, {
+    required String reversalDateText,
+    String? narration,
+  }) async {
+    final original = await (select(moves)
+          ..where((t) => t.id.equals(postedMoveId)))
+        .getSingleOrNull();
+    if (original == null) {
+      throw StateError('لا قيد بالمعرف $postedMoveId');
+    }
+    if (original.state != 'posted') {
+      throw StateError('العكس يقتصر على قيد مرحّل (07 §1.3)');
+    }
+    final lineRows = await (select(moveLines)
+          ..where((t) => t.moveId.equals(postedMoveId)))
+        .get();
+    final reversal = buildReversalMoveDraft(
+      journalId: original.journalId,
+      originalLines: [
+        for (final l in lineRows)
+          LedgerLine(
+            moveId: l.moveId,
+            accountId: l.accountId,
+            debitMinor: l.debitMinor,
+            creditMinor: l.creditMinor,
+          )
+      ],
+      originalLabel: original.number,
+      reversalDateText: reversalDateText,
+      originalMoveId: postedMoveId,
+      narration: narration,
+    );
+    final moveId = await createMoveDraft(
+      journalId: reversal.journalId,
+      dateText: reversal.dateText,
+      narration: reversal.narration,
+      refDocType: reversal.refDocType,
+      refDocId: reversal.refDocId,
+      lines: reversal.lines,
+    );
+    await _recordMoveEvent(moveId: moveId, action: 'reversal_created');
+    return moveId;
+  }
+
+  /// حذف مسودة (07 §1.3: «حذف المسودات مسموح») — باللقطة كاملة في سجل
+  /// الأحداث (السجل يوثق حتى إلغاء المسودات) والمرحّل مستحيل الحذف
+  /// حرساً هنا ومشغلاً في القاعدة (05 §7-4).
+  Future<void> deleteMoveDraft(int moveId) async {
+    return transaction(() async {
+      final moveRow = await (select(moves)
+            ..where((t) => t.id.equals(moveId)))
+          .getSingleOrNull();
+      if (moveRow == null) return;
+      if (moveRow.state == 'posted') {
+        throw StateError(
+            'حذف القيد المرحّل مستحيل — التصحيح بقيد عكس (07 §1.3)');
+      }
+      final snapshot = await _moveSnapshot(moveId);
+      await (delete(moveLines)..where((t) => t.moveId.equals(moveId))).go();
+      await (delete(moves)..where((t) => t.id.equals(moveId))).go();
+      await into(events).insert(
+        EventsCompanion.insert(
+          eventAt: DateTime.now().millisecondsSinceEpoch,
+          deviceId: await deviceId(),
+          entityType: 'move',
+          entityId: Value(moveId),
+          action: 'draft_deleted',
+          payload: snapshot,
+          uuid: const Uuid().v4(),
+        ),
+      );
+    });
+  }
+
+  /// قراءة الحسابات بترتيب أكوادها (1، 11، 111، 1111 — فرز الدليل
+  /// المعجمي الصحيح) بصورتها النقية — التخزين يقرأ ولا يحسب.
+  Future<List<AccountInfo>> allLedgerAccounts() async {
+    final rows = await (select(accounts)
+          ..orderBy([(t) => OrderingTerm(expression: t.code)]))
+        .get();
+    return [
+      for (final r in rows)
+        AccountInfo(
+          id: r.id,
+          code: r.code,
+          name: r.name,
+          type: AccountType.values.byName(r.type),
+          normalSide: NormalSide.values.byName(r.normalSide),
+          parentId: r.parentId,
+          isLeaf: r.isLeaf,
+          isActive: r.isActive,
+        )
+    ];
+  }
+
+  /// قراءة الفترات بصورتها النقية — فحص الترحيل للمجال.
+  Future<List<PeriodInfo>> ledgerPeriods() async {
+    final rows = await select(periods).get();
+    return [
+      for (final p in rows)
+        PeriodInfo(
+          id: p.id,
+          fiscalYearId: p.fiscalYearId,
+          startDateText: p.startDateText,
+          endDateText: p.endDateText,
+          isOpen: p.state == 'open',
+        )
+    ];
+  }
+
+  /// أسطر القيود المرحّلة (واختيارياً حساب واحد) — المواد الخام للرصيد
+  /// والميزان، والحساب للمجال (computeAccountBalance/trialBalanceTotals).
+  Future<List<LedgerLine>> postedLedgerLines({int? accountId}) async {
+    final rows = await customSelect(
+      "SELECT l.move_id AS move_id, l.account_id AS account_id, "
+      "l.debit_minor AS debit_minor, l.credit_minor AS credit_minor "
+      "FROM move_lines l JOIN moves m ON m.id = l.move_id "
+      "WHERE m.state = 'posted'" +
+          (accountId == null ? '' : ' AND l.account_id = ?'),
+      variables: accountId == null
+          ? const <Variable>[]
+          : <Variable>[Variable.withInt(accountId)],
+    ).get();
+    return [
+      for (final r in rows)
+        LedgerLine(
+          moveId: r.data['move_id'] as int,
+          accountId: r.data['account_id'] as int,
+          debitMinor: r.data['debit_minor'] as int,
+          creditMinor: r.data['credit_minor'] as int,
+        )
+    ];
+  }
+
+  /// رصيد حساب ورقي بالاتجاه الطبيعي من المرحّل حصراً (س-50) — القراءة
+  /// هنا والحساب بدالة المجال النقية ذاتها المستعملة بالاختبارات.
+  Future<int> accountBalanceOf(int accountId) async {
+    final accountRow = await (select(accounts)
+          ..where((t) => t.id.equals(accountId)))
+        .getSingle();
+    final accountInfo = AccountInfo(
+      id: accountRow.id,
+      code: accountRow.code,
+      name: accountRow.name,
+      type: AccountType.values.byName(accountRow.type),
+      normalSide: NormalSide.values.byName(accountRow.normalSide),
+      parentId: accountRow.parentId,
+      isLeaf: accountRow.isLeaf,
+      isActive: accountRow.isActive,
+    );
+    return computeAccountBalance(
+      await postedLedgerLines(accountId: accountId),
+      accountInfo,
+    );
+  }
+
+  /// مجاميع ميزان المراجعة الافتراضي من المرحّل حصراً (س-50) — والحساب
+  /// بدالة المجال النقية ذاتها.
+  Future<(int, int)> trialBalanceTotalsOf() async {
+    return trialBalanceTotals(await postedLedgerLines());
+  }
+}
+
+/// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
+/// بيانات لا نصوص جاهزة) وأوصافها العربية تخدم صفوف فشل التنفيذ حصراً؛
+/// الواجهة حرية صياغتها المعروضة.
+class LedgerValidationException implements Exception {
+  final List<MoveValidationError> errors;
+
+  const LedgerValidationException(this.errors);
+
+  @override
+  String toString() =>
+      'رفض مدقق الدفتر: ${errors.map(describeMoveValidationError).join('؛ ')}';
 }
