@@ -256,6 +256,8 @@ void main() {
     ).getSingle();
     expect(accRows.data['is_active'], 0);
 
+    // شراء تمويني بالليرة كي يصح البيع على رصيد (F-042) — بلا مساس بالصندوق
+    await f.purchaseCredit(lines: [f.line(f.oilId, 10, 25000)]);
     // الفاتورة النقدية بالدولار (المؤجلة من دفعة 4 — إفصاح س32) تعمل
     // الآن فوق صندوقها الدولاري: 100.00 دولار بلقطة 15,000
     final saleId = await db.createInvoiceDraft(InvoiceDraft(
