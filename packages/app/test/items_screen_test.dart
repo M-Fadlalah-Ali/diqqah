@@ -282,6 +282,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
+    // استقرار كامل لانتقال الرجوع قبل أي لمسة تالية — اللمسة أثناء خروج
+    // البطاقة تُصيب زخرفتها لا بلاط القائمة (علة س30)
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('زيت ممتاز (100)'), findsOneWidget);
 
     // س-40: فتح البطاقة ثانية ثم التعطيل — بشارة وبلا حذف
@@ -308,6 +311,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
+    // استقرار كامل قبل السحبة الثانية (علة س30)
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.drag(find.byType(ListView).last, const Offset(0, -320));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
