@@ -241,7 +241,7 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(
+      return Scaffold(
         appBar: AppBar(title: Text('صندوق جديد')),
         body: Center(child: CircularProgressIndicator()),
       );

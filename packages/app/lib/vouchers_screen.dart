@@ -648,7 +648,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(
+      return Scaffold(
         appBar: AppBar(title: Text('سند جديد')),
         body: Center(child: CircularProgressIndicator()),
       );
@@ -970,7 +970,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(
+      return Scaffold(
         appBar: AppBar(title: Text('تحويل بين صناديق')),
         body: Center(child: CircularProgressIndicator()),
       );
@@ -1166,7 +1166,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(
+      return Scaffold(
         appBar: AppBar(title: Text('تسوية صندوق')),
         body: Center(child: CircularProgressIndicator()),
       );

@@ -404,7 +404,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(
+      return Scaffold(
         appBar: AppBar(title: Text('فاتورة جديدة')),
         body: Center(child: CircularProgressIndicator()),
       );
