@@ -13,6 +13,17 @@ import 'seed_cycle.dart';
 ///
 /// نمط القاعدة `inMemorySyncClose` حصراً وضخّات محدودة لا pumpAndSettle
 /// (درس س22..س26) — والحكم بنصوص فريدة لا اشتراكات عائمة (درس س35).
+  /// درس السرد الكسول (س35/س36): ListView يبني الظاهر حصراً — زر أسفل
+  /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
+  Future<void> _scrollTo(WidgetTester tester, String label) async {
+    for (var i = 0;
+        i < 6 && find.text(label).evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -260));
+      await tester.pump();
+    }
+  }
+
 void main() {
   EditableText.debugDeterministicCursor = true;
 
@@ -67,6 +78,7 @@ void main() {
     await tester.pump();
 
     // السبب متروك فارغاً عمداً
+    await _scrollTo(tester, 'حفظ وترحيل');
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
@@ -108,6 +120,7 @@ void main() {
         find.widgetWithText(TextField, 'المبلغ بوحدة صغرى'), '10000');
     await tester.pump();
 
+    await _scrollTo(tester, 'حفظ وترحيل');
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -173,6 +186,7 @@ void main() {
     expect(appliedField.controller!.text, '30000');
 
     // حفظ وترحيل — والسند مرحّل والمطبَّق 30,000 يبقى بالفاتورة جزئية
+    await _scrollTo(tester, 'حفظ وترحيل');
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

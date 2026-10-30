@@ -100,12 +100,14 @@ class _BoxesScreenState extends State<BoxesScreen> {
                   builder: (_) => VouchersScreen(db: widget.db)),
             ),
           ),
+          // درس CI (س36): زر الإنشاء في AppBar لا FAB — فالزر دائماً
+          // مضروباً في RTL لا يحجبه شيء ويبنيه الهيكل مباشرة.
+          TextButton.icon(
+            onPressed: _openNew,
+            icon: const Icon(Icons.add),
+            label: const Text('صندوق جديد'),
+          ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openNew,
-        icon: const Icon(Icons.account_balance_wallet_outlined),
-        label: const Text('صندوق جديد'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),

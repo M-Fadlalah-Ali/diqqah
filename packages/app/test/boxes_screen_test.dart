@@ -14,6 +14,17 @@ import 'seed_cycle.dart';
 /// نمط القاعدة `inMemorySyncClose` حصراً وضخّات محدودة لا pumpAndSettle
 /// (درس س22..س26) — والحكم بالبطاقة الفريدة «حساب 1111 · SYP» (درس
 /// س35: النص خلف الشاشة المدفوعة لا يُلمَس نصاً عائماً).
+  /// درس السرد الكسول (س35/س36): ListView يبني الظاهر حصراً — زر أسفل
+  /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
+  Future<void> _scrollTo(WidgetTester tester, String label) async {
+    for (var i = 0;
+        i < 6 && find.text(label).evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -260));
+      await tester.pump();
+    }
+  }
+
 void main() {
   EditableText.debugDeterministicCursor = true;
 
@@ -52,6 +63,7 @@ void main() {
     // اسم مكرر أولاً — رسالة المحرك كما هي
     await tester.enterText(
         find.widgetWithText(TextField, 'اسم الصندوق'), 'الصندوق الرئيسي');
+    await _scrollTo(tester, 'إنشاء الصندوق');
     await tester.tap(find.text('إنشاء الصندوق'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
@@ -60,6 +72,7 @@ void main() {
     // اسم جديد بالعملة الأساسية (المختارة افتراضياً) — والحساب آلي
     await tester.enterText(
         find.widgetWithText(TextField, 'اسم الصندوق'), 'صندوق الفرع');
+    await _scrollTo(tester, 'إنشاء الصندوق');
     await tester.tap(find.text('إنشاء الصندوق'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

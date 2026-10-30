@@ -12,33 +12,90 @@ import 'reports_screen.dart' show formatMinorAmount;
 /// إنشاء يفوض الحكم كله للمحرك — المدقق البنيوي ثم الفحوص المحركية
 /// ثم حواجز القاعدة (منع السالب الموحد) — والواجهة تعرض رسائل المدقق
 /// العربية كما هي.
-class VouchersScreen extends StatelessWidget {
+///
+/// درس CI (س36): زر الإنشاء زرٌّ واحد في Scaffold الأم يتبدل نصه وعمله
+/// بالتبويب النشط — لا FAB داخل كل تبويب فتتكدس الأزرار في
+/// PageView ويتحجب بعضها بعضاً في الاختبارات ولا يُضرب.
+class VouchersScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
   const VouchersScreen({super.key, required this.db});
 
   @override
+  State<VouchersScreen> createState() => _VouchersScreenState();
+}
+
+class _VouchersScreenState extends State<VouchersScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 3, vsync: this);
+
+  final GlobalKey<_VouchersTabState> _voucherTabKey =
+      GlobalKey<_VouchersTabState>();
+  final GlobalKey<_TransfersTabState> _transfersTabKey =
+      GlobalKey<_TransfersTabState>();
+  final GlobalKey<_AdjustmentsTabState> _adjustmentsTabKey =
+      GlobalKey<_AdjustmentsTabState>();
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openCreate() async {
+    final Widget target = switch (_tabs.index) {
+      0 => VoucherEditScreen(db: widget.db),
+      1 => TransferEditScreen(db: widget.db),
+      _ => AdjustmentEditScreen(db: widget.db),
+    };
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => target),
+    );
+    // بعد العودة من النموذج تُحدّث قائمة التبويب المنشئ حصراً
+    switch (_tabs.index) {
+      case 0:
+        _voucherTabKey.currentState?.reload();
+      case 1:
+        _transfersTabKey.currentState?.reload();
+      default:
+        _adjustmentsTabKey.currentState?.reload();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('السندات'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'السندات'),
-              Tab(text: 'التحويلات'),
-              Tab(text: 'التسويات'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _VouchersTab(db: db),
-            _TransfersTab(db: db),
-            _AdjustmentsTab(db: db),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('السندات'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(text: 'السندات'),
+            Tab(text: 'التحويلات'),
+            Tab(text: 'التسويات'),
           ],
         ),
+      ),
+      // زر واحد لا ثلاثة — والنص يتبدل بالتبويب (درس CI أعلاه)
+      floatingActionButton: AnimatedBuilder(
+        animation: _tabs,
+        builder: (context, _) => FloatingActionButton.extended(
+          onPressed: _openCreate,
+          icon: const Icon(Icons.add_circle_outline),
+          label: Text(switch (_tabs.index) {
+            0 => 'سند جديد',
+            1 => 'تحويل جديد',
+            _ => 'تسوية جديدة',
+          }),
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabs,
+        children: [
+          _VouchersTab(key: _voucherTabKey, db: widget.db),
+          _TransfersTab(key: _transfersTabKey, db: widget.db),
+          _AdjustmentsTab(key: _adjustmentsTabKey, db: widget.db),
+        ],
       ),
     );
   }
@@ -157,24 +214,13 @@ class _VouchersTabState extends State<_VouchersTab>
     });
   }
 
+  /// إعادة التحميل من الأم (بعد العودة من نموذج إنشاء)
+  void reload() => _reload();
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'new-voucher',
-        onPressed: () async {
-          final created = await Navigator.of(context).push<bool>(
-            MaterialPageRoute<bool>(
-                builder: (_) => VoucherEditScreen(db: widget.db)),
-          );
-          if (created == true) _reload();
-        },
-        icon: const Icon(Icons.receipt_outlined),
-        label: const Text('سند جديد'),
-      ),
-      body: Column(
+    return Column(
         children: [
           _RangeBar(from: _from, to: _to, onShow: _reload),
           Expanded(
@@ -197,8 +243,7 @@ class _VouchersTabState extends State<_VouchersTab>
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -243,24 +288,13 @@ class _TransfersTabState extends State<_TransfersTab>
     });
   }
 
+  /// إعادة التحميل من الأم (بعد العودة من نموذج إنشاء)
+  void reload() => _reload();
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'new-transfer',
-        onPressed: () async {
-          final created = await Navigator.of(context).push<bool>(
-            MaterialPageRoute<bool>(
-                builder: (_) => TransferEditScreen(db: widget.db)),
-          );
-          if (created == true) _reload();
-        },
-        icon: const Icon(Icons.swap_horiz),
-        label: const Text('تحويل جديد'),
-      ),
-      body: Column(
+    return Column(
         children: [
           _RangeBar(from: _from, to: _to, onShow: _reload),
           Expanded(
@@ -283,8 +317,7 @@ class _TransfersTabState extends State<_TransfersTab>
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -328,24 +361,13 @@ class _AdjustmentsTabState extends State<_AdjustmentsTab>
     });
   }
 
+  /// إعادة التحميل من الأم (بعد العودة من نموذج إنشاء)
+  void reload() => _reload();
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'new-adjustment',
-        onPressed: () async {
-          final created = await Navigator.of(context).push<bool>(
-            MaterialPageRoute<bool>(
-                builder: (_) => AdjustmentEditScreen(db: widget.db)),
-          );
-          if (created == true) _reload();
-        },
-        icon: const Icon(Icons.balance),
-        label: const Text('تسوية جديدة'),
-      ),
-      body: Column(
+    return Column(
         children: [
           _RangeBar(from: _from, to: _to, onShow: _reload),
           Expanded(
@@ -370,8 +392,7 @@ class _AdjustmentsTabState extends State<_AdjustmentsTab>
               ),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }

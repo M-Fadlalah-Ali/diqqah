@@ -14,6 +14,17 @@ import 'seed_cycle.dart';
 /// نمط القاعدة `inMemorySyncClose` حصراً وضخّات محدودة لا pumpAndSettle —
 /// درس س22..س26 الموثق — والحكم بنصوص بطاقات فريدة لا textContaining
 /// عائماً (درس س35: النص خلف الشاشة المدفوعة).
+  /// درس السرد الكسول (س35/س36): ListView يبني الظاهر حصراً — زر أسفل
+  /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
+  Future<void> _scrollTo(WidgetTester tester, String label) async {
+    for (var i = 0;
+        i < 6 && find.text(label).evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView), const Offset(0, -260));
+      await tester.pump();
+    }
+  }
+
 void main() {
   EditableText.debugDeterministicCursor = true;
 
@@ -50,6 +61,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
+    await _scrollTo(tester, 'حفظ كمسودة');
     await tester.tap(find.text('حفظ كمسودة'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -104,6 +116,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
+    await _scrollTo(tester, 'حفظ وترحيل');
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
