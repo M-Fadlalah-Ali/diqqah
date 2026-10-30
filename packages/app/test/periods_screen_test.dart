@@ -93,7 +93,13 @@ void main() {
     await tester.tap(find.text('فتح الفترة'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.textContaining('بسبب نصي إلزامي'), findsOneWidget);
+    // بالنص الحرفي الكامل — لا textContaining: بطاقة الإرشاد خلف الحوار
+    // تشارك عبارة «بسبب نصي إلزامي» (فشل CI جولة الثانية — 2026-10-31)
+    expect(
+      find.text(
+          'فك الإقفال طارئ بسبب نصي إلزامي — اكتب سبب الفك ولا يفتح بلا سبب'),
+      findsOneWidget,
+    );
 
     await tester.enterText(
         find.byType(TextField), 'تصحيح خطأ ترحيل بإذن المالك');
