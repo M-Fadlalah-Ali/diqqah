@@ -6,28 +6,13 @@ import 'package:diqqah_app/parties_screen.dart';
 
 /// اختبارات شاشة الأطراف — دفعة م1 (1) على السيناريوهات المعتمدة
 /// س-29..س-35 (06 §1-ب) بقرارات D-062..D-066.
-
-/// نمط الإغلاق الآمن لكل اختبار يعرض شاشة ذات تدفق watch نشط (علّة CI
-/// 2026-10-29 س25 — الجذر الموثق من سجل الجولة السابعة):
-/// تدمير StreamBuilder يُلغي تدفق drift فيجدول StreamQueryStore.markAsClosed
-/// مؤقتاً زائفاً مدته صفر، وأي إغلاق للقاعدة قبل إطلاقه — مباشراً في الteardown
-/// أو عبر runAsync كما جرّبت س24 — ينتظره أبدياً فيعلق حتى مهلة الاختبار العشر
-/// دقائق، والإغلاق المعلق المسرّب يسمّ اختبارات الملف كلها بعده (رفض !inTest
-/// على التالي ثم Reentrant runAsync على من بعده — عشر دقائق لكل اختبار
-/// متتابع حتى 12 فشلاً). الضخّ في الteardown مشروع: النطاق الزائف باقٍ حتى
-/// نهاية runTest فالمؤقتات الزائفة تُطلق هنا لا في الانتظار الحقيقي.
-Future<void> closeScreenDb(WidgetTester tester, DiqqahDatabase db) async {
-  // (أ) إطلاق مؤقت إخفاء SnackBar (أربع ثوانٍ) وأنيميشنه قبل التفكيك —
-  // رسائل رفض أحفظها لا تزال ظاهرة عند نهاية بعض الاختبارات.
-  await tester.pump(const Duration(seconds: 5));
-  await tester.pump(const Duration(seconds: 1));
-  // (ب) تفكيك الشجرة داخل النطاق الزائف: يُلغي تدفق watch ويجدول المؤقت الصفري
-  await tester.pumpWidget(const SizedBox.shrink());
-  // (ج) إطلاق المؤقت الزائف ثم إغلاق بلا تدفقات نشطة — اكتمال فوري
-  await tester.pump(const Duration(seconds: 1));
-  await db.close();
-}
-
+///
+/// نمط القاعدة هنا `inMemorySyncClose` حصراً: drift يؤجل تنظيف تدفق watch
+/// مؤقتاً زائفاً بعد آخر إلغاء اشتراك، وفحص ثوابت flutter_test («مؤقت ما زال
+/// معلقاً بعد تفكيك الشجرة») يسبق teardowns فلا سبيل لإطلاقه بعد التفكيك —
+/// وكان هذا جذر تعليق ساعات في س22..س25 حتى قُطع الطريق من مصدره بخيار
+/// drift الموثق closeStreamsSynchronously (س26). الإغلاق نفسه إغلاق عادي
+/// في الteardown — لا runAsync ولا رقصة ضخّات.
 void main() {
   // مؤشر الكتابة الوامض يجعل pumpAndSettle تدور إلى مهلتها (10 دقائق لكل
   // موضع — علّة CI 2026-10-29: الوظيفة عالقت 40+ دقيقة بلا نتيجة). التثبيت
@@ -36,8 +21,8 @@ void main() {
 
   testWidgets('س-29: بطاقة طرف جديد — الرقم مقترح آلياً (0001)، والحفظ بلا '
       'اسم مرفوض برسالة، وبالحفظ يظهر «الاسم (الرقم)» بالقائمة', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
     // ضخّات محدودة لا pumpAndSettle: مؤشر الانتظار (سطر الشاشة 83) يظل
@@ -85,8 +70,8 @@ void main() {
 
   testWidgets('س-29: رقم مكرر بعد نزع الأصفار مرفوض برسالة تري صاحبه — '
       '«الرقم 53 مستخدم للطرف: محمد الخالدي (0053)»', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
     await db.insertParty(
       number: '0053',
       name: 'محمد الخالدي',
@@ -119,8 +104,8 @@ void main() {
 
   testWidgets('س-31/D-064: البحث الجامع المطبَّع — «خال 53» و«احمد» ونتيجة '
       'فارغة برسالة لا بصمت', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
     await db.insertParty(
       number: '0012',
       name: 'أحمد الغالي',
@@ -167,8 +152,8 @@ void main() {
 
   testWidgets('س-33: التعطيل بشارة والطرف يبقى بالقائمة — وزر الحذف غير '
       'موجود أصلاً — وإعادة التفعيل ممكنة', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
     await db.insertParty(
       number: '0053',
       name: 'محمد الخالدي',
@@ -210,8 +195,8 @@ void main() {
 
   testWidgets('س-32: تعديل طرف — الرقم مقفل بلا حقل تعديل، والاسم يعدل '
       'بالمرجع فيبقى الرقم كما هو', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
     await db.insertParty(
       number: '0053',
       name: 'محمد الخالدي',
@@ -249,8 +234,8 @@ void main() {
 
   testWidgets('س-30/س-34: الطرف المزدوج «الاثنان معاً» بصف واحد، وحد '
       'الائتمان يخزن والفراغ فيه بلا سقف', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
 
     await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
     await tester.pump();
@@ -282,8 +267,8 @@ void main() {
 
   testWidgets('س-29/D-065: الاسم المطابق حرفياً لطرف قائم مرفوض برسالة تحمل '
       'الطرف القائم — و«احمد» غير «أحمد» (المنع حرفي)', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
     await db.insertParty(
       number: '0001',
       name: 'أحمد',

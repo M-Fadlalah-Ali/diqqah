@@ -195,6 +195,24 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// للاختبارات: قاعدة في الذاكرة — لا أثر على ملف المستخدم أبداً.
   DiqqahDatabase.inMemory() : super(NativeDatabase.memory());
 
+  /// اتصال اختباري بإغلاق التدفقات فوراً بلا مؤقتات — الخيار الموثق في
+  /// drift نفسها (DatabaseConnection.closeStreamsSynchronously) «لبيئات
+  /// الاختبار التي ترمي استثناءات على المؤقتات المتبقية بعد الاختبارات»
+  /// (علّة CI 2026-10-29/30 — س24/س25/س26): drift يؤجل تنظيف تدفق watch
+  /// مؤقتاً زائفاً بعد آخر إلغاء اشتراك كي لا يعيد الاستعلام عند إعادة
+  /// الاتصال السريع، وفحص ثوابت flutter_test («مؤقت ما زال معلقاً بعد
+  /// تفكيك الشجرة») يسبق teardowns فلا سبيل لإطلاقه بعد التفكيك —
+  /// والخيار هنا يقطع الطريق من مصدره: لا مؤقت يُجدول أصلاً عند إلغاء
+  /// أي اشتراك. للاختبارات حصراً — المنتج لا يستعمله.
+  factory DiqqahDatabase.inMemorySyncClose() =>
+      DiqqahDatabase._syncClose(DatabaseConnection(
+        NativeDatabase.memory(),
+        closeStreamsSynchronously: true,
+      ));
+
+  DiqqahDatabase._syncClose(DatabaseConnection connection)
+      : super.connect(connection);
+
   @override
   int get schemaVersion => 4;
 

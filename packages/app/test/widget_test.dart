@@ -11,21 +11,6 @@ import 'package:diqqah_app/main.dart';
 import 'package:diqqah_app/parties_screen.dart';
 import 'package:diqqah_app/settings_screen.dart';
 
-/// نمط الإغلاق الآمن للاختبار الذي يعرض شاشة ذات تدفق watch نشط — نفس
-/// نمط parties_screen_test (علّة CI 2026-10-29 س25): إطلاق المؤقتات الزائفة
-/// بضخّات داخل النطاق الزائف قبل الإغلاق، لا انتظار حقيقي عبر runAsync
-/// يعلق أبدياً ويسمّ اختبارات الملف كلها بعده.
-Future<void> closeScreenDb(WidgetTester tester, DiqqahDatabase db) async {
-  // (أ) إطلاق مؤقت إخفاء SnackBar وإن وُجد وأنيميشنه قبل التفكيك
-  await tester.pump(const Duration(seconds: 5));
-  await tester.pump(const Duration(seconds: 1));
-  // (ب) تفكيك الشجرة: يُلغي تدفق watch ويجدول مؤقت markAsClosed الصفري
-  await tester.pumpWidget(const SizedBox.shrink());
-  // (ج) إطلاق المؤقت الزائف ثم إغلاق بلا تدفقات نشطة — اكتمال فوري
-  await tester.pump(const Duration(seconds: 1));
-  await db.close();
-}
-
 void main() {
   // تثبيت المؤشر الوامض تجريبياً — F-016 يفتح شاشة بحقل بحث، والوميض مصدر
   // إطارات لا نهائية لأي ضخّ غير محدود (النمط نفسه الموثق في parties_screen_test)
@@ -77,11 +62,10 @@ void main() {
 
   testWidgets('F-016: الأطراف فُتحت بدفعة م1 (1) مع الإعدادات — والبقية معطلة؛\n'
       'وفتح الأطراف يفتح شاشتها والبحث فيها يعمل', (tester) async {
-    final db = DiqqahDatabase.inMemory();
-    // الإغلاق بالنمط الآمن — هذا الاختبار وحده من اختبارات هذا الملف يعرض
-    // شاشة ذات تدفق watch نشط (علّة CI 2026-10-29 س25 — انظر closeScreenDb؛
-    // إغلاق runAsync في س24 علّق العشر دقائق وسمّ الملف كله بعده).
-    addTearDown(() => closeScreenDb(tester, db));
+    final db = DiqqahDatabase.inMemorySyncClose();
+    // الإغلاق العادي يكفي — القاعدة بنمط inMemorySyncClose (س26) فلا مؤقت
+    // يُجدول عند إلغاء تدفق watch عند تفكيك الشجرة، ولا runAsync ولا ضخّات.
+    addTearDown(db.close);
     await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
 
     await tester.pumpWidget(DiqqahApp(db: db));
