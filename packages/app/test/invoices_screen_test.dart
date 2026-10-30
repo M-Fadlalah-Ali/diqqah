@@ -66,6 +66,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
+    // بطاقة الأخطاء أعلى القائمة — والتمرير إلى الزر فكّ إدراجها من
+    // الشجرة الكسولة (درس س35/س36) فتُعاد إلى النافذة قبل فحصها
+    await tester.drag(find.byType(ListView), const Offset(0, 800));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
     // مدقق البنية النقي يعرض رسالته كما هي — الكمية صفر في البند الأول
     expect(find.textContaining('الكمية «0» صفر أو سالبة'), findsWidgets);
 

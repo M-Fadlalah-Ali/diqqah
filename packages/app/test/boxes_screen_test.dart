@@ -69,6 +69,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.textContaining('مستخدم سلفاً'), findsOneWidget);
 
+    // بطاقة الرسالة دفعت الحقل خارج النافذة فتُعاد القائمة لأولها
+    // قبل إعادة الإدخال (درس القائمة الكسولة — س36)
+    await tester.drag(find.byType(ListView), const Offset(0, 800));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
     // اسم جديد بالعملة الأساسية (المختارة افتراضياً) — والحساب آلي
     await tester.enterText(
         find.widgetWithText(TextField, 'اسم الصندوق'), 'صندوق الفرع');

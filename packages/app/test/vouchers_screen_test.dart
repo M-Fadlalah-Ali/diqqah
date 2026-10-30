@@ -172,6 +172,10 @@ void main() {
     // فاتورة البيع المفتوحة ظهرت بمتبقيها 40,000 (قبض الدورة 50,000)
     expect(find.textContaining('متبقٍ 40,000'), findsOneWidget);
 
+    await tester.enterText(
+        find.widgetWithText(TextField, 'التاريخ (YYYY-MM-DD)'), '2026-03-15');
+    await tester.pump();
+
     // المبلغ 30,000 ثم المقترح الآلي بالأقدمية يعبئ المطبَّق
     await tester.enterText(
         find.widgetWithText(TextField, 'المبلغ بوحدة صغرى'), '30000');
