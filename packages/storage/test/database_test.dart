@@ -18,7 +18,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011: كل تغيير مخطط إصدار وترحيلة — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 8);
+    expect(db.schemaVersion, 9);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -478,7 +478,7 @@ void main() {
     // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
     // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 8);
+    expect(migrated.schemaVersion, 9);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');

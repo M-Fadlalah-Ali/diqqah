@@ -617,7 +617,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -628,6 +628,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createInvoiceTriggers();
           await _createVoucherTables();
           await _createVoucherTriggers();
+          await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
           await _seedVoucherBaseline();
@@ -787,6 +788,12 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               await _seedAccountingBaseline();
               await _seedInvoiceBaseline();
               await _seedVoucherBaseline();
+            }
+            // 8→9 (ومن إصدار أدنى مباشرة): دفعة (6) حواجز الإقفال حصراً
+            // (D-088 معروض) — بلا جداول ولا أعمدة جديدة، والبناة DROP+CREATE
+            // فآمنة التكرار أي كان مسار الوصول.
+            if (version == 9) {
+              await _createClosingTriggers();
             }
           }
         },
@@ -4288,6 +4295,355 @@ Future<void> _seedVoucherBaseline() async {
   await customStatement(
       "UPDATE accounts SET is_active = 1 "
       "WHERE code IN ('44', '55') AND is_active = 0");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// دفعة (6) التقارير والإغلاق — الدفعة السادسة والأخيرة من م1-نواة
+// (س-71..س-78، D-088..D-090 معروضة): التقارير الخمسة قراءات من المرحّل
+// حصراً بلا جداول تجميع مخزنة (D-089 معروض — السجل مصدراً D-067)،
+// والإقفال حالة الفترة وحدها بحدثَي سجل موثقين (D-090 معروض)، وحاجز
+// الإقفال الثالث مُشغِّلات v9 فوق حاجزَي المجال والمحرك (نمط D-067).
+// ═══════════════════════════════════════════════════════════════════
+
+/// صف الفترة (المدى والحالة) — حرس قراءة المستندات والإقفال.
+Future<(String, String, String)?> _periodRowTx(int periodId) async {
+  final rows = await customSelect(
+    'SELECT start_date_text, end_date_text, state FROM periods '
+    'WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(periodId)],
+  ).get();
+  if (rows.isEmpty) return null;
+  final data = rows.first.data;
+  return (
+    data['start_date_text'] as String,
+    data['end_date_text'] as String,
+    data['state'] as String,
+  );
+}
+
+/// مسودات فترة قائمة بكل المستندات القيدية الخمسة (س-20: «تظهر قائمة
+/// المستندات المفتوحة (المسودات) في الفترة لطلب حسمها أولاً») — والمسودة
+/// بلا رقم فتلقب «مسودة #المعرف» (الترقيم لحظة الترحيل حصراً — 07 §1.9).
+Future<List<PeriodDraftInfo>> periodOpenDrafts(int periodId) async {
+  final row = await _periodRowTx(periodId);
+  if (row == null) return const <PeriodDraftInfo>[];
+  final (startDateText, endDateText, _) = row;
+  final rows = await customSelect(
+    "SELECT 'move' AS doc_type, id, '' AS number, date_text AS doc_date "
+    'FROM moves WHERE is_deleted = 0 AND state = '
+    "'draft' AND date_text BETWEEN ?1 AND ?2 "
+    'UNION ALL '
+    "SELECT 'invoice', id, number, invoice_date FROM invoices "
+    "WHERE is_deleted = 0 AND state = 'draft' "
+    'AND invoice_date BETWEEN ?1 AND ?2 '
+    'UNION ALL '
+    "SELECT 'voucher', id, number, voucher_date FROM vouchers "
+    "WHERE is_deleted = 0 AND state = 'draft' "
+    'AND voucher_date BETWEEN ?1 AND ?2 '
+    'UNION ALL '
+    "SELECT 'box_transfer', id, number, transfer_date FROM box_transfers "
+    "WHERE is_deleted = 0 AND state = 'draft' "
+    'AND transfer_date BETWEEN ?1 AND ?2 '
+    'UNION ALL '
+    "SELECT 'cash_adjustment', id, number, adjustment_date "
+    'FROM cash_adjustments '
+    "WHERE is_deleted = 0 AND state = 'draft' "
+    'AND adjustment_date BETWEEN ?1 AND ?2',
+    variables: [
+      Variable.withString(startDateText),
+      Variable.withString(endDateText),
+    ],
+  ).get();
+  return [
+    for (final r in rows)
+      PeriodDraftInfo(
+        docType: r.data['doc_type'] as String,
+        docId: r.data['id'] as int,
+        label: (r.data['number'] as String).isEmpty
+            ? 'مسودة #${r.data['id']}'
+            : r.data['number'] as String,
+        dateText: r.data['doc_date'] as String,
+      ),
+  ];
+}
+
+/// إقفال فترة (س-20): مسوداتها تُعرض وتُطلب حسمها بتأكيد صريح — رحّلها
+/// أو أكّد تركها معلقة لا تُرحَّل حتى الفك — ثم الحالة «مقفلة» وحدث
+/// سجل موثق بلقطة المسودات عند القفل (لا مستندات تُمسّ هنا إطلاقاً:
+/// المرحّل مجمد أصلاً — 07 §1.3).
+Future<void> closePeriod(int periodId, {required bool draftsConfirmed}) {
+  return transaction(() async {
+    final row = await _periodRowTx(periodId);
+    if (row == null) {
+      throw StateError('الفترة $periodId غير موجودة');
+    }
+    final (startDateText, endDateText, state) = row;
+    final drafts = await periodOpenDrafts(periodId);
+    final errors = validatePeriodClose(
+      periodId: periodId,
+      startDateText: startDateText,
+      endDateText: endDateText,
+      isOpen: state == 'open',
+      openDraftsCount: drafts.length,
+      draftsConfirmed: draftsConfirmed,
+    );
+    if (errors.isNotEmpty) {
+      throw PeriodClosingException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (update(periods)..where((t) => t.id.equals(periodId))).write(
+      PeriodsCompanion(
+        state: const Value('closed'),
+        updatedAt: Value(now),
+      ),
+    );
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: now,
+        deviceId: await deviceId(),
+        entityType: 'period',
+        entityId: Value(periodId),
+        action: 'period_closed',
+        payload: jsonEncode(<String, Object?>{
+          'period_id': periodId,
+          'start_date_text': startDateText,
+          'end_date_text': endDateText,
+          'open_drafts': [
+            for (final d in drafts)
+              <String, Object?>{
+                'doc_type': d.docType,
+                'doc_id': d.docId,
+                'label': d.label,
+                'date_text': d.dateText,
+              },
+          ],
+        }),
+        uuid: const Uuid().v4(),
+      ),
+    );
+  });
+}
+
+/// فكُّ الإقفال (س-20/س2): طارئ بسبب نصي إلزامي يوثق في السجل بلقطة
+/// «لماذا فُتح» — والتقارير التاريخية لا تتأثر إطلاقاً فمصدرها المرحّل
+/// المجمد (D-090 معروض: لقطة «كما قُفل» الختامية مع الإقفال السنوي م2).
+Future<void> openPeriod(int periodId, {required String reason}) {
+  return transaction(() async {
+    final row = await _periodRowTx(periodId);
+    if (row == null) {
+      throw StateError('الفترة $periodId غير موجودة');
+    }
+    final (startDateText, endDateText, state) = row;
+    final errors = validatePeriodOpen(
+      periodId: periodId,
+      isClosed: state == 'closed',
+      reason: reason,
+    );
+    if (errors.isNotEmpty) {
+      throw PeriodClosingException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (update(periods)..where((t) => t.id.equals(periodId))).write(
+      PeriodsCompanion(state: const Value('open'), updatedAt: Value(now)),
+    );
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: now,
+        deviceId: await deviceId(),
+        entityType: 'period',
+        entityId: Value(periodId),
+        action: 'period_opened',
+        payload: jsonEncode(<String, Object?>{
+          'period_id': periodId,
+          'start_date_text': startDateText,
+          'end_date_text': endDateText,
+          'reopen_reason': reason,
+        }),
+        uuid: const Uuid().v4(),
+      ),
+    );
+  });
+}
+
+/// ميزان المراجعة من المرحّل حصراً (س-71) — البناء بدالة المجال النقية
+/// ذاتها المستعملة بالاختبارات (نمط س-50: التخزين يقرأ ولا يحسب).
+Future<TrialBalanceReport> trialBalanceReport() async {
+  final lines = [
+    for (final line in await postedLedgerLines())
+      TrialBalanceRawLine(
+        accountId: line.accountId,
+        debitMinor: line.debitMinor,
+        creditMinor: line.creditMinor,
+      ),
+  ];
+  return buildTrialBalance(lines, await allLedgerAccounts());
+}
+
+/// تقرير الصناديق (س-72) — الرصيد بمعادلة الصندوق ذاتها (الافتتاحي +
+/// الداخل − الخارج، والتحويل دخلاً للمستلم وخروجاً للمرسل) ونشاط
+/// الصندوق نشاط حسابه الورقي (تعطيل الحساب تعطيل للصندوق — 03 §6-3).
+Future<List<CashBoxReportRow>> cashBoxesReport() async {
+  final rows = await customSelect(
+    'SELECT b.id AS box_id, b.name AS name, c.code AS currency_code, '
+    'a.code AS account_code, a.is_active AS account_active '
+    'FROM cash_boxes b '
+    'JOIN currencies c ON c.id = b.currency_id '
+    'JOIN accounts a ON a.id = b.account_id '
+    'WHERE b.is_deleted = 0 ORDER BY b.id',
+  ).get();
+  final report = <CashBoxReportRow>[];
+  for (final r in rows) {
+    report.add(CashBoxReportRow(
+      boxId: r.data['box_id'] as int,
+      name: r.data['name'] as String,
+      currencyCode: r.data['currency_code'] as String,
+      accountCode: r.data['account_code'] as String,
+      balanceBaseMinor: await _cashBoxBalanceTx(r.data['box_id'] as int),
+      isActive: (r.data['account_active'] as int) == 1,
+    ));
+  }
+  return report;
+}
+
+/// تقرير الذمم (س-73) — صافي كل طرف على حسابَي السيطرة (112/211) من
+/// المرحّل حصراً، والاتجاهان (هم يدينون/نحن مدينون) بالمجال (05 §5).
+Future<List<ReceivablesPayablesRow>> receivablesPayablesReport() async {
+  final rows = await customSelect(
+    'SELECT ml.party_id AS party_id, p.name AS party_name, '
+    'SUM(ml.debit_minor) - SUM(ml.credit_minor) AS net_debit '
+    'FROM move_lines ml '
+    'JOIN moves m ON m.id = ml.move_id '
+    'JOIN parties p ON p.id = ml.party_id '
+    'JOIN accounts a ON a.id = ml.account_id '
+    "WHERE m.state = 'posted' AND ml.party_id IS NOT NULL "
+    "AND a.code IN ('112', '211') "
+    'GROUP BY ml.party_id ORDER BY p.name',
+  ).get();
+  return buildReceivablesPayables([
+    for (final r in rows)
+      PartyControlRaw(
+        partyId: r.data['party_id'] as int,
+        partyName: r.data['party_name'] as String,
+        netDebitMinor: r.data['net_debit'] as int,
+      ),
+  ]);
+}
+
+/// تقرير المخزون (س-74) — من stock_balances مباشرة (السجل مصدراً
+/// D-067) والمتوسط عرضاً حصراً بالمجال (رسة النصف بعيداً عن الصفر).
+Future<List<InventoryReportRow>> inventoryReport() async {
+  final rows = await customSelect(
+    'SELECT sb.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    'w.name AS warehouse_name, sb.qty_base AS qty_base, '
+    'sb.total_value_minor AS total_value '
+    'FROM stock_balances sb '
+    'JOIN items i ON i.id = sb.item_id '
+    'LEFT JOIN warehouses w ON w.id = sb.warehouse_id '
+    'WHERE sb.qty_base <> 0 OR sb.total_value_minor <> 0 '
+    'ORDER BY i.sku',
+  ).get();
+  return buildInventoryReport([
+    for (final r in rows)
+      InventoryRawRow(
+        itemId: r.data['item_id'] as int,
+        sku: r.data['sku'] as String,
+        name: r.data['name'] as String,
+        warehouseName: r.data['warehouse_name'] as String?,
+        qtyBase: r.data['qty_base'] as int,
+        totalValueMinor: r.data['total_value'] as int,
+      ),
+  ]);
+}
+
+/// تقرير مبيعات وحركة الأصناف (س-75) — بيع ومردود بيع مرحّلان بمدى
+/// تاريخ، والقيم بالأساسية من سطور الفواتير المخزنة (D-089 معروض:
+/// حركة الشراء ظاهرة في المخزون والميزان، وتقرير المشتريات المستقل
+/// مع واجهات التقارير).
+Future<List<SalesMovementRow>> salesMovementReport({
+  required String fromText,
+  required String toText,
+}) async {
+  final errors = validateReportRange(fromText, toText);
+  if (errors.isNotEmpty) {
+    throw ReportValidationException(errors);
+  }
+  final rows = await customSelect(
+    'SELECT il.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    "SUM(CASE WHEN inv.kind = 'invoice_sale' "
+    'THEN il.qty_base ELSE 0 END) AS qty_sold, '
+    "SUM(CASE WHEN inv.kind = 'invoice_sale' "
+    'THEN il.line_total_base_minor ELSE 0 END) AS sales_value, '
+    "SUM(CASE WHEN inv.kind = 'invoice_sale_return' "
+    'THEN il.qty_base ELSE 0 END) AS qty_returned, '
+    "SUM(CASE WHEN inv.kind = 'invoice_sale_return' "
+    'THEN il.line_total_base_minor ELSE 0 END) AS returns_value '
+    'FROM invoice_lines il '
+    'JOIN invoices inv ON inv.id = il.invoice_id '
+    'JOIN items i ON i.id = il.item_id '
+    "WHERE inv.state <> 'draft' AND inv.is_deleted = 0 "
+    'AND il.is_deleted = 0 '
+    'AND inv.invoice_date >= ?1 AND inv.invoice_date <= ?2 '
+    'GROUP BY il.item_id ORDER BY i.sku',
+    variables: [
+      Variable.withString(fromText),
+      Variable.withString(toText),
+    ],
+  ).get();
+  return buildSalesMovementReport([
+    for (final r in rows)
+      SalesMovementRawRow(
+        itemId: r.data['item_id'] as int,
+        sku: r.data['sku'] as String,
+        name: r.data['name'] as String,
+        qtySoldBase: r.data['qty_sold'] as int,
+        salesValueBaseMinor: r.data['sales_value'] as int,
+        qtyReturnedBase: r.data['qty_returned'] as int,
+        returnsValueBaseMinor: r.data['returns_value'] as int,
+      ),
+  ]);
+}
+
+Future<void> _createClosingTriggers() async {
+  // ═══ حواجز الإقفال الثالثة (دفعة 6 — ترحيلة v9): المجال يفحص فترة
+  // التاريخ (MoveClosedPeriod وأخواتها الأربع) والمحرك يمنع قبل أي كتابة
+  // والقاعدة تحبط أي إدراج أو ترحيل خام في فترة مقفلة — الحاجز الثالث
+  // على نمط D-067 (07 §2.2). DROP+CREATE فإعادة التعريف موثقة آمنة
+  // التكرار (نمط توسعة حاجز سالب الصندوق س33). والمستندات القيدية
+  // الخمسة بأعمدة تواريخها، والفواتير بحالتَيها المحسومتين posted/paid
+  // (النقدية غير المردودة «paid» فوراً — دفعة 4).
+  const docTables = <(String, String, String)>[
+    ('moves', 'date_text', "'posted'"),
+    ('invoices', 'invoice_date', "'posted', 'paid'"),
+    ('vouchers', 'voucher_date', "'posted'"),
+    ('box_transfers', 'transfer_date', "'posted'"),
+    ('cash_adjustments', 'adjustment_date', "'posted'"),
+  ];
+  for (final (table, dateColumn, committedStates) in docTables) {
+    final periodClosed = '(SELECT p.state FROM periods p '
+        'WHERE p.is_deleted = 0 '
+        'AND p.start_date_text <= NEW.$dateColumn '
+        'AND p.end_date_text >= NEW.$dateColumn LIMIT 1) = '
+        "'closed'";
+    await customStatement(
+        'DROP TRIGGER IF EXISTS trg_${table}_closed_period_insert');
+    await customStatement(
+        'DROP TRIGGER IF EXISTS trg_${table}_closed_period_post');
+    await customStatement(
+      'CREATE TRIGGER trg_${table}_closed_period_insert '
+      'BEFORE INSERT ON $table FOR EACH ROW '
+      "WHEN NEW.state IN ($committedStates) AND $periodClosed "
+      "BEGIN SELECT RAISE(ABORT, 'فترة مقفلة: لا ترحيل فيها "
+      "(حاجز القاعدة)'); END",
+    );
+    await customStatement(
+      'CREATE TRIGGER trg_${table}_closed_period_post '
+      'BEFORE UPDATE OF state ON $table FOR EACH ROW '
+      "WHEN NEW.state IN ($committedStates) "
+      'AND OLD.state NOT IN ($committedStates) AND $periodClosed '
+      "BEGIN SELECT RAISE(ABORT, 'فترة مقفلة: لا ترحيل فيها "
+      "(حاجز القاعدة)'); END",
+    );
+  }
 }
 }
 
