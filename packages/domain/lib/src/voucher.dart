@@ -24,8 +24,7 @@
 /// سيناريوهات الدفعة س-61..س-70 (06 §1-و): مقترحة وبُنيت عليها حصراً —
 /// بانتظار اعتماد المالك أو تعديلها (عرف الدفعات: الصدق أولاً).
 
-import 'invoice.dart'
-    show baseCurrencyFxRate, convertToBaseMinor, formatDocumentNumber;
+import 'invoice.dart' show baseCurrencyFxRate, convertToBaseMinor;
 import 'journal.dart' show isValidIsoDate;
 
 export 'invoice.dart'
@@ -460,7 +459,6 @@ String describeVoucherValidationError(VoucherValidationError error) =>
       VoucherAllocationCurrencyMismatch(:final invoiceId) =>
         'الفاتورة رقم $invoiceId بعملة تخالف عملة السند',
       VoucherAllocationExceedsRemaining(
-        :final invoiceId,
         :final invoiceLabel,
         :final remainingDocMinor,
       ) =>

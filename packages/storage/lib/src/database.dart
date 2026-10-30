@@ -3089,23 +3089,33 @@ Future<List<CurrencyRow>> currenciesOf() async {
       // التقريب فمجموع مطابقاتها الأساسي يساوي قيمتها المسجلة حرفاً
       // (D-084: لا غبار تقريب — نمط D-067).
       final invCache = <int, InvoiceDocument>{};
+      // صفوف المطابقة خاماً من القاعدة — تُعرَّب سجلاً مكتوباً مرة واحدة
+      // كي تكون حواملها نمطاً لا خرائط (درس جولة س32 الثانية).
+      final allocations = [
+        for (final r in allocRows)
+          (
+            id: r['id'] as int,
+            invoiceId: r['invoice_id'] as int,
+            appliedDocMinor: r['applied_doc_minor'] as int,
+          ),
+      ];
       final coverage =
-          await _coverageByInvoiceTx([for (final r in allocRows) r.invoiceId]);
+          await _coverageByInvoiceTx([for (final a in allocations) a.invoiceId]);
       var allocatedDocTotal = 0;
       var allocatedBaseTotal = 0;
       final baseByAllocationRow = <int, int>{};
-      for (final r in allocRows) {
+      for (final a in allocations) {
         final inv =
-            invCache[r.invoiceId] ??= (await _invoiceRowTx(r.invoiceId))!;
-        final remainingDoc = inv.totalDocMinor - (coverage[r.invoiceId]?.$1 ?? 0);
+            invCache[a.invoiceId] ??= (await _invoiceRowTx(a.invoiceId))!;
+        final remainingDoc = inv.totalDocMinor - (coverage[a.invoiceId]?.$1 ?? 0);
         final int base;
-        if (r.appliedDocMinor >= remainingDoc) {
-          base = inv.totalBaseMinor - (coverage[r.invoiceId]?.$2 ?? 0);
+        if (a.appliedDocMinor >= remainingDoc) {
+          base = inv.totalBaseMinor - (coverage[a.invoiceId]?.$2 ?? 0);
         } else {
-          base = convertToBaseMinor(r.appliedDocMinor, inv.fxRate);
+          base = convertToBaseMinor(a.appliedDocMinor, inv.fxRate);
         }
-        baseByAllocationRow[r.id] = base;
-        allocatedDocTotal += r.appliedDocMinor;
+        baseByAllocationRow[a.id] = base;
+        allocatedDocTotal += a.appliedDocMinor;
         allocatedBaseTotal += base;
       }
       final advanceDoc = totalDoc - allocatedDocTotal;
@@ -3125,14 +3135,14 @@ Future<List<CurrencyRow>> currenciesOf() async {
             amountMinor: totalDoc,
             fxRate: draft.fxRate,
           ));
-          for (final r in allocRows) {
-            final inv = invCache[r.invoiceId]!;
+          for (final a in allocations) {
+            final inv = invCache[a.invoiceId]!;
             lines.add(MoveLineDraft(
               accountId: acc112,
-              creditMinor: baseByAllocationRow[r.id]!,
+              creditMinor: baseByAllocationRow[a.id]!,
               partyId: draft.partyId,
               currencyId: inv.currencyId,
-              amountMinor: r.appliedDocMinor,
+              amountMinor: a.appliedDocMinor,
               fxRate: inv.fxRate,
             ));
           }
@@ -3160,14 +3170,14 @@ Future<List<CurrencyRow>> currenciesOf() async {
                 amountMinor: -fxDiff));
           }
         } else {
-          for (final r in allocRows) {
-            final inv = invCache[r.invoiceId]!;
+          for (final a in allocations) {
+            final inv = invCache[a.invoiceId]!;
             lines.add(MoveLineDraft(
               accountId: acc211,
-              debitMinor: baseByAllocationRow[r.id]!,
+              debitMinor: baseByAllocationRow[a.id]!,
               partyId: draft.partyId,
               currencyId: inv.currencyId,
-              amountMinor: r.appliedDocMinor,
+              amountMinor: a.appliedDocMinor,
               fxRate: inv.fxRate,
             ));
           }
@@ -3251,11 +3261,11 @@ Future<List<CurrencyRow>> currenciesOf() async {
 
       // مكافئات صفوف المطابقة تُكتب قبل تجميد السند كي لا يجمد المُشغِّل
       // تحديثها (نمط الحواجز: الترتيب جزء من الصحة).
-      for (final r in allocRows) {
+      for (final a in allocations) {
         await customStatement(
           'UPDATE voucher_allocations SET applied_base_minor = ?, '
           'updated_at = ? WHERE id = ?',
-          [baseByAllocationRow[r.id]!, now, r.id],
+          [baseByAllocationRow[a.id]!, now, a.id],
         );
       }
 
