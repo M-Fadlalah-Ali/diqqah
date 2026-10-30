@@ -432,6 +432,10 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   List<String>? _errors;
   bool _busy = false;
 
+  /// بوابة التحميل — فقيم الحقول الابتدائية جاهزة قبل أول بناء
+  /// (نمط items_screen الموثق بالـinitialValue).
+  bool _loaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -451,6 +455,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
       _accounts = accounts.where((a) => a.isActive && a.isLeaf).toList();
       _currencies = currencies;
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
+      _loaded = true;
     });
   }
 
@@ -642,6 +647,12 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        appBar: AppBar(title: Text('سند جديد')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     final directChoices = _directChoices;
     final box = _box;
     final unapplied = _amountValue - _appliedTotal;
@@ -672,7 +683,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                     ),
                   ),
                 DropdownButtonFormField<String>(
-                  value: _kind.storageValue,
+                  initialValue: _kind.storageValue,
                   decoration: const InputDecoration(labelText: 'نوع السند'),
                   items: [
                     for (final k in VoucherKind.values)
@@ -686,7 +697,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                   }),
                 ),
                 DropdownButtonFormField<bool>(
-                  value: _partyVoucher,
+                  initialValue: _partyVoucher,
                   decoration: const InputDecoration(
                       labelText: 'الجهة (طرفية أو بغير طرف)'),
                   items: const [
@@ -699,7 +710,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                 ),
                 if (_partyVoucher)
                   DropdownButtonFormField<int>(
-                    value: _partyId,
+                    initialValue: _partyId,
                     decoration: InputDecoration(
                         labelText: _kind.isReceipt
                             ? 'العميل (القبض على ذمم العملاء)'
@@ -717,7 +728,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                   )
                 else
                   DropdownButtonFormField<int>(
-                    value: _directAccountId,
+                    initialValue: _directAccountId,
                     decoration: const InputDecoration(
                         labelText: 'الحساب المباشر (311 ضخ — 321 مسحوبات — 54x مصروف)'),
                     items: [
@@ -730,7 +741,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                         setState(() => _directAccountId = value),
                   ),
                 DropdownButtonFormField<int>(
-                  value: _boxId,
+                  initialValue: _boxId,
                   decoration: const InputDecoration(
                       labelText: 'الصندوق — وعمله سند العملة'),
                   items: [
@@ -853,6 +864,9 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
   List<String>? _errors;
   bool _busy = false;
 
+  /// بوابة التحميل — نمط initialValue الموثق.
+  bool _loaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -869,6 +883,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
       _currencies = currencies;
       _fromBoxId = _boxes.isEmpty ? null : _boxes.first.boxId;
       _toBoxId = _boxes.length < 2 ? null : _boxes[1].boxId;
+      _loaded = true;
     });
   }
 
@@ -954,6 +969,12 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        appBar: AppBar(title: Text('تحويل بين صناديق')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('تحويل بين صناديق')),
       body: _busy
@@ -981,7 +1002,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                     ),
                   ),
                 DropdownButtonFormField<int>(
-                  value: _fromBoxId,
+                  initialValue: _fromBoxId,
                   decoration: const InputDecoration(
                       labelText: 'من صندوق (المرسل)'),
                   items: [
@@ -993,7 +1014,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   onChanged: (value) => setState(() => _fromBoxId = value),
                 ),
                 DropdownButtonFormField<int>(
-                  value: _toBoxId,
+                  initialValue: _toBoxId,
                   decoration: const InputDecoration(
                       labelText: 'إلى صندوق (المستلم)'),
                   items: [
@@ -1066,6 +1087,9 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
   List<String>? _errors;
   bool _busy = false;
 
+  /// بوابة التحميل — نمط initialValue الموثق.
+  bool _loaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -1079,6 +1103,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
     setState(() {
       _boxes = boxes;
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
+      _loaded = true;
     });
   }
 
@@ -1140,6 +1165,12 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        appBar: AppBar(title: Text('تسوية صندوق')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('تسوية صندوق')),
       body: _busy
@@ -1167,7 +1198,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
                     ),
                   ),
                 DropdownButtonFormField<int>(
-                  value: _boxId,
+                  initialValue: _boxId,
                   decoration:
                       const InputDecoration(labelText: 'الصندوق'),
                   items: [
@@ -1179,7 +1210,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
                   onChanged: (value) => setState(() => _boxId = value),
                 ),
                 DropdownButtonFormField<String>(
-                  value: _direction.storageValue,
+                  initialValue: _direction.storageValue,
                   decoration: const InputDecoration(
                       labelText: 'اتجاه الفرق (عجزاً أو زيادةً — على 57)'),
                   items: [

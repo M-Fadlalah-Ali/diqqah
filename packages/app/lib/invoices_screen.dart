@@ -117,7 +117,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: _kind,
+                        initialValue: _kind,
                         decoration:
                             const InputDecoration(labelText: 'النوع'),
                         items: [
@@ -251,6 +251,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   List<String>? _errors;
   bool _busy = false;
 
+  /// بوابة التحميل: النموذج لا يُبنى قبل اكتمال القوائم الأولية —
+  /// فقيم الحقول الابتدائية (initialValue) جاهزة قبل أول بناء (درس
+  /// إبادة DropdownButtonFormField.value في Flutter الجديد: النماذج
+  /// القديمة كله بها initialValue وitems_screen نمطها الموثق).
+  bool _loaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -281,6 +287,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       final base =
           _currencies.where((c) => c.isBase).toList();
       _currencyId = base.isEmpty ? 1 : base.first.id;
+      _loaded = true;
     });
   }
 
@@ -396,6 +403,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        appBar: AppBar(title: Text('فاتورة جديدة')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     final showFx = _currencyId != 1;
     return Scaffold(
       appBar: AppBar(title: const Text('فاتورة جديدة')),
@@ -424,7 +437,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     ),
                   ),
                 DropdownButtonFormField<String>(
-                  value: _kind.storageValue,
+                  initialValue: _kind.storageValue,
                   decoration:
                       const InputDecoration(labelText: 'نوع الفاتورة'),
                   items: [
@@ -458,7 +471,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   ],
                 ),
                 DropdownButtonFormField<bool>(
-                  value: _isCash,
+                  initialValue: _isCash,
                   decoration: const InputDecoration(
                       labelText: 'النقدية (نقدي يطلب صندوقاً — والآجل طرفاً)'),
                   items: const [
@@ -469,7 +482,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 ),
                 if (_isCash)
                   DropdownButtonFormField<int>(
-                    value: _boxId,
+                    initialValue: _boxId,
                     decoration: const InputDecoration(
                         labelText: 'صندوق النقدية'),
                     items: [
@@ -482,7 +495,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   )
                 else
                   DropdownButtonFormField<int>(
-                    value: _partyId,
+                    initialValue: _partyId,
                     decoration: InputDecoration(
                         labelText: _kind.isSalesSide
                             ? 'العميل (الآجل يطلب طرفاً)'
@@ -496,7 +509,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     onChanged: (value) => setState(() => _partyId = value),
                   ),
                 DropdownButtonFormField<int>(
-                  value: _warehouseId,
+                  initialValue: _warehouseId,
                   decoration: const InputDecoration(
                       labelText: 'المستودع (للبضاعة — الخدمة بلا مستودع)'),
                   items: [
@@ -507,7 +520,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   onChanged: (value) => setState(() => _warehouseId = value),
                 ),
                 DropdownButtonFormField<int>(
-                  value: _currencyId,
+                  initialValue: _currencyId,
                   decoration: const InputDecoration(
                       labelText: 'عملة المستند'),
                   items: [
@@ -597,7 +610,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         child: Column(
           children: [
             DropdownButtonFormField<int>(
-              value: line.itemId,
+              initialValue: line.itemId,
               decoration: const InputDecoration(labelText: 'الصنف'),
               items: [
                 for (final it in _items)

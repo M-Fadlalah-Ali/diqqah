@@ -184,6 +184,9 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
   List<String>? _errors;
   bool _busy = false;
 
+  /// بوابة التحميل — نمط initialValue الموثق.
+  bool _loaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -197,6 +200,7 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
       _currencies = currencies;
       final base = currencies.where((c) => c.isBase).toList();
       _currencyId = base.isEmpty ? 1 : base.first.id;
+      _loaded = true;
     });
   }
 
@@ -236,6 +240,12 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        appBar: AppBar(title: Text('صندوق جديد')),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('صندوق جديد')),
       body: _busy
@@ -263,7 +273,7 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
                           'اسم الصندوق (يُنشأ معه حسابه الورقي 111x آلياً)'),
                 ),
                 DropdownButtonFormField<int>(
-                  value: _currencyId,
+                  initialValue: _currencyId,
                   decoration: const InputDecoration(
                       labelText: 'العملة — وسند الصندوق بعملته حصراً'),
                   items: [
