@@ -39,7 +39,9 @@ void main() {
         id: 4, code: '411', name: 'إيراد البضاعة', type: AccountType.income);
     final cogs = account(
         id: 5, code: '51', name: 'تكلفة المبيعات', type: AccountType.expense);
-    final accounts = [cash, receivable, payable, goodsRevenue, cogs];
+    final capital = account(
+        id: 6, code: '311', name: 'رأس المال', type: AccountType.equity);
+    final accounts = [cash, receivable, payable, goodsRevenue, cogs, capital];
 
     test('التجميع بالاتجاه الطبيعي والمجاميع متوازنة والفرز بالكود', () {
       final report = buildTrialBalance([
@@ -48,12 +50,13 @@ void main() {
         line(3, 0, 100000), // الموردون: دائن
         line(4, 0, 90000), // إيراد البضاعة
         line(5, 60000, 0), // تكلفة المبيعات
+        line(6, 0, 450000), // رأس المال: الضخ الافتتاحي المتبقي
       ], accounts);
 
       expect(report.isBalanced, isTrue,
           reason: 'مرحّل متوازن بالبناء (F-068) فالميزان متوازن');
-      expect(report.totalDebitMinor, 755000);
-      expect(report.totalCreditMinor, 755000);
+      expect(report.totalDebitMinor, 695000);
+      expect(report.totalCreditMinor, 695000);
 
       final byCode = {for (final r in report.rows) r.account.code: r};
       expect(byCode['1111']!.balanceMinor, 540000,
@@ -65,7 +68,7 @@ void main() {
       expect(byCode['51']!.balanceMinor, 60000);
       expect(
           report.rows.map((r) => r.account.code).toList(),
-          ['1111', '112', '211', '411', '51'],
+          ['1111', '112', '211', '311', '411', '51'],
           reason: 'الفرز المعجمي للكود — نمط الفهرس');
     });
 

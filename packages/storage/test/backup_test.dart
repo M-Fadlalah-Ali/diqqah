@@ -225,6 +225,7 @@ void main() {
     // «أحدث من التطبيق» تُحاكى دائماً بإصدار التطبيق نفسه +1 — لا برقم ثابت
     // علّة CI 2026-10-29: الرقم 4 كان «المستقبل» حتى رفعه دفعة الأطراف إلى
     // 4 فصار الحاضر — والثابت الميت يكذب على الاختبار مع كل ترقية مخطط.
+    // نفس الدرس عاد بدفعة (6): الرقم 9 كان صلباً هنا حتى رفعها المخطط إلى 9.
     raw.execute('PRAGMA user_version = ${db.schemaVersion + 1}');
     raw.dispose();
 
@@ -241,7 +242,9 @@ void main() {
       () async {
     final newerPath = p.join(tempDir.path, 'newer-live.db');
     final raw = sql.sqlite3.open(newerPath);
-    raw.execute('PRAGMA user_version = 9');
+    // درس الاختبار الشقيق نفسه: «أحدث» بإصدار التطبيق +1 لا برقم ميت —
+    // الرقم 9 كان صلباً حتى رفعته دفعة (6) المخطط إلى 9 فصار حاضراً.
+    raw.execute('PRAGMA user_version = ${db.schemaVersion + 1}');
     raw.dispose();
 
     final newer = DiqqahDatabase(filePath: newerPath);

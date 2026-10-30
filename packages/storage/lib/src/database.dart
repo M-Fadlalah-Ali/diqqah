@@ -4569,13 +4569,13 @@ Future<List<SalesMovementRow>> salesMovementReport({
   }
   final rows = await customSelect(
     'SELECT il.item_id AS item_id, i.sku AS sku, i.name AS name, '
-    "SUM(CASE WHEN inv.kind = 'invoice_sale' "
+    "SUM(CASE WHEN inv.kind = 'sale' "
     'THEN il.qty_base ELSE 0 END) AS qty_sold, '
-    "SUM(CASE WHEN inv.kind = 'invoice_sale' "
+    "SUM(CASE WHEN inv.kind = 'sale' "
     'THEN il.line_total_base_minor ELSE 0 END) AS sales_value, '
-    "SUM(CASE WHEN inv.kind = 'invoice_sale_return' "
+    "SUM(CASE WHEN inv.kind = 'sale_return' "
     'THEN il.qty_base ELSE 0 END) AS qty_returned, '
-    "SUM(CASE WHEN inv.kind = 'invoice_sale_return' "
+    "SUM(CASE WHEN inv.kind = 'sale_return' "
     'THEN il.line_total_base_minor ELSE 0 END) AS returns_value '
     'FROM invoice_lines il '
     'JOIN invoices inv ON inv.id = il.invoice_id '
