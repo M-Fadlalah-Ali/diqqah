@@ -1,6 +1,7 @@
 library diqqah_domain;
 
 export 'src/backup.dart';
+export 'src/invoice.dart';
 export 'src/item.dart';
 export 'src/journal.dart';
 export 'src/money.dart';

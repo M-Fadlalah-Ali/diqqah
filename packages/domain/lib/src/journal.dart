@@ -233,6 +233,32 @@ const List<JournalSpec> defaultJournals = [
 /// قيود الفواتير والسندات المولدة يحسم بدفعتها ويعرض (D-076 معروض).
 const String ledgerMoveSequenceKind = 'move_general';
 
+/// نوع تسلسل قيود المستندات المولدة — بدفتر جهتها (D-080 معروض):
+/// قيود الفواتير والمردودات من دفاتر المبيعات/المشتريات بأنواعها، وأنواع
+/// النقدية والمخزون بنية جاهزة لدفعة السندات (5) وتسويات المخزون (م2).
+String moveSequenceKindForJournal(String journalKind) => switch (journalKind) {
+      'sales' => 'move_sales',
+      'purchase' => 'move_purchase',
+      'cash' => 'move_cash',
+      'stock' => 'move_stock',
+      _ => ledgerMoveSequenceKind,
+    };
+
+/// الاسم الكامل لكل نوع تسلسل (م-44/D-071 — بلا بادئات مختصرة): يغذي
+/// formatSequenceLabel للعرض «قيد مبيعات 2026/000001» و«فاتورة بيع
+/// 2026/000001». أنواع الفواتير الأربعة في invoice.dart الدنيا.
+const Map<String, String> sequenceKindLabels = {
+  'move_general': 'قيد عام',
+  'move_sales': 'قيد مبيعات',
+  'move_purchase': 'قيد مشتريات',
+  'move_cash': 'قيد نقدية',
+  'move_stock': 'قيد مخزون',
+  'invoice_sale': 'فاتورة بيع',
+  'invoice_purchase': 'فاتورة شراء',
+  'invoice_sale_return': 'مردود بيع',
+  'invoice_purchase_return': 'مردود شراء',
+};
+
 /// صورة حساب قائم للفهرسة والتحقق — بلا أي اعتماد تخزين أو واجهة.
 class AccountInfo {
   final int id;
@@ -349,11 +375,27 @@ class MoveLineDraft {
   final int debitMinor;
   final int creditMinor;
 
+  /// بنية العملات الجاهزة (F-174) — تُملأ من قيود المستندات المولدة
+  /// (الفواتير دفعة 4/D-082 معروض): عملة السطر ومبلغه بعملة المستند
+  /// ولقطة السعر؛ القيود اليدوية تتركها فارغة (عملة الأساسية بلا لقطة
+  /// كما هي سليم v6).
+  final int? currencyId;
+  final int? amountMinor;
+  final int? fxRate;
+
+  /// ربط سطر المخزون (113) بحركته (07 §3.1/م-27 مؤكد) — يُملأ من محرك
+  /// الفواتير عند ترحيلها ولا يملؤه أي مسار يدوي.
+  final int? refStockMoveId;
+
   const MoveLineDraft({
     required this.accountId,
     this.partyId,
     this.debitMinor = 0,
     this.creditMinor = 0,
+    this.currencyId,
+    this.amountMinor,
+    this.fxRate,
+    this.refStockMoveId,
   });
 }
 

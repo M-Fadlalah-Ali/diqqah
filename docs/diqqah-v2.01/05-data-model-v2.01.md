@@ -59,7 +59,7 @@
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
 | `warehouse` | name, is_active | مستودع واحد في MVP؛ البنية تعددية منذ البداية |
-| `cash_box` | name, currency_id (افتراضياً الأساسية), opening_balance_base_minor | كل صندوق عملته واحدة (يُمنع خلط عملات في صندوق واحد) |
+| `cash_box` | name, currency_id (افتراضياً الأساسية), opening_balance_base_minor | كل صندوق عملته واحدة (يُمنع خلط عملات في صندوق واحد)؛ و`account_id` حسابه الورقي تحت 111 (03 §3: الرئيسي 1111 وكل جديد 111x — D-079 معروض) |
 
 ### 3.4 الدفتر المحاسبي
 
@@ -85,7 +85,7 @@
 
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
-| `invoice` | kind(`sale/purchase/sale_return/purchase_return`), number, party_id, warehouse_id, invoice_date, due_date?, currency_id, fx_rate, totals..., discount_rate?, discount_amount_base_minor?, state(`draft/posted/paid/partially_paid`), move_id, original_invoice_id?(للمردود) | إلغاء المرحّلة = مردود لا حذف؛ **حُذفت `cancelled` من التعداد بقرار المالك (م-22/D-043): الإلغاء حذف منطقي للمسودة (F-059) والمرحّل يعالج بمردود أو عكس حصراً (07 §1.3) فلا مسار تشغيلي يصل إليها**؛ خصم الفاتورة: نسبة على المسودة تُترجم مبلغاً ويُقيّد صافياً بلا حساب مستقل ولا يمس كلفة المخزون (س7)؛ وحالتا paid/partially_paid مشتقتان آلياً من (الإجمالي − المطابقات − المردودات) — لا ضبط يدوي (س5) |
+| `invoice` | kind(`sale/purchase/sale_return/purchase_return`), number, party_id, warehouse_id, invoice_date, due_date?, currency_id, fx_rate, totals..., discount_rate?, discount_amount_base_minor?, state(`draft/posted/paid/partially_paid`), move_id, original_invoice_id?(للمردود) | إلغاء المرحّلة = مردود لا حذف؛ **حُذفت `cancelled` من التعداد بقرار المالك (م-22/D-043): الإلغاء حذف منطقي للمسودة (F-059) والمرحّل يعالج بمردود أو عكس حصراً (07 §1.3) فلا مسار تشغيلي يصل إليها**؛ خصم الفاتورة: نسبة على المسودة تُترجم مبلغاً ويُقيّد صافياً بلا حساب مستقل ولا يمس كلفة المخزون (س7)؛ وحالتا paid/partially_paid مشتقتان آلياً من (الإجمالي − المطابقات − المردودات) — لا ضبط يدوي (س5)؛ والمجاميع مخزنة على المستند بالصافي بعملتيه (`total_doc_minor`/`total_base_minor`) والسطر بمكافئه التوثيقي `line_total_doc_minor` بجانب الأساسي (F-122/D-082 معروضة) |
 | `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor | للصنف التجميعي: عند الترحيل تُولَّد حركات مخزون لمكوناته من `bundle_component` |
 
 ### 4.2 السندات والصناديق
@@ -94,14 +94,14 @@
 |---|---|---|
 | `voucher` | kind(`receipt/payment`), number, party_id, cash_box_id, voucher_date, amount_minor, currency_id, fx_rate, state, move_id | سند قبض/صرف؛ السداد الجزئي طبيعي |
 | `voucher_allocation` | voucher_id, invoice_id, applied_base_minor | **مصالحة الذمم**: توزيع السداد على فواتير محددة (يدوياً أو آلياً بالأقدمية مع إمكانية التعديل)؛ ويجوز أن يبقى سند بلا صفوف مطابقة مؤقتاً = «رصيد مقدّم» على الذمة يُطابق لاحقاً (س5). **تشغيلية جزء من السند الذي ولّده — تُزامن معه ولا تُعاد بناؤها كمشتقة** (08 §3؛ م-21/D-042) |
-| `cash_movement` | cash_box_id, kind(`in/out/transfer_in/transfer_out`), amount_minor, ref_doc_type, ref_doc_id, user_id | كل حركة صندوق مرجعها مستند مصدر (سند أو فاتورة نقدية أو تحويل) |
+| `cash_movement` | cash_box_id, kind(`in/out/transfer_in/transfer_out`), amount_minor, ref_doc_type, ref_doc_id, user_id | كل حركة صندوق مرجعها مستند مصدر (سند أو فاتورة نقدية أو تحويل)؛ ومكافؤها الأساسي ولقطته `amount_base_minor`/`fx_rate` (F-122/D-082 معروضة) |
 | `box_transfer` | from_box_id, to_box_id, amount_minor, state, move_id | تحويل بين صندوقين بقيدين متكاملين |
 
 ### 4.3 المخزون
 
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
-| `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد |
+| `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد؛ و`value_base_minor` قيمة الحركة الكاملة بجانب لقطة كلفة الوحدة (F-140) — والترصيد بالقيمة الإجمالية (D-067) |
 | `stock_transfer` | number, from_wh, to_wh, lines..., state | مستند التحويل بين مستودعات (المرحلة 2) |
 | `stock_count` (الجرد) | warehouse_id, count_date, lines(item, counted_qty_base, system_qty_base, diff), state, adjustment_move_id | تسوية الجرد تولّد حركة تسوية وقيداً |
 
