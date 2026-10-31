@@ -201,9 +201,20 @@ void main() {
     await tester.ensureVisible(find.text('حفظ وترحيل'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ وترحيل'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpAndSettle();
+
+    // تشخيص حرفي موثق بالجلسة (درس س35: الحكم بالنص الحرفي) — نصوص
+    // الشاشة بعد الحفظ تظهر في سجل CI كي يُكشف سبب أي رفض من مصدره
+    // لا تخميناً: السند الجديد في القائمة إن نجح الترحيل، أو رسالة
+    // المدقق في بطاقة الأخطاء أعلى النموذج إن رُفض.
+    for (final t
+        in tester.widgetList<Text>(find.byType(Text)).take(40)) {
+      final plain = t.data ?? t.textSpan?.toPlainText() ?? '';
+      if (plain.trim().isNotEmpty) {
+        // ignore: avoid_print
+        print('SHOWN_TEXT: $plain');
+      }
+    }
 
     final allocations = await db.customSelect(
       'SELECT applied_doc_minor FROM voucher_allocations',
