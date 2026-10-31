@@ -64,7 +64,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011 — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 9);
+    expect(db.schemaVersion, 10);
   });
 
   group('البذر الأولي (س-42) — الدليل إعداد لا كود (07 §1.6)', () {
@@ -607,7 +607,7 @@ void main() {
       final migrated = DiqqahDatabase(filePath: dbPath);
       addTearDown(migrated.close);
       await migrated.select(migrated.items).get();
-      expect(migrated.schemaVersion, 9);
+      expect(migrated.schemaVersion, 10);
 
       // بيانات القائمة محفوظة — الترحيلة لم تلمس جداول قائمة
       final items = await migrated.select(migrated.items).get();

@@ -94,7 +94,7 @@ class _RolesScreenState extends State<RolesScreen> {
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text(role == null ? 'إنشاء الدور' : 'حفظ الأذونات'),
+              child: Text(role == null ? 'إنشاء الدور' : 'حفظ الأذونات'),
             ),
           ],
         ),

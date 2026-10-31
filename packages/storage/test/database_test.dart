@@ -18,7 +18,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011: كل تغيير مخطط إصدار وترحيلة — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 9);
+    expect(db.schemaVersion, 10);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -101,7 +101,9 @@ void main() {
     await db.createManager(name: 'الأول', login: 'a', passwordHash: 's:h');
     // مستخدم إضافي عبر المسار نفسه (القاعدة لا تمنعه — البوابة تمنعه، F-014)
     await db.createManager(name: 'الثاني', login: 'b', passwordHash: 's:h');
-    expect(await db.select(db.roles).get(), hasLength(1));
+    // بذر v10 زاد الأدوار النمطية الأربعة — والقيد: «مدير» واحداً لا يتضاعف
+    final roles = await db.select(db.roles).get();
+    expect(roles.where((r) => r.name == 'مدير'), hasLength(1));
   });
 
   test('login فريد — إدراج مكرر يرفض من القاعدة', () async {
@@ -478,7 +480,7 @@ void main() {
     // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
     // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 9);
+    expect(migrated.schemaVersion, 10);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');

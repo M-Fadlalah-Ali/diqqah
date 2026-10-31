@@ -163,16 +163,15 @@ void main() {
   test('T2 — رصيد مخزون سالب مكسور بالإدراج المباشر يُكشف', () async {
     // حاجز السالب على UPDATE حصراً — الإدراج المباشر السالب يمرّ وهو
     // عين الخرق الذي يصطاده الفحص (طعن خارجي لا مسار محرك).
+    // مستودع غير موجود كي لا يصطدم قيد UNIQUE (item، warehouse) برصيد
+    // الدورة القائم — والفحص يقرأ السجل بلا انضمام فيمسكه.
     final itemRow = await db.customSelect(
       "SELECT id FROM items WHERE sku = 'OIL-1'",
-    ).get();
-    final warehouseRow = await db.customSelect(
-      'SELECT id FROM warehouses LIMIT 1',
     ).get();
     await db.customStatement(
       "INSERT INTO stock_balances (item_id, warehouse_id, qty_base, "
       "total_value_minor, uuid) VALUES (${itemRow.first.data['id']}, "
-      "${warehouseRow.first.data['id']}, -5, -50000, 'sb-t2')",
+      "999999, -5, -50000, 'sb-t2')",
     );
     final report = await db.integrityCheckReport();
     final t2 = report.violations.where((v) => v.checkCode == 'T2').toList();
@@ -245,8 +244,18 @@ void main() {
     );
     final report = await db.integrityCheckReport();
     final m3 = report.violations.where((v) => v.checkCode == 'M3').toList();
-    expect(m3, hasLength(1));
-    expect(m3.single.detail, contains('بلا طرف'));
+    // خرقان لمساوِن من طعن واحد: السطر اليتيم بلا طرف، وانحراف التطابق
+    // (مدين 300 على الدفتر لا يجمعه الأطراف) — كلاهما وجه M-067 الثالثة
+    // والفحص أظهر الوجهين لا أراهما.
+    expect(m3, hasLength(2));
+    expect(
+      m3.where((v) => v.detail.contains('بلا طرف')),
+      hasLength(1),
+    );
+    expect(
+      m3.where((v) => v.detail.contains('112') && v.detail.contains('لا يساوي')),
+      hasLength(1),
+    );
   });
 
   test('بذر الأدوار الأربعة (F-080): الأربعة مزروعة بأذوناتها الافتراضية',

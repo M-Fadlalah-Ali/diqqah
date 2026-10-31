@@ -81,10 +81,12 @@ class RolePermissions {
   bool get isAll => stored == allModulesToken;
 
   /// صياغة التخزين من مفاتيح مختارة — بترتيب القائمة المعروفة حصراً
-  /// وبإسقاط التكرار والمجهول، والقائمة الفارغة صيغة صالحة (دور بلا
-  /// وحدات ظاهرة — يرى الرئيسية المعطلة وحدها).
+  /// وبإسقاط التكرار والمجهول، واختيار كل الوحدات صيغته النجمة (نفس
+  /// حالة المدير لا قائمة مطولة)، والقائمة الفارغة صيغة صالحة (دور
+  /// بلا وحدات ظاهرة — يرى الرئيسية المعطلة وحدها).
   static String format(Iterable<String> selected) {
     final chosen = selected.toSet();
+    if (chosen.containsAll(moduleKeys)) return allModulesToken;
     return <String>[
       for (final key in moduleKeys)
         if (chosen.contains(key)) key,
