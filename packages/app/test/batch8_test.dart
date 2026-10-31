@@ -273,8 +273,9 @@ void main() {
     expect(find.textContaining('المورد (الدفع من ذمم الموردين)'), findsOneWidget);
   });
 
-  testWidgets('س-109 (D-110): Enter في حقل الكمية يضيف بنداً جديداً وينقل '
-      'المؤشر إليه — الإدخال بلوحة المفاتيح بلا مسك الفأرة', (tester) async {
+  testWidgets('س-109 (D-110): Tab في حقل الكمية يضيف بنداً جديداً وينقل '
+      'المؤشر إليه — الإدخال بلوحة المفاتيح بلا مسك الفأرة (وEnter عبر '
+      'onSubmitted الحقل نفسه بقناة IME الحية)', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
@@ -297,13 +298,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(TextField, 'الكمية').first);
     await tester.pump();
-    // الحدث عبر قناة النص (IME) — sendKeyEvent لا يصل onSubmitted في
-    // بيئة الاختبار (درس CI: 1 بدل 2 بجولة CI الثانية)
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    // الحدث عبر قناة العتاد — Tab مُعترضه بwrapper KeyboardAddLine
+    // (onKeyEvent) فقناتها HardwareChannel التي يغذيها sendKeyEvent،
+    // بينما Enter يمر قناة IME ولا يصل onSubmitted في بيئة الاختبار
+    // (درس CI: الجولتان 110/111)
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(countQtyFields(), 2,
-        reason: 'Enter أضاف بنداً جديداً — والمؤشر انتقل إلى كمية البند الجديد');
+        reason: 'Tab أضاف بنداً جديداً — والمؤشر انتقل إلى كمية البند الجديد');
   });
 
   testWidgets('س-111/س-109 (D-108/D-110): نموذج السند بتاريخ اليوم — '

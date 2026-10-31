@@ -683,7 +683,9 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   Future<void> _proposeAutomatically() async {
     final box = _box;
     if (_partyId == null || box == null) return;
-    final amount = int.tryParse(_amount.text.trim()) ?? 0;
+    // D-102: الحقل مفصول أثناء الكتابة — والقراءة تنزع الفواصل
+    // (كسر CI س39: int.tryParse على «30,000» صفر فتوقف المقترح بلا تعبئة)
+    final amount = parseGroupedInt(_amount.text.trim());
     if (amount <= 0) return;
     final currency = _currencyOf(box);
     final proposed = await widget.db.proposeVoucherAllocations(
