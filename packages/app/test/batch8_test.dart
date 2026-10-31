@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+// LogicalKeyboardKey لا يمر عبر material بهذا الإصدار (درس CI الجولة 112)
+// — والاستيراد المحدد لا يباد لأنه مستعمل فعلاً.
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:pdf/pdf.dart' show PdfPageFormat;
