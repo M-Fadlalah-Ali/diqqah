@@ -22,11 +22,13 @@ void main() {
 
   /// درس السرد الكسول (س35/س36): ListView يبني الظاهر حصراً — حقل أسفل
   /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
+  /// ودرس CI (جولة 110): بعد فتح قائمة منسدلة يبقى بمحلكة قابلة للتمرير
+  /// فيفشى الـListView بأثنين — فالأول دائماً هو القائمة الأصلية.
   Future<void> _scrollTo(WidgetTester tester, String label) async {
     for (var i = 0;
         i < 6 && find.widgetWithText(TextField, label).evaluate().isEmpty;
         i++) {
-      await tester.drag(find.byType(ListView), const Offset(0, -260));
+      await tester.drag(find.byType(ListView).first, const Offset(0, -260));
       await tester.pump();
     }
   }
@@ -154,7 +156,7 @@ void main() {
         reason: 'سعر الشراء عُبّئ مفصولاً في حقل سعر الوحدة');
 
     // تبديل الجهة إلى بيع يعبّئ البند المعبأ آلياً بسعر البيع (س-108)
-    await tester.drag(find.byType(ListView), const Offset(0, 800));
+    await tester.drag(find.byType(ListView).first, const Offset(0, 800));
     await tester.pump();
     await tester.tap(find.textContaining('فاتورة شراء').first);
     await tester.pumpAndSettle();
@@ -288,6 +290,11 @@ void main() {
     await _scrollTo(tester, 'الكمية');
     expect(countQtyFields(), 1);
 
+    // ensureVisible كي يكون الحقل كله داخل النافذة قبل الضغط — درس CI:
+    // tap على حقل نصفه خارج الشاشة (Offset 610>600) فات فلم يتركز الحقل
+    await tester.ensureVisible(
+        find.widgetWithText(TextField, 'الكمية').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(TextField, 'الكمية').first);
     await tester.pump();
     // الحدث عبر قناة النص (IME) — sendKeyEvent لا يصل onSubmitted في

@@ -18,7 +18,7 @@ import 'seed_cycle.dart';
   /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
   Future<void> _scrollTo(WidgetTester tester, String label) async {
     for (var i = 0;
-        i < 6 && find.text(label).evaluate().isEmpty;
+        i < 10 && find.text(label).evaluate().isEmpty;
         i++) {
       await tester.drag(find.byType(ListView), const Offset(0, -260));
       await tester.pump();
@@ -69,13 +69,21 @@ void main() {
         '2026-03-15');
 
     await _scrollTo(tester, 'حفظ كمسودة');
+    // درس CI (جولة 110): النموذج أطول بحقل الخصم المذيل (D-109) —
+    // ensureVisible يقفل الموضع فلا يُضغط غير المبني خارج الشاشة
+    await tester.ensureVisible(find.text('حفظ كمسودة'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ كمسودة'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
     // بطاقة الأخطاء أعلى القائمة — والتمرير إلى الزر فكّ إدراجها من
-    // الشجرة الكسولة (درس س35/س36) فتُعاد إلى النافذة قبل فحصها
-    await tester.drag(find.byType(ListView), const Offset(0, 800));
+    // الشجرة الكسولة (درس س35/س36) — والنموذج أطول بحقل الخصم المذيل
+    // (D-109) فإعادة القائمة لأولها بسحب أعمق من مسافة النموذج كله
+    await tester.drag(find.byType(ListView), const Offset(0, 5000));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.drag(find.byType(ListView), const Offset(0, 5000));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -112,11 +120,12 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'التاريخ (YYYY-MM-DD)'), '2026-03-15');
 
-    // الصنف: قائمة الأصناف ثم البند الوحيد
+    // الصنف: قائمة الأصناف ثم البند الوحيد — العنصر صار سطراً مركّباً
+    // بمعلوماته (س-108) فالفINDER نصاً محتوياً لا مطابقة كاملة
     await tester.tap(find.text('الصنف'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.text('Z-100 زيت محلي').last);
+    await tester.tap(find.textContaining('Z-100 زيت محلي').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -130,6 +139,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await _scrollTo(tester, 'حفظ وترحيل');
+    await tester.ensureVisible(find.text('حفظ وترحيل'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

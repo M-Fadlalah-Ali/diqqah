@@ -17,7 +17,7 @@ import 'seed_cycle.dart';
   /// النموذج غير مبني خارج الشاشة فلا يُلمَس قبل تمريره إلى النافذة.
   Future<void> _scrollTo(WidgetTester tester, String label) async {
     for (var i = 0;
-        i < 6 && find.text(label).evaluate().isEmpty;
+        i < 10 && find.text(label).evaluate().isEmpty;
         i++) {
       await tester.drag(find.byType(ListView), const Offset(0, -260));
       await tester.pump();
@@ -79,6 +79,8 @@ void main() {
 
     // السبب متروك فارغاً عمداً
     await _scrollTo(tester, 'حفظ وترحيل');
+    await tester.ensureVisible(find.text('حفظ وترحيل'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
@@ -121,6 +123,8 @@ void main() {
     await tester.pump();
 
     await _scrollTo(tester, 'حفظ وترحيل');
+    await tester.ensureVisible(find.text('حفظ وترحيل'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -164,7 +168,9 @@ void main() {
     await tester.tap(find.byType(DropdownButtonFormField<int>).first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.text('0001 عميل الأمل').last);
+    // D-106: العناصر صارت بأسطر رصيد مركّبة — الفيض نصاً جزئياً
+    // (درس الحكم بالنص الحرفي لا يمنع النص المحتوي عند عنصر مركّب)
+    await tester.tap(find.textContaining('عميل الأمل').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -192,6 +198,8 @@ void main() {
 
     // حفظ وترحيل — والسند مرحّل والمطبَّق 30,000 يبقى بالفاتورة جزئية
     await _scrollTo(tester, 'حفظ وترحيل');
+    await tester.ensureVisible(find.text('حفظ وترحيل'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
