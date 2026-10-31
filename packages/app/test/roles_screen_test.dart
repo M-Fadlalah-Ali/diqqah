@@ -32,6 +32,10 @@ void main() {
     expect(find.text('بائع'), findsOneWidget);
     // أذونات المدير النجمة بلخصها العربي
     expect(find.textContaining('الأذونات: كل الوحدات'), findsOneWidget);
+    // درس السرد الكسول: المستخدمون أسفل الأدوار الأربعة خارج نافذة البناء
+    // — تمرير قبل الفحص لا فحص الغائب.
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump();
     expect(find.textContaining('1 مستخدم'), findsOneWidget);
     expect(find.text('المالك'), findsOneWidget);
     expect(find.textContaining('دخوله: owner'), findsOneWidget);
@@ -59,8 +63,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('كاشير'), findsOneWidget);
-    // الصياغة بترتيب مفاتيح الوحدات (parties قبل invoices)
-    expect(find.textContaining('الأذونات: الأطراف، الفواتير'),
+    // الصياغة بترتيب مفاتيح الوحدات (parties قبل invoices) — والحكم بالنص
+    // الحرفي الكامل لا textContaining جزئياً (درس س35: بائع يحمل الجزء نفسه)
+    expect(find.text('0 مستخدم · الأذونات: الأطراف، الفواتير'),
         findsOneWidget);
   });
 
@@ -103,6 +108,10 @@ void main() {
 
     await open(tester, db);
 
+    // درس السرد الكسول: بلاط المستخدمين أسفل الأدوار الأربعة غير مبنية
+    // خارج النافذة — تمرير أولاً ثم مسك الزر
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump();
     final userTile = find.ancestor(
       of: find.text('المالك'),
       matching: find.byType(ListTile),

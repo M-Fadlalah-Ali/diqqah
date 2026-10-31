@@ -10,6 +10,10 @@ import 'package:diqqah_app/print_service.dart';
 /// بلا قنوات منصة: بايتات PDF صحيحة الترويج بالخط العربي المضمّن،
 /// وافتراضيات القياس لكل نوع (D-101 معروض) بدوالها النقية.
 void main() {
+  // التوليد النقي يستدعي rootBundle لتحميل الخط المضمّن — والربط لازم
+  // مهيّأ في الاختبار النقي (درس CI: Binding has not yet been initialized).
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('افتراضيات القياس (D-101): الفواتير والسندات A5 طولي والتقارير A4 عرضي',
       () {
     final invoice = resolvePageFormat(docKind: 'invoice');
