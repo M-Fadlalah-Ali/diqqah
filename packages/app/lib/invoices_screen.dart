@@ -753,18 +753,16 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 for (final it in _items)
                   DropdownMenuItem<int>(
                     value: it.id,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                            '${it.sku} ${it.name}'
-                            '${it.kind == 'service' ? ' (خدمة)' : ''}'),
-                        Text(
-                          _itemSubtitle(it),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
+                    // س-108: سطر واحد مركّب بترتيب المالك «رقم الصنف –
+                    // الاسم – المتاح – السعر» — عمود سطرين افاض حقل القائمة
+                    // المغلقة (درس CI: RenderFlex overflowed by 16 pixels)
+                    // فصار سطراً واحداً يلتف مقصوصاً لا يفاض.
+                    child: Text(
+                      '${it.sku} ${it.name}'
+                      '${it.kind == 'service' ? ' (خدمة)' : ''}'
+                      ' — ${_itemSubtitle(it)}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
               ],

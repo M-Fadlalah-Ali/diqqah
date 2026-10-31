@@ -184,10 +184,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    // الحقل المطبَّق عُبئ بالأقدمية بكامل المقترح 30,000
+    // الحقل المطبَّق عُبئ بالأقدمية بكامل المقترح 30,000 — مفصولاً
+    // (D-102): التعبئة البرمجية تعرض بالفواصل كالكتابة
     final appliedField = tester.widget<TextField>(
         find.widgetWithText(TextField, 'المطبَّق بوحدة صغرى'));
-    expect(appliedField.controller!.text, '30000');
+    expect(appliedField.controller!.text, '30,000');
 
     // حفظ وترحيل — والسند مرحّل والمطبَّق 30,000 يبقى بالفاتورة جزئية
     await _scrollTo(tester, 'حفظ وترحيل');

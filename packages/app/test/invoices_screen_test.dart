@@ -61,6 +61,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
+    // س-111/D-108: التاريخ معبأ افتراضياً بتاريخ اليوم وهو خارج دورة
+    // البذور — فنُدخل تاريخ الدورة صراحة كي يجري حرس الكمية (موضع
+    // هذا الاختبار) لا حرس الدورة، والحفظ الفارغ كما هو.
+    await tester.enterText(
+        find.widgetWithText(TextField, 'التاريخ (YYYY-MM-DD)'),
+        '2026-03-15');
+
     await _scrollTo(tester, 'حفظ كمسودة');
     await tester.tap(find.text('حفظ كمسودة'));
     await tester.pump();

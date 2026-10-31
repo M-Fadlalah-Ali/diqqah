@@ -143,11 +143,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // النوع الافتراضي شراء — السطر الفرعي بسعر الشراء المفصول (س-108)
-    expect(find.textContaining('سعر شراء: 25,000'), findsWidgets);
-    // اختيار الصنف يعبّئ السعر الافتراضي بسعر الشراء
+    // النوع الافتراضي شراء — فتح القائمة يبني عناصرها فتظهر سطور
+    // المعلومات (س-108) ثم اختيار الصنف يعبّئ السعر الافتراضي بسعر الشراء
     await tester.tap(find.text('الصنف').first);
     await tester.pumpAndSettle();
+    expect(find.textContaining('سعر شراء: 25,000'), findsWidgets);
     await tester.tap(find.textContaining('زيت محلي').last);
     await tester.pump(const Duration(milliseconds: 100));
     await _scrollTo(tester, 'سعر الوحدة بوحدة صغرى');
@@ -291,7 +291,9 @@ void main() {
 
     await tester.tap(find.widgetWithText(TextField, 'الكمية').first);
     await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    // الحدث عبر قناة النص (IME) — sendKeyEvent لا يصل onSubmitted في
+    // بيئة الاختبار (درس CI: 1 بدل 2 بجولة CI الثانية)
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(countQtyFields(), 2,
