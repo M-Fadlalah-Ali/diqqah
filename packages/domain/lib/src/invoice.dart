@@ -133,6 +133,17 @@ int wacExitValue(int totalValue, int onHand, int qtyOut) {
 String formatDocumentNumber(int year, int number) =>
     '$year/${number.toString().padLeft(6, '0')}';
 
+/// نص نسبة مخزنة ×100 للعرض (س-117/D-112): 350 → «3.5» و1000 → «10»
+/// و275 → «2.75» — بلا أصفار زائدة، والفاصلة نقطة عشرية. السالب
+/// سليم تلقائياً (Dart: العلامة مع القسمة الصحيحة والباقي غير السالب).
+String formatPercentRate(int rate100) {
+  final whole = rate100 ~/ 100;
+  final frac = rate100 % 100;
+  if (frac == 0) return '$whole';
+  if (frac % 10 == 0) return '$whole.${frac ~/ 10}';
+  return '$whole.$frac';
+}
+
 /// سطر فاتورة خام كما يخرج من نموذج الإدخال (05 §4.1).
 ///
 /// - م1 الإدخال بالوحدة الأساسية حصراً (09 §2): [unitId] وحدة أساسية
@@ -192,6 +203,9 @@ class InvoiceDraft {
 
   /// خصم الفاتورة الكلي نسبةً 0..100 (س-06/س7): نسبة على المسودة تُترجم
   /// مبلغاً ويُقيَّد صافياً بلا حساب مستقل ولا يمس كلفة المخزون (05 §4.1).
+  /// المخزن ×100 (س-117/D-112 بلفظ المالك «ألا أستطيع إدخال خصم 3.5٪؟»):
+  /// 350 = 3.5% — فتقبل الفاصلة العشرية حتى خانتين وتظل الخانة INTEGER
+  /// دون ترحيل مخطط (ترحيلة القيم v11 تضرب القديم 100).
   final int discountRate;
 
   /// مرجع الفاتورة الأصلية — للمردودين إلزاماً (س-05/س-11/F-056).
@@ -276,7 +290,9 @@ InvoiceTotals computeInvoiceTotals(InvoiceDraft draft) {
   for (final g in gross) {
     subtotal += g;
   }
-  final discount = roundHalfAwayFromZeroRatio(subtotal * draft.discountRate, 100);
+  // النسبة مخزنة ×100 (س-117/D-112): 350 = 3.5% — فالمقام 10,000 لا 100.
+  final discount =
+      roundHalfAwayFromZeroRatio(subtotal * draft.discountRate, 10000);
   final totalDoc = subtotal - discount;
   final totalBase = convertToBaseMinor(totalDoc, draft.fxRate);
 
@@ -604,7 +620,7 @@ List<InvoiceValidationError> validateInvoiceDraftStructure(
       errors.add(InvoiceLineDiscountInvalid(i));
     }
   }
-  if (draft.discountRate < 0 || draft.discountRate > 100) {
+  if (draft.discountRate < 0 || draft.discountRate > 10000) {
     errors.add(InvoiceDiscountRateInvalid(draft.discountRate));
   }
   if (errors.isEmpty) {
@@ -639,7 +655,8 @@ String describeInvoiceValidationError(InvoiceValidationError error) {
     case InvoiceLineDiscountInvalid(:final lineIndex):
       return 'السطر ${lineIndex + 1}: الخصم سالب أو يتجاوز قيمة السطر';
     case InvoiceDiscountRateInvalid(:final rate):
-      return 'نسبة خصم الفاتورة «$rate» خارج 0..100';
+      // النسبة مخزنة ×100 (س-117/D-112) فتُعرض مقسومة لقيمتها الإنسانية.
+      return 'نسبة خصم الفاتورة «${formatPercentRate(rate)}» خارج 0..100';
     case InvoiceZeroTotal():
       return 'صافي الفاتورة صفر — لا قيد بلا مبالغ';
     case InvoiceClosedPeriod(:final dateText):

@@ -68,7 +68,7 @@ void main() {
         kind: InvoiceKind.purchase,
         dateText: '2026-03-15',
         partyId: 1,
-        discountRate: 10,
+        discountRate: 1000,
         lines: const [
           InvoiceLineDraft(itemId: 1, unitId: 1, qtyBase: 3, unitPriceMinor: 10001),
           InvoiceLineDraft(itemId: 2, unitId: 1, qtyBase: 1, unitPriceMinor: 9999),
@@ -96,6 +96,57 @@ void main() {
       // نصيب السطر الأساسي توزيع نسبي لا محايد (علة س32): زيت 27,003
       expect(totals.lines[0].baseMinor, 27003);
       expect(totals.lines[1].baseMinor, 8999);
+    });
+    test('س-117 (D-112): الخصم العشري 3.5% — مخزناً ×100 والمقام 10,000',
+        () {
+      // مثال المالك حرفاً «ألا أستطيع إدخال خصم 3.5٪؟» — 30,000 × 3.5%
+      // = 1,050 خصماً والصافي 28,950.
+      final draft = InvoiceDraft(
+        kind: InvoiceKind.sale,
+        dateText: '2026-03-15',
+        partyId: 1,
+        discountRate: 350,
+        lines: const [
+          InvoiceLineDraft(
+              itemId: 1, unitId: 1, qtyBase: 2, unitPriceMinor: 15000),
+        ],
+      );
+      final totals = computeInvoiceTotals(draft);
+      expect(totals.subtotalDocMinor, 30000);
+      expect(totals.discountDocMinor, 1050);
+      expect(totals.totalDocMinor, 28950);
+      expect(totals.lines[0].netDocMinor, 28950);
+      // العرض الإنساني للنسبة المخزنة — بلا أصفار زائدة
+      expect(formatPercentRate(350), '3.5');
+      expect(formatPercentRate(1000), '10');
+      expect(formatPercentRate(275), '2.75');
+      expect(formatPercentRate(10000), '100');
+      expect(formatPercentRate(0), '0');
+      // والحدود: 100% سليمة وما بعدها مرفوضة
+      expect(
+        validateInvoiceDraftStructure(InvoiceDraft(
+            kind: InvoiceKind.sale,
+            dateText: '2026-03-15',
+            partyId: 1,
+            discountRate: 10000,
+            lines: const [
+              InvoiceLineDraft(
+                  itemId: 1, unitId: 1, qtyBase: 1, unitPriceMinor: 100),
+            ])),
+        isNot(contains(isA<InvoiceDiscountRateInvalid>())),
+      );
+      expect(
+        validateInvoiceDraftStructure(InvoiceDraft(
+            kind: InvoiceKind.sale,
+            dateText: '2026-03-15',
+            partyId: 1,
+            discountRate: 10050,
+            lines: const [
+              InvoiceLineDraft(
+                  itemId: 1, unitId: 1, qtyBase: 1, unitPriceMinor: 100),
+            ])),
+        contains(isA<InvoiceDiscountRateInvalid>()),
+      );
     });
     test('هدية بسعر صفر لا تفسد التوزيع', () {
       final draft = InvoiceDraft(
@@ -241,7 +292,7 @@ void main() {
             kind: InvoiceKind.sale,
             dateText: '2026-03-15',
             partyId: 1,
-            discountRate: 101,
+            discountRate: 10050,
             lines: const [
               InvoiceLineDraft(itemId: 1, unitId: 1, qtyBase: 1, unitPriceMinor: 100),
             ])),

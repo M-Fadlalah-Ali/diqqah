@@ -18,7 +18,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011: كل تغيير مخطط إصدار وترحيلة — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 10);
+    expect(db.schemaVersion, 11);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -480,7 +480,7 @@ void main() {
     // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
     // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 10);
+    expect(migrated.schemaVersion, 11);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');
@@ -504,5 +504,42 @@ void main() {
     );
     expect(newId, greaterThan(0));
     expect(await migrated.select(migrated.units).get(), hasLength(1));
+  });
+
+  test('ترحيلة v11 (س-117/D-112): قيم الخصم القديمة تُضرب 100 والمشغل '
+      'الثابت يُطرح للتحديث ويُعاد بعده', () async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_v11_mig_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final dbPath = p.join(tempDir.path, 'migrate11.db');
+    // قاعدة كاملة المخطط بخصم قديم المعنى (10 = 10%) — ثم تخفيض
+    // user_version إلى 10 كي تُجري إعادة الفتح ترحيلة 10→11 أمامنا.
+    final seeded = DiqqahDatabase(filePath: dbPath);
+    await seeded.customStatement(
+      "INSERT INTO invoices (kind, number, invoice_date, currency_id, fx_rate, "
+      "discount_rate, subtotal_doc_minor, discount_doc_minor, total_doc_minor, "
+      "total_base_minor, state, uuid, created_at, updated_at, is_deleted) "
+      "VALUES ('sale', '2026/000001', '2026-03-15', 1, 1000000, 10, "
+      "30000, 0, 30000, 30000, 'draft', 'uuid-v11-1', 0, 0, 0)");
+    await seeded.close();
+    final raw = sqlite3.open(dbPath);
+    raw.execute('PRAGMA user_version = 10');
+    raw.dispose();
+
+    final migrated = DiqqahDatabase(filePath: dbPath);
+    addTearDown(migrated.close);
+    expect(migrated.schemaVersion, 11);
+    final row = (await migrated.customSelect(
+      'SELECT discount_rate, state FROM invoices',
+    ).getSingle()).data;
+    expect(row['discount_rate'], 1000,
+        reason: 'القديم 10 (10% بالمعنى السابق) صار 1000 بنفس المعنى ×100');
+    // والمشغل الثابت عاد بعد الترحيلة: المرحّلة لا تعدل discount_rate
+    await migrated
+        .customStatement("UPDATE invoices SET state = 'posted'");
+    await expectLater(
+      migrated.customStatement(
+          'UPDATE invoices SET discount_rate = 9999'),
+      throwsA(anything),
+    );
   });
 }

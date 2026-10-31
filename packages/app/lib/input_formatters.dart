@@ -107,3 +107,50 @@ class KeyboardAddLine extends StatelessWidget {
     );
   }
 }
+
+/// حقل النسبة العشرية (س-117/D-112، دفعة 9) — بلفظ المالك «ألا أستطيع
+/// إدخال خصم 3.5٪؟»: أرقام وفاصلة عشرية واحدة، والفاصلة العربية «٫»
+/// واللاتينية «,» توحَّدان إلى «.» كي يُقبل إدخال أي لوحة مفاتيح.
+/// فواصل الألوف بقيت خارج النسب بقرار D-102 الموثق فلا تجميع هنا —
+/// وغير الرقم ولا الفاصلة يُسقط (لصق شاذ)، ومسار الحذف حر كلياً.
+class PercentDecimalInputFormatter extends TextInputFormatter {
+  const PercentDecimalInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final src = newValue.text.replaceAll(RegExp('[٫،,]'), '.');
+    final buf = StringBuffer();
+    var dotSeen = false;
+    for (var i = 0; i < src.length; i++) {
+      final ch = src[i];
+      if (ch == '.') {
+        if (dotSeen) continue;
+        dotSeen = true;
+      } else if (ch.codeUnitAt(0) < 0x30 || ch.codeUnitAt(0) > 0x39) {
+        continue;
+      }
+      buf.write(ch);
+    }
+    final out = buf.toString();
+    var offset = newValue.selection.baseOffset;
+    if (offset < 0 || offset > out.length) offset = out.length;
+    return TextEditingValue(
+      text: out,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
+
+/// قراءة النسبة مخزنة ×100 (س-117/D-112): «3.5» → 350 و«2.75» → 275
+/// و«10» → 1000 والفراغ صفر — والفواصل العربية توحَّدان، والمشوّه
+/// يعود بصفر ويحكم عليه مدقق المجال برسالته (خارج 0..100).
+int parsePercentRate100(String text) {
+  final clean = text.trim().replaceAll(RegExp('[٫،,]'), '.');
+  if (clean.isEmpty) return 0;
+  final v = double.tryParse(clean);
+  if (v == null) return 0;
+  return (v * 100).round();
+}

@@ -624,7 +624,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -822,6 +822,20 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                     "NOT NULL DEFAULT '*'");
               }
               await _seedDefaultRoles();
+            }
+            // 10→11 (س-117/D-112): الخصم العشري — النسبة تُخزن ×100
+            // (350 = 3.5%) فتقبل الفاصلة العشرية حتى خانتين، وترحيلة
+            // القيم القائمة تضربها 100 بلا مساس بالمخطط (العمود INTEGER
+            // كما هو — لا إعادة بناء). حارس المشغل الثابت:
+            // trg_invoices_posted_frozen يمنع تغيير discount_rate على
+            // المرحّلة فيُطرح قبل التحديث ويُعاد بعده بالدالة ذاتها
+            // (كل مشغلاتها IF NOT EXISTS فآمنة التكرار — درس v10).
+            if (version == 11) {
+              await customStatement(
+                  'DROP TRIGGER IF EXISTS trg_invoices_posted_frozen');
+              await customStatement(
+                  'UPDATE invoices SET discount_rate = discount_rate * 100');
+              await _createInvoiceTriggers();
             }
           }
         },
@@ -3219,6 +3233,23 @@ Future<Map<int, int>> stockQuantitiesByItem({required int warehouseId}) async {
     for (final r in rows)
       r.data['item_id'] as int: r.data['qty'] as int? ?? 0,
   };
+}
+
+/// أقدم تاريخ مستند مرحّل (فواتير وسندات) — قراءة عرض خالصة (س-118/D-113
+/// دفعة 9): افتراضيات المدى في التقارير — «من» أول السنة الحالية أو أول
+/// مستند أيهما أحدث (بلفظ المالك «تاريخ أول المدة المحدد إن لم يكن هو
+/// بداية العام»). المسودات خارجها (التقارير لا تراها أصلاً)، ولا مستندات
+/// فالعدم null ويقع الافتراض على أول السنة.
+Future<String?> earliestDocumentDate() async {
+  final rows = await customSelect(
+    "SELECT MIN(d) AS d FROM ("
+    "SELECT MIN(invoice_date) AS d FROM invoices "
+    "WHERE is_deleted = 0 AND state <> 'draft' "
+    "UNION ALL "
+    "SELECT MIN(voucher_date) AS d FROM vouchers "
+    "WHERE is_deleted = 0 AND state <> 'draft')",
+  ).get();
+  return rows.first.data['d'] as String?;
 }
 
 /// رصيد صندوق بالأساسية (الافتتاحي + الداخل − الخارج).

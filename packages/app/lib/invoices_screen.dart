@@ -284,7 +284,25 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     // — بلفظ المالك «حقل التاريخ في الفواتير أو السندات أو التقارير
     // يملأ افتراضياً بتاريخ اليوم» — ويذهب جذرو درس س-90.
     _date.text = todayIsoDate();
+    // س-120 (D-115): المجاميع وإجمالي السطر تتجدد مع كل ضغطة —
+    // مستمعو الحقول يستدعون _touch فتُعاد البطاقات لحظياً.
+    _discount.addListener(_touch);
+    for (final l in _lines) {
+      _listenLine(l);
+    }
     _load();
+  }
+
+  /// تحديث لحظي أثناء الكتابة (س-120/D-115) — كانت بطاقة المجاميع
+  /// تتجدد عند تغيّرات القوائم حصراً لا مع كل ضغطة في الحقول.
+  void _touch() {
+    if (mounted) setState(() {});
+  }
+
+  void _listenLine(_LineUi l) {
+    l.qty.addListener(_touch);
+    l.price.addListener(_touch);
+    l.discount.addListener(_touch);
   }
 
   Future<void> _load() async {
@@ -297,11 +315,16 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final currencies = await widget.db.currenciesOf();
     final items = await widget.db.select(widget.db.items).get();
     final units = await widget.db.select(widget.db.units).get();
-    // المتاح لكل صنف من المستودع الافتراضي (س-108/D-106 قراءة خالصة) —
-    // ويُحدّث مع كل تبديل للمستودع.
-    final avail = _warehouseId == null
+    // المتاح لكل صنف من المستودع المختار (س-108/D-106 قراءة خالصة) —
+    // إصلاح علة س-119 (D-114): القراءة كانت قبل تعيين المستودع الافتراضي
+    // فتُقرأ خريطة فارغة أولَ فتح وتبقى حتى تبديل المستودع يدوياً —
+    // صار التعيين قبل القراءة فيرى المالك متاح ما رحّله فور فتح النموذج
+    // (بلفظه «لم يحدث التطبيق الكمية المتاحة» بعد فاتورة الشراء).
+    final wid =
+        _warehouseId ?? (warehouses.isEmpty ? null : warehouses.first.id);
+    final avail = wid == null
         ? const <int, int>{}
-        : await widget.db.stockQuantitiesByItem(warehouseId: _warehouseId!);
+        : await widget.db.stockQuantitiesByItem(warehouseId: wid);
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
@@ -311,9 +334,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _items = items.where((i) => i.isActive).toList();
       _unitNames = {for (final u in units) u.id: u.name};
       _stockAvail = avail;
-      // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط.
+      // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط —
+      // والمستودع المعين قبل قراءة المتاح (إصلاح س-119/D-114 أعلاه).
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
-      _warehouseId = _warehouses.isEmpty ? null : _warehouses.first.id;
+      _warehouseId = wid;
       final base =
           _currencies.where((c) => c.isBase).toList();
       _currencyId = base.isEmpty ? 1 : base.first.id;
@@ -391,12 +415,18 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     }
   }
 
+  /// إجمالي السطر الخام — الكمية × السعر − خصم السطر (س-120/D-115)
+  /// قبل نصيبه من خصم الفاتورة الكلي، ويُعرض لحظياً في بطاقة البند.
+  int _lineGrossMinor(_LineUi line) =>
+      _parsed(line.qty) * _parsed(line.price) - _parsed(line.discount);
+
   /// إضافة بند جديد وتركيز حقل الكمية فيه (س-109/D-110) — الإدخال
   /// بلوحة المفاتيح كاملاً بلا مسك الفأرة عند نهاية كل بند.
   void _addLineFocused() {
     setState(() {
       _lines.add(_LineUi());
     });
+    _listenLine(_lines.last);
     // بعد إعادة البناء — التأجيل يعطي الإطار فرصة التركيب.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -442,7 +472,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       warehouseId: _warehouseId,
       currencyId: _currencyId,
       fxRate: _fx,
-      discountRate: _parsed(_discount),
+      // س-117/D-112: النسبة تُقرأ عشرية وتُخزن ×100 (3.5 → 350).
+      discountRate: parsePercentRate100(_discount.text),
       originalInvoiceId: _kind.isReturn
           ? (int.tryParse(_original.text.trim()))
           : null,
@@ -687,10 +718,14 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 ),
                 // س-110 (D-109): حقل الخصم إلى جانب بطاقة المجاميع في
                 // التذييل — نسبة لا مبلغ فلا فواصل ألوف (D-102).
+                // س-117 (D-112): الفاصلة العشرية مقبولة حتى خانتين
+                // (3.5% مثال المالك) — ولا تناقض مع منع فواصل الألوف
+                // عن النسب فهما فاصلتان مختلفتان.
                 TextField(
                   controller: _discount,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [const PercentDecimalInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'خصم الفاتورة نسبةً 0..100 (اختياري)'),
                 ),
@@ -749,6 +784,11 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
               initialValue: line.itemId,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'الصنف'),
+              onTap: () {
+                // س-119/D-114: النقر على الصنف يحدّث المتاح أولاً كي
+                // لا تُعرض خريطة قديمة إن رُحّلت فاتورة والنموذج مفتوح.
+                _reloadStock();
+              },
               items: [
                 for (final it in _items)
                   DropdownMenuItem<int>(
@@ -781,6 +821,16 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text('الوحدة: $unitName (الأساسية)'),
+              ),
+            if (line.itemId != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  // س-120 (D-115): إجمالي السطر لحظياً — الكمية × السعر
+                  // − خصم السطر، ويتجدد مع كل ضغطة (مستمعو الحقول أعلاه).
+                  'إجمالي السطر: ${formatMinorAmount(_lineGrossMinor(line))}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
             Row(
               children: [

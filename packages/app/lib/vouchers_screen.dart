@@ -905,6 +905,18 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                     _reloadOpenInvoices();
                   },
                 ),
+                if (_box != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      // س-121 (D-116): رصيد الصندوق المختار قبل الحفظ —
+                      // بنفس سطر الفاتورة النقدية (س-105/D-106) — بلفظ
+                      // المالك «رصيد الصندوق في السندات غير موجود»،
+                      // ويتجدد مع تبديل الصندوق (القائمة محملة بأرصدتها).
+                      'الرصيد الآن: ${formatMinorAmount(_box!.balanceBaseMinor)} (بالأساسية)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 TextField(
                   controller: _date,
                   keyboardType: TextInputType.datetime,
@@ -1054,6 +1066,13 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
     return null;
   }
 
+  CashBoxReportRow? get _toBox {
+    for (final b in _boxes) {
+      if (b.boxId == _toBoxId) return b;
+    }
+    return null;
+  }
+
   CurrencyRow _currencyOf(CashBoxReportRow box) {
     for (final c in _currencies) {
       if (c.code == box.currencyCode) return c;
@@ -1173,6 +1192,16 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   ],
                   onChanged: (value) => setState(() => _fromBoxId = value),
                 ),
+                if (_fromBox != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      // س-122 (D-117): رصيد الصندوقين قبل التحويل —
+                      // إضافة المستشار المعتمدة ببوابة دفعة (9).
+                      'الرصيد الآن: ${formatMinorAmount(_fromBox!.balanceBaseMinor)} (بالأساسية)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 DropdownButtonFormField<int>(
                   initialValue: _toBoxId,
                   decoration: const InputDecoration(
@@ -1185,6 +1214,16 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   ],
                   onChanged: (value) => setState(() => _toBoxId = value),
                 ),
+                if (_toBox != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      // س-122 (D-117): رصيد المستلم قبل التحويل —
+                      // موازن سطر المرسل أعلاه.
+                      'الرصيد الآن: ${formatMinorAmount(_toBox!.balanceBaseMinor)} (بالأساسية)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 TextField(
                   controller: _date,
                   keyboardType: TextInputType.datetime,

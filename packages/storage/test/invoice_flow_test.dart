@@ -203,7 +203,7 @@ void main() {
   });
 
   test('بذر v7 (س-51): العملتان ببنيتهما والمستودع والصندوق على 1111', () async {
-    expect(db.schemaVersion, 10);
+    expect(db.schemaVersion, 11);
     final currencies = await db.currenciesOf();
     expect(currencies, hasLength(2),
         reason: 'قبل م3 لا عملة ثالثة — الأساسية والدولار حصراً (D-070)');
@@ -374,7 +374,7 @@ void main() {
       () async {
     final f = await buildFixture(db);
     final id = await f.purchaseCredit(
-      discountRate: 10,
+      discountRate: 1000,
       lines: [f.line(f.oilId, 3, 10001), f.line(f.sugarId, 1, 9999)],
     );
     final inv = (await db.invoiceById(id))!;
@@ -919,7 +919,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 10);
+    expect(migrated.schemaVersion, 11);
     final items = await migrated.select(migrated.items).get();
     expect(items, hasLength(1));
     expect(items.first.sku, 'SKU-OLD');

@@ -480,6 +480,29 @@ class _MovementViewState extends State<_MovementView> {
   List<_MovementDisplay>? _rows;
 
   @override
+  void initState() {
+    super.initState();
+    _fillDefaultRange();
+  }
+
+  /// س-118 (D-113): افتراضيات المدى بلفظ المالك «اجعل "من" تاريخ أول
+  /// العام الحالي أو تاريخ أول المدة المحدد إن لم يكن هو بداية العام،
+  /// واجعل "إلى" تاريخ اليوم الحالي» — «من» أول السنة أو أول مستند
+  /// مرحّل أيهما أحدث (earliestDocumentDate قراءة خالصة نمط D-088)،
+  /// و«إلى» اليوم — وكلاهما قابل للتعديل اليدوي.
+  Future<void> _fillDefaultRange() async {
+    final earliest = await widget.db.earliestDocumentDate();
+    if (!mounted) return;
+    final jan1 = '${DateTime.now().year}-01-01';
+    final from =
+        (earliest != null && earliest.compareTo(jan1) > 0) ? earliest : jan1;
+    setState(() {
+      _from.text = from;
+      _to.text = todayIsoDate();
+    });
+  }
+
+  @override
   void dispose() {
     _from.dispose();
     _to.dispose();
