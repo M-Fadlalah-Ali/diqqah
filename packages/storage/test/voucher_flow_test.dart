@@ -387,7 +387,9 @@ void main() {
           VoucherAllocationDraft(invoiceId: purchaseId, appliedDocMinor: 250000)
         ]);
     final voucher = (await db.voucherById(voucherId))!;
-    expect(voucherDisplayLabel(voucher), 'سند صرف ${f.year}/000001');
+    // D-105 (دفعة 8 س39): «سند دفع» في أرقام المستندات المعروضة —
+    // والنص الحرفي تحديثًا بقرار المصطلح (درس س35: الحكم بالنص الحرفي).
+    expect(voucherDisplayLabel(voucher), 'سند دفع ${f.year}/000001');
     final lines = await moveLinesOf(db, voucher.moveId!);
     expect(lines[0]['account_id'], await accountIdByCode(db, '211'));
     expect(lines[0]['debit_minor'], 250000);

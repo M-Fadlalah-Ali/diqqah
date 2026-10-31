@@ -79,7 +79,8 @@ Future<void> loadFontChoice() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(kFontChoicePrefsKey);
     if (saved == kFontSahel || saved == kFontTajawal) {
-      appFontChoice.value = saved;
+      // التضييق الصريح — الدليل لا يضيّق String? بمقارنات const المزدوجة.
+      appFontChoice.value = saved!;
     }
   } catch (_) {
     // الافتراضي باقٍ — بلا كسر.
