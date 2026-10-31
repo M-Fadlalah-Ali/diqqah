@@ -745,7 +745,10 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
         for (final a in _allocations)
           VoucherAllocationDraft(
             invoiceId: a.invoiceId,
-            appliedDocMinor: int.tryParse(a.applied.text.trim()) ?? 0,
+            // D-102: الحقل مفصول — والقراءة تنزع الفواصل (كسر CI جولة
+            // 114: رسالة المدقق الحرفية «مطبَّق الفاتورة رقم 2 يجب أن
+            // يكون أكبر من صفر» كشفتها بطاقة الرسائل المعادة للنافذة)
+            appliedDocMinor: parseGroupedInt(a.applied.text.trim()),
           ),
       ],
     );
