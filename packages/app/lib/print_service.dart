@@ -1,4 +1,4 @@
-/// محرك الطباعة والتصدير (D-016، دفعة إغلاق النواة س37).
+/// محرك الطباعة والتصدير (D-016، دفعة إغلاق النواة س37 — محدث بدفعة 8 س39).
 ///
 /// الطباعة وعدٌ معتمد قديم بقي في النواة (09 §2 حرفاً): «PDF وطباعة
 /// بمقاسي A4/A5 (طولي/عرضي) لكل مستندات المرحلة وتقاريرها بتحويل
@@ -9,9 +9,22 @@
 /// موسومة) وتعيد بايتات PDF — يختبرها flutter_test بلا قنوات منصة،
 /// والأفعال (المشاركة/الطباعة) منفصلة أدناه بتعليقها للاختبار.
 ///
-/// D-101 معروض: افتراضيات القياس لكل نوع — الفواتير والسندات A5
-/// طولياً (قسيمة كاونتر)، والتقارير A4 عرضياً (جداول أعمدة) — مع
-/// تجاوز صريح بالمعاملين حيث يختار المالك غير الافتراضي.
+/// D-101: افتراضيات القياس لكل نوع — الفواتير والسندات A5 طولياً
+/// (قسيمة كاونتر)، والتقارير A4 عرضياً (جداول أعمدة) — مع تجاوز
+/// صريح بالمعاملين حيث يختار المالك غير الافتراضي.
+///
+/// D-103 (دفعة 8 س39) — مبدأ النسب المئوية بلفظ المالك: «في موضوع
+/// تصميم الفاتورة أرى أن نعتمد مبدأ النسب المئوية لا القياسات
+/// والأبعاد المحددة، فلو تغير قياس الورق تبقى النسب ثابتة» — فكل
+/// قياسات التخطيط مشتقة من عرض الصفحة وارتفاعها لا قيم مطلقة، والأحجام
+/// النصية نسب الارتفاع بسقف قراءة (لا يتلاشى الحرف ولا يتضخم) —
+/// الافتراضيات (A5/A4) لا تتغير، والافتراضيات ثابتة الآن وتخصيص
+/// الفاتورة بالنسب بيد المستخدم مؤجل (قائمة الانتظار 09 §8).
+///
+/// D-104 (دفعة 8 س39) — الخط: ساحل افتراضياً للطباعة (ومع العرض
+/// خيار واحد) وتجوال خيار آخر، من مكتبة مدمجة حصراً — لا خطوط جهاز
+/// ولا تحميل خارجي — بلفظ المالك وأميري خرج من الخيارات فحُذفت
+/// أصوله. رخصتا MIT/OFL مرفقتان مع الأصول.
 library;
 
 import 'dart:io' show File;
@@ -27,19 +40,30 @@ import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
-/// خط الطباعة العربي المضمّن — أميري (رخصة OFL) يحمل التشكيل العربي
-/// الكامل، والتحميل مرة واحدة المخزّنة كي لا تُقرأ الأصول كل طباعة.
-pw.Font? _amiriRegular;
-pw.Font? _amiriBold;
+import 'ui_fonts.dart';
 
-Future<void> _ensureFonts() async {
-  if (_amiriRegular != null) return;
-  final regular =
-      await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
-  final bold = await rootBundle.load('assets/fonts/Amiri-Bold.ttf');
-  _amiriRegular = pw.Font.ttf(regular);
-  _amiriBold = pw.Font.ttf(bold);
+/// الخطوط المحملة لكل مفتاح خيار — تحميل مرة واحدة المخزّنة كي لا
+/// تُقرأ الأصول كل طباعة.
+final Map<String, (pw.Font, pw.Font)> _fontCache = {};
+
+/// تحميل زوج الخط (عادي، عريض) لمفتاح الخيار — مدمج حصراً من الأصول،
+/// وأي مفتاح غريب يعيد ساحل (نمط القراءة الافتراضية الموثق).
+Future<(pw.Font, pw.Font)> _fontsFor(String fontKey) async {
+  final cached = _fontCache[fontKey];
+  if (cached != null) return cached;
+  final family = appFontFamily(fontKey);
+  final regular = pw.Font.ttf(
+      await rootBundle.load('assets/fonts/$family-Regular.ttf'));
+  final bold =
+      pw.Font.ttf(await rootBundle.load('assets/fonts/$family-Bold.ttf'));
+  final pair = (regular, bold);
+  _fontCache[fontKey] = pair;
+  return pair;
 }
+
+/// خط الطباعة بالخيار الحي من الإعدادات — الشاشات تمرره من المُنبِّه،
+/// والافتراضي ساحل.
+String get activeFontKey => appFontChoice.value;
 
 /// افتراضيات القياس لكل نوع مستند (D-101 معروض) — والمفاتيح بأسماء
 /// الأنواع المعروفة: فواتير وسندات A5 طولي، تقارير A4 عرضي.
@@ -82,9 +106,87 @@ PdfPageFormat resolvePageFormat({
   return format;
 }
 
+/// قياسات التخطيط النسبية (D-103) — كل قيمة دالة في مقاس الصفحة:
+/// الهوامش والحواشي من العرض، والأحجام النصية من الارتفاع بسقف قراءة
+/// (min/max) كي تبقى النسبة ثابتة على أي ورق والحرف مقروءاً دائماً.
+class _PdfMetrics {
+  final double margin;
+  final double labelWidth;
+  final double boxPadding;
+  final double boxGap;
+  final double titleSize;
+  final double brandSize;
+  final double headerTextSize;
+  final double tableHeaderSize;
+  final double tableCellSize;
+  final double footerStampSize;
+  final double smallGap;
+
+  const _PdfMetrics._({
+    required this.margin,
+    required this.labelWidth,
+    required this.boxPadding,
+    required this.boxGap,
+    required this.titleSize,
+    required this.brandSize,
+    required this.headerTextSize,
+    required this.tableHeaderSize,
+    required this.tableCellSize,
+    required this.footerStampSize,
+    required this.smallGap,
+  });
+
+  factory _PdfMetrics.fromPage(PdfPageFormat f) {
+    double clampAbs(double v, double min, double max) =>
+        v < min ? min : (v > max ? max : v);
+    return _PdfMetrics._(
+      margin: clampAbs(f.width * 0.05, 14, 40),
+      labelWidth: f.width * 0.22,
+      boxPadding: clampAbs(f.width * 0.022, 5, 12),
+      boxGap: clampAbs(f.height * 0.014, 6, 16),
+      titleSize: clampAbs(f.height * 0.026, 12, 20),
+      brandSize: clampAbs(f.height * 0.013, 7, 10),
+      headerTextSize: clampAbs(f.height * 0.017, 8, 11),
+      tableHeaderSize: clampAbs(f.height * 0.015, 7, 10),
+      tableCellSize: clampAbs(f.height * 0.015, 7, 10),
+      footerStampSize: clampAbs(f.height * 0.011, 6, 8),
+      smallGap: clampAbs(f.height * 0.006, 3, 8),
+    );
+  }
+}
+
+/// صف ترويسة أو خلاصة — سطر «تسمية: قيمة» بمساحة تسمية نسبية.
+List<pw.Widget> _pairLines(
+  List<(String, String)> pairs,
+  pw.Font regular,
+  pw.Font bold,
+  double fontSize,
+  double labelWidth,
+) => [
+      for (final (label, value) in pairs)
+        pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.SizedBox(
+                width: labelWidth,
+                child: pw.Text('$label:',
+                    style: pw.TextStyle(font: bold, fontSize: fontSize)),
+              ),
+              pw.Expanded(
+                child: pw.Text(value,
+                    style: pw.TextStyle(font: regular, fontSize: fontSize)),
+              ),
+            ],
+          ),
+        ),
+    ];
+
 /// البنّاء العام الموحد لكل مستندات المرحلة وتقاريرها — عنوان ومجموعة
 /// أزواج ترويسة (تسمية: قيمة) وجدول أعمدة وأسطر وسطور خلاصة، كله RTL
-/// بخط أميري المضمّن، والأعمدة الرقمية تمتد يساراً لا تُقطع.
+/// بخط المكتبة المدمجة المختار، والتخطيط كله بنسب الصفحة (D-103)،
+/// والأعمدة الرقمية تمتد يساراً لا تُقطع.
 Future<Uint8List> buildDocumentPdf({
   required String title,
   required List<(String, String)> headerPairs,
@@ -92,40 +194,20 @@ Future<Uint8List> buildDocumentPdf({
   required List<List<String>> rows,
   required List<(String, String)> footerPairs,
   required PdfPageFormat format,
+  String? fontKey,
 }) async {
-  await _ensureFonts();
-  final regular = _amiriRegular!;
-  final bold = _amiriBold!;
+  final key = fontKey ?? activeFontKey;
+  final (regular, bold) = await _fontsFor(key);
+  final m = _PdfMetrics.fromPage(format);
 
   final doc = pw.Document(
     theme: pw.ThemeData.withFont(base: regular, bold: bold),
   );
 
-  final headerWidgets = <pw.Widget>[
-    for (final (label, value) in headerPairs)
-      pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-        child: pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.SizedBox(
-              width: 110,
-              child: pw.Text('$label:',
-                  style: pw.TextStyle(font: bold, fontSize: 10)),
-            ),
-            pw.Expanded(
-              child: pw.Text(value,
-                  style: pw.TextStyle(font: regular, fontSize: 10)),
-            ),
-          ],
-        ),
-      ),
-  ];
-
   doc.addPage(
     pw.Page(
       pageFormat: format,
-      margin: const pw.EdgeInsets.all(24),
+      margin: pw.EdgeInsets.all(m.margin),
       build: (context) => pw.Directionality(
         textDirection: pw.TextDirection.rtl,
         child: pw.Column(
@@ -133,15 +215,15 @@ Future<Uint8List> buildDocumentPdf({
           children: [
             pw.Text(title,
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(font: bold, fontSize: 15)),
-            pw.SizedBox(height: 4),
+                style: pw.TextStyle(font: bold, fontSize: m.titleSize)),
+            pw.SizedBox(height: m.smallGap),
             pw.Text('دِقَّة — نظام المحاسبة لمحلك',
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(font: regular, fontSize: 8)),
-            pw.SizedBox(height: 10),
+                style: pw.TextStyle(font: regular, fontSize: m.brandSize)),
+            pw.SizedBox(height: m.boxGap),
             if (headerPairs.isNotEmpty) ...[
               pw.Container(
-                padding: const pw.EdgeInsets.all(8),
+                padding: pw.EdgeInsets.all(m.boxPadding),
                 decoration: pw.BoxDecoration(
                   border: pw.Border.all(color: PdfColors.grey400),
                   borderRadius:
@@ -149,34 +231,38 @@ Future<Uint8List> buildDocumentPdf({
                 ),
                 child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: headerWidgets),
+                    children: _pairLines(
+                        headerPairs, regular, bold, m.headerTextSize, m.labelWidth)),
               ),
-              pw.SizedBox(height: 10),
+              pw.SizedBox(height: m.boxGap),
             ],
             if (rows.isEmpty)
               pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(vertical: 12),
+                padding: pw.EdgeInsets.symmetric(vertical: m.boxGap),
                 child: pw.Text('لا أسطر',
                     textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(font: regular, fontSize: 10)),
+                    style:
+                        pw.TextStyle(font: regular, fontSize: m.headerTextSize)),
               )
             else
               pw.TableHelper.fromTextArray(
                 headers: columns,
                 data: rows,
                 border: pw.TableBorder.all(color: PdfColors.grey400),
-                headerStyle: pw.TextStyle(font: bold, fontSize: 9),
-                cellStyle: pw.TextStyle(font: regular, fontSize: 9),
+                headerStyle: pw.TextStyle(
+                    font: bold, fontSize: m.tableHeaderSize),
+                cellStyle: pw.TextStyle(
+                    font: regular, fontSize: m.tableCellSize),
                 headerDecoration:
                     const pw.BoxDecoration(color: PdfColors.grey200),
                 cellAlignment: pw.Alignment.centerRight,
                 oddRowDecoration:
                     const pw.BoxDecoration(color: PdfColors.grey50),
               ),
-            pw.SizedBox(height: 12),
+            pw.SizedBox(height: m.boxGap),
             if (footerPairs.isNotEmpty)
               pw.Container(
-                padding: const pw.EdgeInsets.all(8),
+                padding: pw.EdgeInsets.all(m.boxPadding),
                 decoration: pw.BoxDecoration(
                   border: pw.Border.all(color: PdfColors.grey400),
                   borderRadius:
@@ -184,34 +270,17 @@ Future<Uint8List> buildDocumentPdf({
                 ),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    for (final (label, value) in footerPairs)
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
-                        child: pw.Row(
-                          children: [
-                            pw.SizedBox(
-                              width: 110,
-                              child: pw.Text('$label:',
-                                  style:
-                                      pw.TextStyle(font: bold, fontSize: 10)),
-                            ),
-                            pw.Expanded(
-                              child: pw.Text(value,
-                                  style:
-                                      pw.TextStyle(font: regular, fontSize: 10)),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
+                  children: _pairLines(
+                      footerPairs, regular, bold, m.headerTextSize, m.labelWidth),
                 ),
               ),
             pw.Spacer(),
             pw.Text('طُبع من دِقَّة',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
-                    font: regular, fontSize: 7, color: PdfColors.grey600)),
+                    font: regular,
+                    fontSize: m.footerStampSize,
+                    color: PdfColors.grey600)),
           ],
         ),
       ),

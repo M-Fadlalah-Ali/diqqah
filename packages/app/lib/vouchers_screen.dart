@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'print_service.dart';
+import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 
 /// طباعة سند أو تحويل أو تسوية (D-016، دفعة إغلاق النواة س37) — قسيمة
@@ -219,7 +219,7 @@ Widget _tabList<T>(BuildContext context, AsyncSnapshot<List<T>> snapshot,
   return ListView(children: [for (final row in rows) builder(row)]);
 }
 
-/// تبويب السندات (قبض/صرف — س-12..س-15) — القائمة الطرفية وغير الطرفية
+/// تبويب السندات (قبض/دفع — س-12..س-15، D-105) — القائمة الطرفية وغير الطرفية
 /// معاً والمميزان بحقليهما.
 class _VouchersTab extends StatefulWidget {
   final DiqqahDatabase db;
@@ -511,7 +511,7 @@ class _AllocationUi {
   }
 }
 
-/// نموذج سند قبض/صرف (س-89/س-90): الطرفي بمطابقاته «يدوياً أو آلياً
+/// نموذج سند قبض/دفع (س-89/س-90، D-105): الطرفي بمطابقاته «يدوياً أو آلياً
 /// بالأقدمية مع إمكانية التعديل» (05 §4.2/م-21) والفائض غير المطابق
 /// «رصيد مقدَّم» على الذمة (س-12/س5)؛ وبغير طرف على حساب مباشر (311
 /// ضخ رأس مال — 321 مسحوبات — 54x مصروف) بلا دخول الإيرادات (س-13/س-15).
@@ -555,6 +555,9 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   @override
   void initState() {
     super.initState();
+    // س-111 (D-108): التاريخ الافتراضي بتاريخ اليوم قابلاً للتعديل —
+    // ويذهب جذر درس س-90 (حفظ بتاريخ فارغ) — والنماذج الثلاثة.
+    _date.text = todayIsoDate();
     _load();
   }
 
@@ -564,12 +567,17 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
     final parties = await widget.db.select(widget.db.parties).get();
     final accounts = await widget.db.allLedgerAccounts();
     final currencies = await widget.db.currenciesOf();
+    // أرصدة الأطراف الجارية (س-105/D-106) — قراءة خالصة من تقرير الذمم.
+    final balances = await widget.db.receivablesPayablesReport();
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
       _parties = parties.where((p) => p.isActive).toList();
       _accounts = accounts.where((a) => a.isActive && a.isLeaf).toList();
       _currencies = currencies;
+      _partyBalances
+        ..clear()
+        ..addEntries([for (final r in balances) MapEntry(r.partyId, r)]);
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
       _loaded = true;
     });
@@ -608,11 +616,28 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
       .where((a) => !a.code.startsWith('111') && a.isLeaf && a.isActive)
       .toList();
 
-  /// أطراف جهة السند: القبض عملاء والصرف موردون (خريطة الذمم 05 §5).
+  /// أطراف جهة السند: القبض عملاء والدفع موردون (خريطة الذمم 05 §5).
   List<Party> get _sideParties => _parties
       .where((p) =>
           p.kind == (_kind.isReceipt ? 'customer' : 'supplier'))
       .toList();
+
+  /// رصيد الطرف الجاري (س-105/D-106) — من تقرير الذمم ذاته (المرحّل
+  /// حصراً) — بالاتجاهين: هم يدينون لنا أو نحن ندن له.
+  final Map<int, ReceivablesPayablesRow> _partyBalances = {};
+
+  /// صياغة الرصيد المعروضة: «50,000 لنا» أو «نحن ندن له بـ20,000» —
+  /// والطرف بلا ذمة صف «بلا ذمة بعد» (الصفر يخرج من التقرير أصلاً).
+  String _partyBalanceText(int partyId) {
+    final row = _partyBalances[partyId];
+    if (row == null) return 'بلا ذمة بعد';
+    return switch (row.direction) {
+      PartyBalanceDirection.theyOweUs =>
+        'لنا ${formatMinorAmount(row.amountMinor)}',
+      PartyBalanceDirection.weOweThem =>
+        'نحن ندن له بـ${formatMinorAmount(row.amountMinor)}',
+    };
+  }
 
   /// الفواتير المفتوحة للطرف بعملة الصندوق — وحقول المطابقة تُبنى
   /// من جديد عند كل تحميل (المسودات مقترحات لا تُحسب).
@@ -674,7 +699,8 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
     for (final p in proposed) {
       for (final a in _allocations) {
         if (a.invoiceId == p.invoiceId) {
-          a.applied.text = '${p.appliedDocMinor}';
+          // مفصولاً (D-102): التعبئة البرمجية تعرض بالفواصل كالكتابة.
+          a.applied.text = groupDigits(p.appliedDocMinor);
         }
       }
     }
@@ -684,12 +710,12 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
   int get _appliedTotal {
     var total = 0;
     for (final a in _allocations) {
-      total += int.tryParse(a.applied.text.trim()) ?? 0;
+      total += parseGroupedInt(a.applied.text.trim());
     }
     return total;
   }
 
-  int get _amountValue => int.tryParse(_amount.text.trim()) ?? 0;
+  int get _amountValue => parseGroupedInt(_amount.text.trim());
 
   /// لقطة صرف السند — عملة الصندوق الأساسية لقطتها المحايدة (D-082)
   /// وغيرها من الحقل، والفراغ صفر يلتقطه المدقق برسالته.
@@ -698,7 +724,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
     if (box == null) return baseCurrencyFxRate;
     return _currencyOf(box).isBase
         ? baseCurrencyFxRate
-        : (int.tryParse(_fx.text.trim()) ?? 0);
+        : (parseGroupedInt(_fx.text.trim()));
   }
 
   VoucherDraft _buildDraft() {
@@ -830,12 +856,15 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                     decoration: InputDecoration(
                         labelText: _kind.isReceipt
                             ? 'العميل (القبض على ذمم العملاء)'
-                            : 'المورد (الصرف من ذمم الموردين)'),
+                            : 'المورد (الدفع من ذمم الموردين)'
+                                ' — D-105'),
                     items: [
                       for (final p in _sideParties)
                         DropdownMenuItem<int>(
                             value: p.id,
-                            child: Text('${p.number} ${p.name}')),
+                            child: Text(
+                                '${p.number} ${p.name} — '
+                                '${_partyBalanceText(p.id)}')),
                     ],
                     onChanged: (value) {
                       setState(() => _partyId = value);
@@ -880,15 +909,23 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                 TextField(
                   controller: _amount,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'المبلغ بوحدة صغرى'),
                 ),
+                if (_partyVoucher && _partyId != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'رصيد حسابه الجاري: ${_partyBalanceText(_partyId!)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 if (box != null && !_currencyOf(box).isBase)
                   TextField(
                     controller: _fx,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
                         labelText:
                             'لقطة الصرف مكبرة ×1,000,000 (مثال: 15000000 = 15)'),
@@ -916,7 +953,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                         controller: a.applied,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
+                          ThousandsSeparatorInputFormatter()
                         ],
                         decoration: const InputDecoration(
                             labelText: 'المطبَّق بوحدة صغرى'),
@@ -986,6 +1023,8 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
   @override
   void initState() {
     super.initState();
+    // س-111 (D-108): التاريخ الافتراضي — نموذج التحويل.
+    _date.text = todayIsoDate();
     _load();
   }
 
@@ -1039,8 +1078,8 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
           ? baseCurrencyFxRate
           : (_currencyOf(from).isBase
               ? baseCurrencyFxRate
-              : (int.tryParse(_fx.text.trim()) ?? 0)),
-      amountDocMinor: int.tryParse(_amount.text.trim()) ?? 0,
+              : parseGroupedInt(_fx.text.trim())),
+      amountDocMinor: parseGroupedInt(_amount.text.trim()),
       narration:
           _narration.text.trim().isEmpty ? null : _narration.text.trim(),
     );
@@ -1150,7 +1189,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                 TextField(
                   controller: _amount,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'المبلغ بوحدة صغرى'),
                 ),
@@ -1158,7 +1197,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                   TextField(
                     controller: _fx,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
                         labelText:
                             'لقطة الصرف مكبرة ×1,000,000 (مثال: 15000000 = 15)'),
@@ -1209,6 +1248,8 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
   @override
   void initState() {
     super.initState();
+    // س-111 (D-108): التاريخ الافتراضي — نموذج التسوية.
+    _date.text = todayIsoDate();
     _load();
   }
 
@@ -1236,7 +1277,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
       dateText: _date.text.trim(),
       cashBoxId: _boxId ?? 0,
       direction: _direction,
-      amountDocMinor: int.tryParse(_amount.text.trim()) ?? 0,
+      amountDocMinor: parseGroupedInt(_amount.text.trim()),
       reason: _reason.text,
     );
   }
@@ -1348,7 +1389,7 @@ class _AdjustmentEditScreenState extends State<AdjustmentEditScreen> {
                 TextField(
                   controller: _amount,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
                   decoration: const InputDecoration(
                       labelText: 'قيمة الفرق بوحدة صغرى'),
                 ),

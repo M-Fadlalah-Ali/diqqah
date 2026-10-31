@@ -9,6 +9,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import 'ui_fonts.dart';
+
 /// Task 51: هوية الإصدار تُحقن زمن الترجمة من CI (--dart-define) —
 /// مصدر الحقيقة pubspec.yaml، ويظهر السطر للمالك أسفل شاشة الإعدادات
 /// فيعرف أي نسخة مثبتة عنده. فارغ في التطوير والاختبار فلا ضجيج ولا كسر.
@@ -638,6 +640,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: const Text('تبديل المستخدم'),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // خط التطبيق والطباعة (D-104، دفعة 8 س39) — خيار واحد يغيّر
+          // العرض والطباعة معاً بلفظ المالك، والمكتبة مدمجة حصراً:
+          // ساحل وتجوال لا غير — لا خطوط جهاز ولا تحميل خارجي.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'خط التطبيق والطباعة (D-104)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'خيار واحد يغيّر خط الشاشات والفواتير المطبوعة معاً '
+                    'بعد لحظة. الخطوط مدمجة مع التطبيق حصراً — فمطبوعاتك '
+                    'تظهر واحدة على كل الأجهزة، ولا يحتاج البرنامج أي اتصال.',
+                  ),
+                  const SizedBox(height: 12),
+                  SegmentedButton<String>(
+                    segments: [
+                      for (final (key, label) in kFontChoices)
+                        ButtonSegment(value: key, label: Text(label)),
+                    ],
+                    selected: {appFontChoice.value},
+                    onSelectionChanged: (selection) {
+                      final key = selection.first;
+                      appFontChoice.value = key;
+                      saveFontChoice(key);
+                    },
+                  ),
                 ],
               ),
             ),

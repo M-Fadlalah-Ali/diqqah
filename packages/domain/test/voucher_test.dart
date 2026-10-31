@@ -13,7 +13,8 @@ void main() {
 
     test('أسماء النوع الكامل للعرض (م-44) مسجلة في قاموس التسلسلات', () {
       expect(sequenceKindLabels['voucher_receipt'], 'سند قبض');
-      expect(sequenceKindLabels['voucher_payment'], 'سند صرف');
+      // D-105 (دفعة 8 س39): «سند دفع» حيث الإشارة إلى السند.
+      expect(sequenceKindLabels['voucher_payment'], 'سند دفع');
       expect(sequenceKindLabels['box_transfer'], 'تحويل بين صناديق');
       expect(sequenceKindLabels['cash_adjustment'], 'تسوية صندوق');
     });

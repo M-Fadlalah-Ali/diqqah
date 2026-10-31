@@ -5,6 +5,7 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'print_service.dart';
+import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 
 /// شاشة الفواتير — دفعة (6-ج) واجهات الإدخال (س-86..س-88، D-094 معروض):
@@ -194,16 +195,31 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
 /// سطر بند في نموذج الإدخال — تحكمات النص أعضاء الحالة وتُفكك عند
 /// التفكيك (عرف الشاشات)، والصنف والكمية والسعر والخصم حقوله.
+///
+/// D-110 (دفعة 8 س39): عقد التركيز لكل حقل كي يعمل الإدخال بلوحة
+/// المفاتيح — Enter في أي حقل من البنود يضيف بنداً جديداً وينقل
+/// المؤشر إليه، وTab ينتقل داخل البند وفي آخره يضيف بلا قفزة خارج
+/// البطاقة، والسهم السفلي يضيف (س-109).
 class _LineUi {
   int? itemId;
+
+  /// هل عُبّئ السعر آلياً من بطاقة الصنف (س-108) — للمتابعة بعد
+  /// تبديل جهة الفاتورة بالتعبئة الصحيحة لا كسر ما كتبه المستخدم يدوياً.
+  bool priceAutoFilled = false;
   final TextEditingController qty = TextEditingController();
   final TextEditingController price = TextEditingController();
   final TextEditingController discount = TextEditingController();
+  final FocusNode qtyFocus = FocusNode();
+  final FocusNode priceFocus = FocusNode();
+  final FocusNode discountFocus = FocusNode();
 
   void dispose() {
     qty.dispose();
     price.dispose();
     discount.dispose();
+    qtyFocus.dispose();
+    priceFocus.dispose();
+    discountFocus.dispose();
   }
 }
 
@@ -249,6 +265,9 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   List<Item> _items = [];
   Map<int, String> _unitNames = {};
 
+  /// المتاح لكل صنف من المستودع المختار (D-106 قراءة خالصة — س-108).
+  Map<int, int> _stockAvail = {};
+
   List<String>? _errors;
   bool _busy = false;
 
@@ -261,6 +280,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   @override
   void initState() {
     super.initState();
+    // س-111 (D-108): التاريخ معبأ افتراضياً بتاريخ اليوم قابلاً للتعديل
+    // — بلفظ المالك «حقل التاريخ في الفواتير أو السندات أو التقارير
+    // يملأ افتراضياً بتاريخ اليوم» — ويذهب جذرو درس س-90.
+    _date.text = todayIsoDate();
     _load();
   }
 
@@ -274,6 +297,11 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final currencies = await widget.db.currenciesOf();
     final items = await widget.db.select(widget.db.items).get();
     final units = await widget.db.select(widget.db.units).get();
+    // المتاح لكل صنف من المستودع الافتراضي (س-108/D-106 قراءة خالصة) —
+    // ويُحدّث مع كل تبديل للمستودع.
+    final avail = _warehouseId == null
+        ? const <int, int>{}
+        : await widget.db.stockQuantitiesByItem(warehouseId: _warehouseId!);
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
@@ -282,6 +310,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _currencies = currencies;
       _items = items.where((i) => i.isActive).toList();
       _unitNames = {for (final u in units) u.id: u.name};
+      _stockAvail = avail;
       // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط.
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
       _warehouseId = _warehouses.isEmpty ? null : _warehouses.first.id;
@@ -290,6 +319,15 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _currencyId = base.isEmpty ? 1 : base.first.id;
       _loaded = true;
     });
+  }
+
+  /// تحديث خريطة المتاح بعد تبديل المستودع (س-108/D-106).
+  Future<void> _reloadStock() async {
+    final wid = _warehouseId;
+    if (wid == null) return;
+    final avail = await widget.db.stockQuantitiesByItem(warehouseId: wid);
+    if (!mounted) return;
+    setState(() => _stockAvail = avail);
   }
 
   @override
@@ -326,10 +364,62 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   /// — والفراغ صفر يلتقطه مدقق البنية برسالته (InvoiceFxRateInvalid).
   int get _fx => _currencyId == 1
       ? baseCurrencyFxRate
-      : (int.tryParse(_fxRate.text.trim()) ?? 0);
+      : parseGroupedInt(_fxRate.text.trim());
 
-  int _parsed(TextEditingController c) =>
-      int.tryParse(c.text.trim()) ?? 0;
+  int _parsed(TextEditingController c) => parseGroupedInt(c.text.trim());
+
+  /// السعر الافتراضي من بطاقة الصنف بحسب جهة الفاتورة (س-108/D-107):
+  /// بيع ومردوده ← سعر البيع، شراء ومردوده ← سعر الشراء — و«بلا سعر
+  /// بعد» (الصفر س6) يبقى الحقل فارغاً لا صفراً. المعبأ آلياً وُسم
+  /// فتُعاد التعبئة الصحيحة عند تبديل جهة الفاتورة لا كسر ما كُتب يدوياً.
+  void _fillDefaultPrice(_LineUi line) {
+    final item = _itemOf(line.itemId);
+    if (item == null) return;
+    final minor =
+        _kind.isSalesSide ? item.salePriceMinor : item.purchasePriceMinor;
+    line.price.text = minor > 0 ? groupDigits(minor) : '';
+    line.priceAutoFilled = minor > 0;
+  }
+
+  /// إعادة تعبئة أسعار البنود المعباة آلياً بعد تبديل جهة الفاتورة —
+  /// فسعر الجهة الجديدة هو المتوقع، وما كتبه المستخدم يدوياً لا يُلمس.
+  void _refillAutoPrices() {
+    for (final l in _lines) {
+      if (l.itemId != null && l.priceAutoFilled) {
+        _fillDefaultPrice(l);
+      }
+    }
+  }
+
+  /// إضافة بند جديد وتركيز حقل الكمية فيه (س-109/D-110) — الإدخال
+  /// بلوحة المفاتيح كاملاً بلا مسك الفأرة عند نهاية كل بند.
+  void _addLineFocused() {
+    setState(() {
+      _lines.add(_LineUi());
+    });
+    // بعد إعادة البناء — التأجيل يعطي الإطار فرصة التركيب.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(_lines.last.qtyFocus);
+      }
+    });
+  }
+
+  Item? _itemOf(int? itemId) {
+    if (itemId == null) return null;
+    for (final i in _items) {
+      if (i.id == itemId) return i;
+    }
+    return null;
+  }
+
+  CashBoxReportRow? _boxOf(int? boxId) {
+    if (boxId == null) return null;
+    for (final b in _boxes) {
+      if (b.boxId == boxId) return b;
+    }
+    return null;
+  }
 
   InvoiceDraft _buildDraft() {
     final lines = [
@@ -446,9 +536,17 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       DropdownMenuItem<String>(
                           value: k.storageValue, child: Text(k.label)),
                   ],
-                  onChanged: (value) => setState(() => _kind = InvoiceKind
-                      .values
-                      .firstWhere((k) => k.storageValue == value)),
+                  onChanged: (value) => setState(() {
+                    final next = InvoiceKind.values
+                        .firstWhere((k) => k.storageValue == value);
+                    if (next == _kind) return;
+                    _kind = next;
+                    // علة س-113 (إصلاح، دفعة 8): تبديل الجهة يصفّر الطرف كي
+                    // لا يبقى «العميل» معروضاً بلون التحديد في قائمة
+                    // الموردين — والصندوق باقٍ بلا مساس.
+                    _partyId = null;
+                    _refillAutoPrices();
+                  }),
                 ),
                 Row(
                   children: [
@@ -481,7 +579,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   ],
                   onChanged: (value) => setState(() => _isCash = value ?? true),
                 ),
-                if (_isCash)
+                if (_isCash) ...[
                   DropdownButtonFormField<int>(
                     initialValue: _boxId,
                     decoration: const InputDecoration(
@@ -493,8 +591,21 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                             child: Text('${b.name} (${b.currencyCode})')),
                     ],
                     onChanged: (value) => setState(() => _boxId = value),
-                  )
-                else
+                  ),
+                  // س-106 (D-106): الرصيد الآن من تقرير الصناديق ذاته —
+                  // يرى البائع قبل الحفظ أن الصندوق لا يكفي، بلا جداول
+                  // جديدة ولا تخزين (روح D-088/D-089).
+                  if (_boxOf(_boxId) != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'الرصيد الآن: '
+                        '${formatMinorAmount(_boxOf(_boxId)!.balanceBaseMinor)}'
+                        ' (بالأساسية)',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                ] else
                   DropdownButtonFormField<int>(
                     initialValue: _partyId,
                     decoration: InputDecoration(
@@ -518,7 +629,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       DropdownMenuItem<int>(
                           value: w.id, child: Text(w.name)),
                   ],
-                  onChanged: (value) => setState(() => _warehouseId = value),
+                  onChanged: (value) {
+                    setState(() => _warehouseId = value);
+                    _reloadStock();
+                  },
                 ),
                 DropdownButtonFormField<int>(
                   initialValue: _currencyId,
@@ -537,7 +651,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   TextField(
                     controller: _fxRate,
                     keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
                         labelText:
                             'لقطة الصرف مكبرة ×1,000,000 (مثال: 15000000 = 15)'),
@@ -551,13 +665,9 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         labelText:
                             'معرف الفاتورة الأصلية (إلزامي للمردود)'),
                   ),
-                TextField(
-                  controller: _discount,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                      labelText: 'خصم الفاتورة نسبةً 0..100 (اختياري)'),
-                ),
+                // س-110 (D-109): خصم الفاتورة في التذييل إلى جانب المجاميع
+                // — بلفظ المالك «الخصم في التذييل» — فالقراءة الطبيعية:
+                // المجموع ← الخصم ← الصافي، والمدققات كما هي.
                 TextField(
                   controller: _narration,
                   decoration: const InputDecoration(
@@ -570,10 +680,19 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: () => setState(() => _lines.add(_LineUi())),
+                    onPressed: _addLineFocused,
                     icon: const Icon(Icons.add),
                     label: const Text('إضافة بند'),
                   ),
+                ),
+                // س-110 (D-109): حقل الخصم إلى جانب بطاقة المجاميع في
+                // التذييل — نسبة لا مبلغ فلا فواصل ألوف (D-102).
+                TextField(
+                  controller: _discount,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                      labelText: 'خصم الفاتورة نسبةً 0..100 (اختياري)'),
                 ),
                 _totalsCard(),
                 const SizedBox(height: 8),
@@ -599,6 +718,22 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     );
   }
 
+  /// سطر معلومات الصنف في قائمة الاختيار (س-108/D-107) — بترتيب
+  /// المالك المعتمد حرفاً: «رقم الصنف – الاسم – الكمية – السعر»،
+  /// والسعر بنوعه («سعر بيع» في البيع و«سعر شراء» في الشراء) مفصولاً
+  /// (D-102)، والمتاح من المستودع المختار لحظياً (D-106).
+  String _itemSubtitle(Item it) {
+    final minor =
+        _kind.isSalesSide ? it.salePriceMinor : it.purchasePriceMinor;
+    final priceText =
+        minor > 0 ? formatMinorAmount(minor) : 'بلا سعر بعد';
+    final priceLabel = _kind.isSalesSide ? 'سعر بيع' : 'سعر شراء';
+    final avail = _stockAvail[it.id] ?? 0;
+    return it.kind == 'service'
+        ? '$priceLabel: $priceText'
+        : 'المتاح: ${groupDigits(avail)} · $priceLabel: $priceText';
+  }
+
   Widget _lineCard(int index) {
     final line = _lines[index];
     final unitId = _baseUnitIdOf(line.itemId);
@@ -612,17 +747,38 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
           children: [
             DropdownButtonFormField<int>(
               initialValue: line.itemId,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'الصنف'),
               items: [
                 for (final it in _items)
                   DropdownMenuItem<int>(
-                      value: it.id,
-                      child: Text(
-                          '${it.sku} ${it.name}'
-                          '${it.kind == 'service' ? ' (خدمة)' : ''}')),
+                    value: it.id,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                            '${it.sku} ${it.name}'
+                            '${it.kind == 'service' ? ' (خدمة)' : ''}'),
+                        Text(
+                          _itemSubtitle(it),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
               ],
-              onChanged: (value) => setState(() => line.itemId = value),
+              onChanged: (value) => setState(() {
+                line.itemId = value;
+                _fillDefaultPrice(line); // س-108: السعر الافتراضي يُعبأ
+              }),
             ),
+            if (line.itemId != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(_itemSubtitle(_itemOf(line.itemId)!),
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
             if (unitName.isNotEmpty)
               Align(
                 alignment: Alignment.centerLeft,
@@ -631,32 +787,59 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: line.qty,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration:
-                        const InputDecoration(labelText: 'الكمية'),
+                  // س-109 (D-110): Enter ينقل للحقل التالي، وTab/السهم
+                  // السفلي يضيفان بنداً جديداً بلا قفزة خارج البطاقة.
+                  child: KeyboardAddLine(
+                    onAdd: _addLineFocused,
+                    child: TextField(
+                      controller: line.qty,
+                      focusNode: line.qtyFocus,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        // الكميات من أهل الفواصل أيضاً (تنبيه المالك:
+                        // «الفاصلة أيضاً تشمل الكميات والمبالغ»).
+                        ThousandsSeparatorInputFormatter(),
+                      ],
+                      decoration:
+                          const InputDecoration(labelText: 'الكمية'),
+                      onSubmitted: (_) => FocusScope.of(context)
+                          .requestFocus(line.priceFocus),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
-                    controller: line.price,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                        labelText: 'سعر الوحدة بوحدة صغرى'),
+                  child: KeyboardAddLine(
+                    onAdd: _addLineFocused,
+                    child: TextField(
+                      controller: line.price,
+                      focusNode: line.priceFocus,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        ThousandsSeparatorInputFormatter(),
+                      ],
+                      decoration: const InputDecoration(
+                          labelText: 'سعر الوحدة بوحدة صغرى'),
+                      onSubmitted: (_) => FocusScope.of(context)
+                          .requestFocus(line.discountFocus),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
-                    controller: line.discount,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(
-                        labelText: 'خصم السطر (اختياري)'),
+                  child: KeyboardAddLine(
+                    onAdd: _addLineFocused,
+                    child: TextField(
+                      controller: line.discount,
+                      focusNode: line.discountFocus,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        ThousandsSeparatorInputFormatter(),
+                      ],
+                      decoration: const InputDecoration(
+                          labelText: 'خصم السطر (اختياري)'),
+                      onSubmitted: (_) => _addLineFocused(),
+                    ),
                   ),
                 ),
                 IconButton(

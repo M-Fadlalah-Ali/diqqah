@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'input_formatters.dart';
+import 'reports_screen.dart' show formatMinorAmount;
+
 /// شاشة الأصناف (F-030/F-031 — دفعة م1 الثانية، س-36..س-41).
+///
+/// - س-107 (دفعة 8/D-102): كل سطر في القائمة يعرض سعر البيع مفصولاً
+///   (والصفر «بلا سعر بعد» لا يُعرض) — فتُقرأ القائمة عيناً السوق.
 ///
 /// - القائمة تعرض الجميع بصيغة «الاسم (الكود)» مرتبة معجمياً بالاسم
 ///   (D-074) — والمعطّل بشارة لا يُخفى: إعادة التفعيل ممكنة متى شئت
@@ -117,7 +122,13 @@ class _ItemsScreenState extends State<ItemsScreen> {
                       ),
                       title: Text(itemDisplayLabel(item.name, item.sku)),
                       subtitle: Text(
-                        kind.label + (category == null ? '' : ' · $category'),
+                        kind.label +
+                            (category == null ? '' : ' · $category') +
+                            // س-107: سعر البيع مفصولاً بجانب النوع.
+                            (item.salePriceMinor > 0
+                                ? ' · سعر بيع: '
+                                    '${formatMinorAmount(item.salePriceMinor)}'
+                                : ''),
                       ),
                       trailing: item.isActive
                           ? null
@@ -184,8 +195,11 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       _sku.text = item.sku;
       _name.text = item.name;
       _category.text = item.category ?? '';
-      _purchase.text = item.purchasePriceMinor.toString();
-      _sale.text = item.salePriceMinor.toString();
+      // مفصولاً (D-102): العرض والحفظ مفصولان — والصفر يبقى فارغاً.
+      _purchase.text =
+          item.purchasePriceMinor > 0 ? groupDigits(item.purchasePriceMinor) : '';
+      _sale.text =
+          item.salePriceMinor > 0 ? groupDigits(item.salePriceMinor) : '';
       _kind = ItemKind.fromStorage(item.kind);
       _unitId = item.baseUnitId;
     } else {
@@ -219,7 +233,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   int _parsePrice(TextEditingController c) {
     final text = c.text.trim();
     if (text.isEmpty) return 0;
-    return int.tryParse(text) ?? -1;
+    return parseGroupedInt(text, fallback: -1);
   }
 
   ExistingItem _asExisting(Item item) => ExistingItem(
@@ -469,22 +483,33 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           TextFormField(
             controller: _purchase,
             keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
+            inputFormatters: [ThousandsSeparatorInputFormatter()],
+            onChanged: (_) => setState(() {}), // المعاينة اللحظية (D-102)
+            decoration: InputDecoration(
               labelText: 'سعر الشراء',
               helperText: 'عدد صحيح بالوحدة الصغرى للعملة (س7) — '
                   'اتركه فارغاً إن لم تحدد سعراً بعد',
+              // D-102: معاينة مفصولة أسفل الحقل — الإدخال يبقى رقماً
+              // والفواصل طبقة عرض حتى أثناء الكتابة.
+              helperStyle: Theme.of(context).textTheme.bodySmall,
+              suffixText: parseGroupedInt(_purchase.text) > 0
+                  ? 'تعادل ${formatMinorAmount(parseGroupedInt(_purchase.text))}'
+                  : null,
             ),
           ),
           const SizedBox(height: 12),
           TextFormField(
             controller: _sale,
             keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
+            inputFormatters: [ThousandsSeparatorInputFormatter()],
+            onChanged: (_) => setState(() {}), // المعاينة اللحظية (D-102)
+            decoration: InputDecoration(
               labelText: 'سعر البيع',
-              helperText: 'الافتراضي في بنود الفواتير — قابل للتعديل '
+              helperText: 'الافتراضي في بنود الفواتير (س-108) — قابل للتعديل '
                   'في كل بند (س-08)',
+              suffixText: parseGroupedInt(_sale.text) > 0
+                  ? 'تعادل ${formatMinorAmount(parseGroupedInt(_sale.text))}'
+                  : null,
             ),
           ),
           const SizedBox(height: 16),

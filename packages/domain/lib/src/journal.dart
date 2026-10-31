@@ -259,7 +259,9 @@ const Map<String, String> sequenceKindLabels = {
   'invoice_purchase_return': 'مردود شراء',
   // دفعة السندات والصندوق (5) — أسماء النوع الكامل للعرض (م-44)
   'voucher_receipt': 'سند قبض',
-  'voucher_payment': 'سند صرف',
+  // D-105 (دفعة 8 س39): «سند دفع» حيث الإشارة إلى السند — بلفظ المالك
+  // والقيمة التخزينية voucher_payment لا تتغير فلا ترحيل بيانات.
+  'voucher_payment': 'سند دفع',
   'box_transfer': 'تحويل بين صناديق',
   'cash_adjustment': 'تسوية صندوق',
 };
@@ -358,6 +360,16 @@ bool isValidIsoDate(String value) {
 
 /// السنة الميلادية من تاريخ ISO — مفتاح التسلسل السنوي (07 §1.9).
 int yearOfIsoDate(String value) => int.parse(value.substring(0, 4));
+
+/// تاريخ اليوم بصيغة ISO المحلية للتعبئة الافتراضية (D-108، دفعة 8 س39
+/// — س-111): «حقل التاريخ في الفواتير أو السندات أو التقارير يملأ
+/// افتراضياً بتاريخ اليوم» — نقية بتاريخ الجهاز وقابلة للتعديل دائماً،
+/// والمدقق يمنع التاريخ خارج الدورة المفتوحة كما هو.
+String todayIsoDate({DateTime? now}) {
+  final t = now ?? DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${t.year}-${two(t.month)}-${two(t.day)}';
+}
 
 /// الفترة الحاضنة لتاريخ ما — أول فترة تقع ضمن حدودها (الفترات شطرها
 /// غير متقاطع بحكم توليدها؛ الأول بترتيبها يفوز لو تكرر الإدخال).

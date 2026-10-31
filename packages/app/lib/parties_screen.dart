@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
+
+import 'input_formatters.dart';
+import 'reports_screen.dart' show formatMinorAmount;
 
 /// شاشة الأطراف (F-020/F-021 — دفعة م1 الأولى، س-29..س-35).
 ///
@@ -184,7 +186,10 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
       _name.text = party.name;
       _phone.text = party.phone ?? '';
       _address.text = party.address ?? '';
-      _credit.text = party.creditLimitBaseMinor?.toString() ?? '';
+      // مفصولاً (D-102): الحد مبلغ فتُعرض فوائله أثناء الكتابة.
+      _credit.text = party.creditLimitBaseMinor == null
+          ? ''
+          : groupDigits(party.creditLimitBaseMinor!);
       _kind = PartyKind.fromStorage(party.kind);
     } else {
       _number = TextEditingController();
@@ -216,7 +221,7 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
   int? _parseCreditLimit() {
     final text = _credit.text.trim();
     if (text.isEmpty) return null;
-    return int.tryParse(text) ?? -1;
+    return parseGroupedInt(text, fallback: -1);
   }
 
   ExistingParty _asExisting(Party party) => ExistingParty(
@@ -363,11 +368,15 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
             TextFormField(
               controller: _credit,
               keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
+              onChanged: (_) => setState(() {}), // المعاينة اللحظية (D-102)
+              decoration: InputDecoration(
                 labelText: 'حد الائتمان (اختياري)',
                 helperText: 'اتركه فارغاً ليكون الطرف بلا سقف (س-34) — '
                     'وتنبيه التجاوز يأتي مع دفعة الفواتير (F-164)',
+                suffixText: parseGroupedInt(_credit.text) > 0
+                    ? 'تعادل ${formatMinorAmount(parseGroupedInt(_credit.text))}'
+                    : null,
               ),
             ),
           ],

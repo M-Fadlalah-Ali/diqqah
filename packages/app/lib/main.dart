@@ -7,8 +7,17 @@ import 'package:path_provider/path_provider.dart';
 
 import 'first_run_screen.dart';
 import 'home_screen.dart';
+import 'ui_fonts.dart';
 
-void main() => runApp(const DiqqahApp());
+/// D-104 (دفعة 8 س39): تسجيل عائلتي الخط (ساحل/تجوال) وقراءة الخيار
+/// المحفوظ قبل الإقلاع — والخطوط مدمجة حصراً (لا خطوط جهاز) بلفظ
+/// المالك، وفشل كل خطوة محاط — إقلاع التطبيق أقدس من خط.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await loadFontChoice();
+  await preloadAppFonts();
+  runApp(const DiqqahApp());
+}
 
 /// إطار دِقَّة — واجهة واحدة تعمل على أندرويد وWindows (F-001).
 class DiqqahApp extends StatelessWidget {
@@ -24,13 +33,22 @@ class DiqqahApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'دِقَّة',
-      theme: ThemeData(useMaterial3: true),
-      home: AppGate(
-        db: db,
-        dbPath: dbPath,
-        hasherIterations: hasherIterations,
+    // D-104: خيار واحد يغيّر العرض والطباعة معاً (جواب المالك «واحد»)
+    // — ValueListenableBuilder يعيد بناء الجذر فور تغيير الخيار من
+    // الإعدادات فتتغير الشاشات والمطبوعات لحظياً دون إقلاع جديد.
+    return ValueListenableBuilder<String>(
+      valueListenable: appFontChoice,
+      builder: (context, fontKey, _) => MaterialApp(
+        title: 'دِقَّة',
+        theme: ThemeData(
+          useMaterial3: true,
+          fontFamily: appFontFamily(fontKey),
+        ),
+        home: AppGate(
+          db: db,
+          dbPath: dbPath,
+          hasherIterations: hasherIterations,
+        ),
       ),
     );
   }

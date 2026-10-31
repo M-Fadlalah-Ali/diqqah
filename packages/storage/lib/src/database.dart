@@ -3205,6 +3205,22 @@ Future<(int, int)> stockBalanceOf({
 }) =>
     _stockBalanceTx(itemId, warehouseId);
 
+/// كميات الأصناف المتاحة في مستودع واحد — خريطة (صنف ← كمية) للقراءة
+/// الخالصة من stock_balances حصراً (D-106، دفعة 8 س39): عرض المتاح في
+/// قائمة اختيار الأصناف بالفاتورة (س-108) — قراءة لا جداول تجميع ولا
+/// أرقام مخزنة، والمستودع غير الموجود بالخريطة متاحه صفر.
+Future<Map<int, int>> stockQuantitiesByItem({required int warehouseId}) async {
+  final rows = await customSelect(
+    'SELECT item_id, SUM(qty_base) AS qty FROM stock_balances '
+    'WHERE warehouse_id = ? GROUP BY item_id',
+    variables: [Variable.withInt(warehouseId)],
+  ).get();
+  return {
+    for (final r in rows)
+      r.data['item_id'] as int: r.data['qty'] as int? ?? 0,
+  };
+}
+
 /// رصيد صندوق بالأساسية (الافتتاحي + الداخل − الخارج).
 Future<int> cashBoxBalanceOf(int boxId) => _cashBoxBalanceTx(boxId);
 
@@ -3605,7 +3621,7 @@ Future<List<CurrencyRow>> currenciesOf() async {
         );
       }
 
-      // حركة الصندوق بمصدرها المعلن (05 §4.2): القبض «داخل» والصرف «خارج»
+      // حركة الصندوق بمصدرها المعلن (05 §4.2): القبض «داخل» والدفع «خارج» (D-105)
       await customStatement(
         "INSERT INTO cash_movements (cash_box_id, kind, amount_minor, "
         "amount_base_minor, fx_rate, ref_doc_type, ref_doc_id, user_id, "
@@ -5059,7 +5075,7 @@ Future<List<InvoiceListRow>> invoicesListReport({
   ];
 }
 
-/// صف قائمة سندات القبض والصرف للعرض (05 §4.2) — الطرفي وغير الطرفي
+/// صف قائمة سندات القبض والدفع للعرض (05 §4.2/D-105) — الطرفي وغير الطرفي
 /// معاً والمميزان بحقليهما (طرف أو حساب مباشر).
 Future<List<VoucherListRow>> vouchersListReport({
   String? fromText,
@@ -5586,7 +5602,7 @@ class InvoiceListRow {
       partyName ?? boxName ?? '—';
 }
 
-/// صف قائمة سندات القبض والصرف للتصفح (05 §4.2).
+/// صف قائمة سندات القبض والدفع للتصفح (05 §4.2/D-105).
 class VoucherListRow {
   final int id;
   final String kind;
