@@ -110,9 +110,11 @@ void main() {
     await tester.tap(find.text('حفظ وترحيل'));
     await tester.pumpAndSettle();
 
-    // المخزن ×100: 3.5% مخزنة 350 — والقراءة من القاعدة لا الشاشة
+    // المخزن ×100: 3.5% مخزنة 350 — والقراءة من القاعدة لا الشاشة،
+    // وآخر فاتورة لأن البذر يترك فاتورتين مرحّلتين (درس الجولة الأولى)
     final row = (await db.customSelect(
-      "SELECT discount_rate FROM invoices WHERE state <> 'draft'",
+      "SELECT discount_rate FROM invoices WHERE state <> 'draft' "
+      'ORDER BY id DESC LIMIT 1',
     ).getSingle()).data;
     expect(row['discount_rate'], 350);
   });
@@ -190,8 +192,9 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'الكمية').first, '2');
     await tester.pump();
-    expect(find.textContaining('إجمالي السطر: 0'), findsOneWidget,
-        reason: 'السعر فارغ فالإجمالي صفر — لحظياً لا متجمداً');
+    expect(find.textContaining('إجمالي السطر: 50,000'), findsOneWidget,
+        reason: 'السعر الافتراضي عُبّئ بسعر الجهة 25,000 (س-108/D-107) — '
+            'فـ2 × 25,000 تُرى لحظياً بعد ضغطة الكمية');
 
     await tester.enterText(
         find.widgetWithText(TextField, 'سعر الوحدة بوحدة صغرى').first,
