@@ -4,7 +4,52 @@ import 'package:flutter/services.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'print_service.dart';
 import 'reports_screen.dart' show formatMinorAmount;
+
+/// طباعة سند أو تحويل أو تسوية (D-016، دفعة إغلاق النواة س37) — قسيمة
+/// A5 طولية (D-101 معروض) ببيانات الصف المعروضة حصراً، ومشاركتها
+/// بنافذة النظام، والفشل رسالة لا صمت.
+Future<void> _printVoucherDoc(
+  BuildContext context, {
+  required String title,
+  required List<(String, String)> headerPairs,
+  required String amountLabel,
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final bytes = await buildDocumentPdf(
+      title: title,
+      headerPairs: headerPairs,
+      columns: const [],
+      rows: const [],
+      footerPairs: [('المبلغ', amountLabel)],
+      format: resolvePageFormat(docKind: 'voucher'),
+    );
+    if (!context.mounted) return;
+    await sharePdfBytes(bytes, '$title.pdf');
+  } catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+    );
+  }
+}
+
+/// زر طباعة صف السند — بجوار المبلغ في نفس السطر.
+Widget _voucherPrintTrailing({
+  required VoidCallback onPrint,
+  required String amountText,
+}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'طباعة / PDF',
+          icon: const Icon(Icons.picture_as_pdf_outlined),
+          onPressed: onPrint,
+        ),
+        Text(amountText),
+      ],
+    );
 
 /// شاشة السندات والصناديق المالية — دفعة (6-ج) واجهات الإدخال
 /// (س-89..س-94، D-094..D-096 معروض): ثلاث تبويبات قراءة لحظية من
@@ -16,9 +61,9 @@ import 'reports_screen.dart' show formatMinorAmount;
 /// درس CI (س36): زر الإنشاء زرٌّ واحد في Scaffold الأم يتبدل نصه وعمله
 /// بالتبويب النشط — لا FAB داخل كل تبويب فتتكدس الأزرار في
 /// PageView ويتحجب بعضها بعضاً في الاختبارات ولا يُضرب.
+/// ودفعة الإغلاق (س37): زر طباعة / PDF بكل صف (D-016).
 class VouchersScreen extends StatefulWidget {
   final DiqqahDatabase db;
-
   const VouchersScreen({super.key, required this.db});
 
   @override
@@ -236,9 +281,28 @@ class _VouchersTabState extends State<_VouchersTab>
                       ' · ${row.counterpartLabel}'
                       ' · ${row.boxName}'
                       ' · ${row.stateLabel}'),
-                  trailing: Text(
-                      '${formatMinorAmount(row.amountDocMinor)}'
-                      ' ${row.currencyCode}'),
+                  trailing: _voucherPrintTrailing(
+                    amountText:
+                        '${formatMinorAmount(row.amountDocMinor)}'
+                        ' ${row.currencyCode}',
+                    onPrint: () => _printVoucherDoc(
+                      context,
+                      title: row.displayLabel,
+                      headerPairs: [
+                        ('التاريخ', row.voucherDate),
+                        ('النوع', VoucherKind.fromStorage(row.kind).label),
+                        ('الحالة', row.stateLabel),
+                        ('الجهة', row.counterpartLabel),
+                        ('الصندوق', row.boxName),
+                        if (row.narration != null &&
+                            row.narration!.isNotEmpty)
+                          ('البيان', row.narration!),
+                      ],
+                      amountLabel:
+                          '${formatMinorAmount(row.amountDocMinor)} '
+                              '${row.currencyCode}',
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -310,9 +374,24 @@ class _TransfersTabState extends State<_TransfersTab>
                       ' · من ${row.fromBoxName}'
                       ' · إلى ${row.toBoxName}'
                       ' · ${row.stateLabel}'),
-                  trailing: Text(
-                      '${formatMinorAmount(row.amountDocMinor)}'
-                      ' ${row.currencyCode}'),
+                  trailing: _voucherPrintTrailing(
+                    amountText:
+                        '${formatMinorAmount(row.amountDocMinor)}'
+                        ' ${row.currencyCode}',
+                    onPrint: () => _printVoucherDoc(
+                      context,
+                      title: row.displayLabel,
+                      headerPairs: [
+                        ('التاريخ', row.transferDate),
+                        ('الحالة', row.stateLabel),
+                        ('من صندوق', row.fromBoxName),
+                        ('إلى صندوق', row.toBoxName),
+                      ],
+                      amountLabel:
+                          '${formatMinorAmount(row.amountDocMinor)} '
+                              '${row.currencyCode}',
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -385,9 +464,25 @@ class _AdjustmentsTabState extends State<_AdjustmentsTab>
                       ' · ${row.directionLabel}'
                       ' · السبب: ${row.reason}'
                       ' · ${row.stateLabel}'),
-                  trailing: Text(
-                      '${formatMinorAmount(row.amountDocMinor)}'
-                      ' ${row.currencyCode}'),
+                  trailing: _voucherPrintTrailing(
+                    amountText:
+                        '${formatMinorAmount(row.amountDocMinor)}'
+                        ' ${row.currencyCode}',
+                    onPrint: () => _printVoucherDoc(
+                      context,
+                      title: row.displayLabel,
+                      headerPairs: [
+                        ('التاريخ', row.adjustmentDate),
+                        ('الحالة', row.stateLabel),
+                        ('الصندوق', row.boxName),
+                        ('الاتجاه', row.directionLabel),
+                        ('السبب', row.reason),
+                      ],
+                      amountLabel:
+                          '${formatMinorAmount(row.amountDocMinor)} '
+                              '${row.currencyCode}',
+                    ),
+                  ),
                 ),
               ),
             ),

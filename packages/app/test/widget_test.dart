@@ -44,7 +44,7 @@ void main() {
     expect(find.text('المالك'), findsNothing); // لا معلومات المستخدم على الشاشة
     expect(find.text('الأطراف'), findsOneWidget);
     expect(find.text('المزامنة'), findsOneWidget);
-    expect(find.byType(ListTile), findsNWidgets(14)); // 13 وحدة + الإعدادات
+    expect(find.byType(ListTile), findsNWidgets(15)); // 14 وحدة + الإعدادات
 
     // F-015: device_id وُلد خلال التهيئة وأصبح في القاعدة
     expect(await db.deviceId(), hasLength(36));
@@ -76,16 +76,16 @@ void main() {
     await tester.pumpAndSettle();
 
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
-    expect(tiles.length, 14); // 13 وحدة + الإعدادات
+    expect(tiles.length, 15); // 14 وحدة + الإعدادات
     final locked = tiles.where((t) => t.enabled != true).length;
     expect(locked, 7,
         reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1 1..6-ب) والفواتير '
-            'والصناديق والصلاحيات (دفعة 6-ج بأمر «تنفيذها كلها معاً» س36) '
+            'والصناديق والصلاحيات (دفعة 6-ج) والسندات (دفعة الإغلاق س37) '
             'فُتحت — والبقية (7 وحدات) معطلة');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 7,
-        reason: 'الأطراف والأصناف والتقارير والفواتير والصناديق والصلاحيات '
-            'والإعدادات');
+    expect(open, 8,
+        reason: 'الأطراف والأصناف والتقارير والفواتير والسندات والصناديق '
+            'والصلاحيات والإعدادات');
 
     // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(
@@ -179,7 +179,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(RolesScreen), findsOneWidget);
-    expect(find.textContaining('العرض قراءة حصراً'), findsOneWidget);
+    expect(find.textContaining('الأدوار النمطية الأربعة مزروعة بأذوناتها'),
+        findsOneWidget);
   });
 
   testWidgets('F-012 + D-050 + D-060: زر النسخ ينتج نسخة مشفرة بمفتاح البرنامج في مجلد القاعدة',

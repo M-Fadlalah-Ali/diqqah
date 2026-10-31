@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'print_service.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 
 /// شاشة الفواتير — دفعة (6-ج) واجهات الإدخال (س-86..س-88، D-094 معروض):
@@ -701,6 +702,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 
 /// تفاصيل فاتورة — قراءة حصراً (س-88): التسمية المعروضة بحساب المجال
 /// (invoiceDisplayLabel) والحالة والسطور بأسعارها والمجاميع كما خُزنت.
+/// ودفعة الإغلاق (س37): زرا الطباعة والمشاركة (D-016) — قسيمة A5
+/// طولية (D-101 معروض) تُبنى من المستند وسطوره وخريطة أسماء الأصناف.
 class InvoiceDetailScreen extends StatelessWidget {
   final DiqqahDatabase db;
   final int invoiceId;
@@ -711,10 +714,123 @@ class InvoiceDetailScreen extends StatelessWidget {
     required this.invoiceId,
   });
 
+  /// توليد قسيمة الفاتورة ومشاركتها بنافذة النظام — البيانات تُجلب
+  /// هنا حصراً (لا تعتمد على حالة الشاشة)، والفشل رسالة لا صمت.
+  Future<void> _sharePrintout(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final invoice = await db.invoiceById(invoiceId);
+      final lines = await db.invoiceLines(invoiceId);
+      if (invoice == null) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('لا فاتورة بهذا المعرف')),
+        );
+        return;
+      }
+      final items = await db.select(db.items).get();
+      final itemNames = <int, String>{
+        for (final item in items) item.id: item.name,
+      };
+      final bytes = await buildDocumentPdf(
+        title: invoiceDisplayLabel(invoice),
+        headerPairs: [
+          ('التاريخ', invoice.invoiceDate),
+          ('الحالة', InvoiceState.fromStorage(invoice.state).label),
+          if (invoice.narration != null && invoice.narration!.isNotEmpty)
+            ('البيان', invoice.narration!),
+        ],
+        columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'صافي السطر'],
+        rows: [
+          for (final line in lines)
+            [
+              itemNames[line.itemId] ?? 'صنف #${line.itemId}',
+              '${line.qtyBase}',
+              formatMinorAmount(line.unitPriceMinor),
+              formatMinorAmount(line.lineTotalDocMinor),
+            ],
+        ],
+        footerPairs: [
+          (
+            'الإجمالي',
+            '${formatMinorAmount(invoice.totalDocMinor)} '
+                '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
+          ),
+          ('المكافئ الأساسي', formatMinorAmount(invoice.totalBaseMinor)),
+        ],
+        format: resolvePageFormat(docKind: 'invoice'),
+      );
+      if (!context.mounted) return;
+      await sharePdfBytes(
+          bytes, '${invoiceDisplayLabel(invoice)}.pdf');
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+      appBar: AppBar(
+        title: const Text('تفاصيل الفاتورة'),
+        actions: [
+          IconButton(
+            tooltip: 'مشاركة PDF',
+            icon: const Icon(Icons.ios_share),
+            onPressed: () => _sharePrintout(context),
+          ),
+          IconButton(
+            tooltip: 'طباعة مباشرة',
+            icon: const Icon(Icons.print_outlined),
+            onPressed: () async {
+              // نفس توليد المشاركة ثم حوار الطباعة — والمنصة غير
+              // الداعمة تُغلف برسالتها (D-101 معروض).
+              final invoice = await db.invoiceById(invoiceId);
+              final lines = await db.invoiceLines(invoiceId);
+              if (invoice == null || !context.mounted) return;
+              final items = await db.select(db.items).get();
+              final itemNames = <int, String>{
+                for (final item in items) item.id: item.name,
+              };
+              final bytes = await buildDocumentPdf(
+                title: invoiceDisplayLabel(invoice),
+                headerPairs: [
+                  ('التاريخ', invoice.invoiceDate),
+                  ('الحالة', InvoiceState.fromStorage(invoice.state).label),
+                  if (invoice.narration != null &&
+                      invoice.narration!.isNotEmpty)
+                    ('البيان', invoice.narration!),
+                ],
+                columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'صافي السطر'],
+                rows: [
+                  for (final line in lines)
+                    [
+                      itemNames[line.itemId] ?? 'صنف #${line.itemId}',
+                      '${line.qtyBase}',
+                      formatMinorAmount(line.unitPriceMinor),
+                      formatMinorAmount(line.lineTotalDocMinor),
+                    ],
+                ],
+                footerPairs: [
+                  (
+                    'الإجمالي',
+                    '${formatMinorAmount(invoice.totalDocMinor)} '
+                        '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
+                  ),
+                  (
+                    'المكافئ الأساسي',
+                    formatMinorAmount(invoice.totalBaseMinor),
+                  ),
+                ],
+                format: resolvePageFormat(docKind: 'invoice'),
+              );
+              if (!context.mounted) return;
+              await printPdfBytes(context, bytes);
+            },
+          ),
+        ],
+      ),
       body: FutureBuilder<InvoiceDocument?>(
         future: db.invoiceById(invoiceId),
         builder: (context, snapshot) {

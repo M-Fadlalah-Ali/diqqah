@@ -139,6 +139,13 @@ class Roles extends Table {
 
   TextColumn get name => text().unique()();
 
+  /// صلاحيات الشاشات (F-080، دفعة إغلاق النواة س37): صيغة مخزنة واحدة
+  /// من المجال (permissions.dart) — النجمة «*» بمعنى كل الوحدات أو
+  /// مفاتيح مفصولة بفواصل. الافتراضي «*» حتى يبقى الدور القديم (مدير)
+  /// كاملاً بعد الترحيلة v10 قبل أي تعديل يدوي.
+  TextColumn get permissions =>
+      text().withDefault(const Constant('*'))();
+
   TextColumn get uuid => text()();
 
   IntColumn get createdAt =>
@@ -617,7 +624,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -632,6 +639,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
           await _seedVoucherBaseline();
+          await _seedDefaultRoles();
         },
         onUpgrade: (m, from, to) async {
           // 1→2: جداول التهيئة جديدة خالصة — createAll يبني الناقص بـ
@@ -795,6 +803,26 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             if (version == 9) {
               await _createClosingTriggers();
             }
+            // 9→10 (ومن إصدار أدنى مباشرة): دفعة إغلاق النواة (س37) —
+            // صلاحيات الشاشات الكاملة (F-080/D-100 معروض): عمود واحد
+            // جديد على roles بـADD COLUMN بحرس pragma (درس v3 المجرّب:
+            // الترقيات من إصدار أدنى تكون قد بنته createAll بشكله الحالي
+            // فالإضافة العمياء تصطدم بـduplicate column) — ثم بذر الأدوار
+            // النمطية الأربعة بأذوناتها الافتراضية (بذر فاحص الفراغ فآمن
+            // التكرار)، والأدوار القائمة تبقى بأذوناتها («*» افتراضياً).
+            if (version == 10) {
+              final roleCols = (await customSelect(
+                      "SELECT name FROM pragma_table_info('roles')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!roleCols.contains('permissions')) {
+                await customStatement(
+                    "ALTER TABLE roles ADD COLUMN permissions TEXT "
+                    "NOT NULL DEFAULT '*'");
+              }
+              await _seedDefaultRoles();
+            }
           }
         },
         // F-156: التطبيق الأقدم يرفض قاعدة أحدث مخططاً برسالة «حدّث التطبيق»
@@ -861,6 +889,133 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         uuid: const Uuid().v4(),
         createdAt: Value(now),
         updatedAt: Value(now),
+      ),
+    );
+  }
+
+  /// بذر الأدوار النمطية الأربعة بأذوناتها الافتراضية (F-080، D-100
+  /// معروض) — فاحص الفراغ بالاسم فآمن التكرار أي كان مسار الوصول
+  /// (onCreate أو ترحيلة 9→10)، والأدوار القائمة لا تُمسّ أبداً.
+  Future<void> _seedDefaultRoles() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final entry in defaultRolesPermissions.entries) {
+      final existing = await (select(roles)
+            ..where((t) => t.name.equals(entry.key)))
+          .getSingleOrNull();
+      if (existing != null) continue;
+      await into(roles).insert(
+        RolesCompanion.insert(
+          name: entry.key,
+          permissions: Value(entry.value),
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+    }
+  }
+
+  /// المستخدم الحالي (F-080/D-100 معروض) — يُخزَّن في app_meta ويبقى
+  /// بين الجلسات، والواجهة تفاضله صاحب الرئيسية (فرض الصلاحيات عليه).
+  /// الفراغ مشروع: قبل أول تبديل تقع الواجهة على أول مستخدم نشط.
+  static const String currentUserMetaKey = 'current_user_id';
+
+  Future<void> setCurrentUserId(int? userId) async {
+    if (userId == null) {
+      await (delete(appMeta)..where((t) => t.key.equals(currentUserMetaKey)))
+          .go();
+      return;
+    }
+    final existing = await (select(appMeta)
+          ..where((t) => t.key.equals(currentUserMetaKey)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await (update(appMeta)..where((t) => t.key.equals(currentUserMetaKey)))
+          .write(AppMetaCompanion(value: Value('$userId')));
+    } else {
+      await into(appMeta).insert(AppMetaCompanion.insert(
+        key: currentUserMetaKey,
+        value: '$userId',
+      ));
+    }
+  }
+
+  Future<int?> currentUserId() async {
+    final row = await (select(appMeta)
+          ..where((t) => t.key.equals(currentUserMetaKey)))
+        .getSingleOrNull();
+    return row == null ? null : int.tryParse(row.value);
+  }
+
+  /// المستخدم صاحب الجلسة الحالية — الحالي المخزن إن كان نشطاً، وإلا
+  /// أول مستخدم نشط، وإلا أي مستخدم (قاعدة فيها معطلون حصراً)، وإلا
+  /// null (قاعدة قبل التهيئة — لا يصلها الواجهة أصلاً ببوابة F-014).
+  Future<AppUser?> currentUser() async {
+    final users = await select(appUsers).get();
+    if (users.isEmpty) return null;
+    final storedId = await currentUserId();
+    for (final u in users) {
+      if (u.id == storedId && u.isActive) return u;
+    }
+    for (final u in users) {
+      if (u.isActive) return u;
+    }
+    return users.first;
+  }
+
+  /// دور المستخدم الحالي وصلاحياته — والواجهة تفاضل بها الرئيسية.
+  Future<Role?> roleOf(AppUser user) =>
+      (select(roles)..where((t) => t.id.equals(user.roleId)))
+          .getSingleOrNull();
+
+  /// تحقق كلمة مرور مستخدم قائم (F-080/D-100 معروض: تبديل المستخدم
+  /// بكلمة المرور — لا جلسة بلا تحقق). يعيد صف المستخدم عند النجاح.
+  Future<AppUser?> verifyUserPassword(int userId, String password) async {
+    final user = await (select(appUsers)
+          ..where((t) => t.id.equals(userId)))
+        .getSingleOrNull();
+    if (user == null || !user.isActive) return null;
+    if (!PasswordHasher.verifyStored(user.passwordHash, password)) {
+      return null;
+    }
+    return user;
+  }
+
+  /// إنشاء دور مخصص بأذوناته (F-080: «إنشاء أدوار مخصصة») — الاسم
+  /// الفريد قيد قاعدة البيانات ذاته (UNIQUE) والتكرار يُرفض استثناءً
+  /// تلتقطه الواجهة وتعرضه برسالته.
+  Future<int> createRole(
+      {required String name, required String permissions}) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return into(roles).insert(
+      RolesCompanion.insert(
+        name: name,
+        permissions: Value(permissions),
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
+  /// تحديث أذونات دور قائم — الاسم لا يُمسّ (هوية الدور، والسندات
+  /// المرجعية به تظل صحيحة).
+  Future<void> updateRolePermissions(
+      int roleId, String permissions) async {
+    await (update(roles)..where((t) => t.id.equals(roleId))).write(
+      RolesCompanion(
+        permissions: Value(permissions),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// تعيين دور لمستخدم — تعديل الدور وحده، والحالة والبقية لا تُمسّ.
+  Future<void> updateUserRole(int userId, int roleId) async {
+    await (update(appUsers)..where((t) => t.id.equals(userId))).write(
+      AppUsersCompanion(
+        roleId: Value(roleId),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
   }
@@ -1598,6 +1753,180 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// بدالة المجال النقية ذاتها.
   Future<(int, int)> trialBalanceTotalsOf() async {
     return trialBalanceTotals(await postedLedgerLines());
+  }
+
+  /// فحص الثوابت الآلي الكامل (F-006، 07 §1.10، D-067) — دفعة إغلاق
+  /// النواة (س37). سبعة فحوص قراءةً خالصة لا تكتب شيئاً ولا ترمي
+  /// استثناءً: الخرق يُجمع في التقرير ولا يُعالج هنا (الخرق يعالجه
+  /// المالك بيد المحاسب، والفحص صاحب الإيقاف هو مدققات المحرك
+  /// ومُشغِّلات الحواجز أثناء الكتابة). يُستدعى من بطاقة الإعدادات
+  /// بيد المالك ومن الرئيسية افتتاحياً صامتاً (D-099 معروض).
+  Future<IntegrityReport> integrityCheckReport() async {
+    final violations = <IntegrityViolation>[];
+
+    // T1 — توازن القيود المرحّلة: مجموع المدين يساوي الدائن في كل
+    // قيد مرحّل (المُشغِّل يحرس الانتقال والفحص يكشف أي طعن خارجي).
+    final unbalanced = await customSelect(
+      'SELECT m.number AS number, '
+      'SUM(l.debit_minor) AS d, SUM(l.credit_minor) AS c '
+      'FROM moves m JOIN move_lines l ON l.move_id = m.id '
+      "WHERE m.state = 'posted' AND m.is_deleted = 0 "
+      'GROUP BY m.id HAVING d <> c',
+    ).get();
+    for (final r in unbalanced) {
+      violations.add(IntegrityViolation(
+        checkCode: 'T1',
+        detail: 'القيد ${r.data['number']} — مدين ${r.data['d']} '
+            'لا يساوي دائن ${r.data['c']}',
+      ));
+    }
+
+    // T2 — عدم سالبية المخزون: كمية أو قيمة سالبة في أرصدة المخزون.
+    final negativeStock = await customSelect(
+      'SELECT item_id, warehouse_id, qty_base, total_value_minor '
+      'FROM stock_balances WHERE qty_base < 0 OR total_value_minor < 0',
+    ).get();
+    for (final r in negativeStock) {
+      violations.add(IntegrityViolation(
+        checkCode: 'T2',
+        detail: 'صنف #${r.data['item_id']} بمستودع '
+            '#${r.data['warehouse_id']} — كمية ${r.data['qty_base']} '
+            'وقيمة ${r.data['total_value_minor']}',
+      ));
+    }
+
+    // T3 — لا حركة صندوق يتيمة: كل حركة صندوق بمستند مرحّل (فاتورة أو
+    // سند أو تحويل أو تسوية) — الحركة اليتيمة بلا مستند مرحّل خرق N-009.
+    final orphanMoves = await customSelect(
+      'SELECT COUNT(*) AS n FROM cash_movements cm '
+      'WHERE cm.is_deleted = 0 AND NOT ('
+      "  (cm.ref_doc_type = 'invoice' AND EXISTS ("
+      '    SELECT 1 FROM invoices i WHERE i.id = cm.ref_doc_id '
+      "    AND i.state IN ('posted', 'paid', 'partially_paid'))) OR "
+      "  (cm.ref_doc_type = 'voucher' AND EXISTS ("
+      '    SELECT 1 FROM vouchers v WHERE v.id = cm.ref_doc_id '
+      "    AND v.state = 'posted')) OR "
+      "  (cm.ref_doc_type = 'box_transfer' AND EXISTS ("
+      '    SELECT 1 FROM box_transfers b WHERE b.id = cm.ref_doc_id '
+      "    AND b.state = 'posted')) OR "
+      "  (cm.ref_doc_type = 'cash_adjustment' AND EXISTS ("
+      '    SELECT 1 FROM cash_adjustments a WHERE a.id = cm.ref_doc_id '
+      "    AND a.state = 'posted')))",
+    ).get();
+    final orphanCount = orphanMoves.first.data['n'] as int;
+    if (orphanCount > 0) {
+      violations.add(IntegrityViolation(
+        checkCode: 'T3',
+        detail: '$orphanCount حركة صندوق بلا مستند مرحّل',
+      ));
+    }
+
+    // T4 — كل فاتورة مرحّلة لها قيد مرتبط (ref_doc_type/ref_doc_id).
+    final unlinkedInvoices = await customSelect(
+      'SELECT i.number AS number FROM invoices i '
+      "WHERE i.state IN ('posted', 'paid', 'partially_paid') "
+      'AND NOT EXISTS ('
+      '  SELECT 1 FROM moves m WHERE m.ref_doc_type = \'invoice\' '
+      '  AND m.ref_doc_id = i.id AND m.state = \'posted\')',
+    ).get();
+    for (final r in unlinkedInvoices) {
+      violations.add(IntegrityViolation(
+        checkCode: 'T4',
+        detail: 'الفاتورة ${r.data['number']} مرحّلة بلا قيد مرتبط',
+      ));
+    }
+
+    // M1 — مطابقة D-067 الأولى: رصيد كل حساب صندوق (111x) في الدفتر =
+    // رصيد الصندوق المحسوب (الافتتاحي + الداخل − الخارج).
+    final boxes = await customSelect(
+      'SELECT b.id AS box_id, b.name AS name, b.account_id AS account_id '
+      'FROM cash_boxes b WHERE b.is_deleted = 0 ORDER BY b.id',
+    ).get();
+    for (final r in boxes) {
+      final boxId = r.data['box_id'] as int;
+      final ledger = await accountBalanceOf(r.data['account_id'] as int);
+      final box = await _cashBoxBalanceTx(boxId);
+      if (ledger != box) {
+        violations.add(IntegrityViolation(
+          checkCode: 'M1',
+          detail: 'الصندوق «${r.data['name']}» — الدفتر $ledger '
+              'لا يساوي الصندوق $box',
+        ));
+      }
+    }
+
+    // M2 — مطابقة D-067 الثانية: رصيد حساب المخزون 113 = قيمة المخزون
+    // المحسوبة من stock_balances (total_value_minor).
+    final stock113 = await customSelect(
+      "SELECT id FROM accounts WHERE code = '113'",
+    ).get();
+    if (stock113.isNotEmpty) {
+      final ledger = await accountBalanceOf(stock113.first.data['id'] as int);
+      final inventoryRow = await customSelect(
+        'SELECT COALESCE(SUM(total_value_minor), 0) AS v FROM stock_balances',
+      ).get();
+      final inventory = inventoryRow.first.data['v'] as int;
+      if (ledger != inventory) {
+        violations.add(IntegrityViolation(
+          checkCode: 'M2',
+          detail: 'حساب 113 في الدفتر $ledger لا يساوي قيمة المخزون $inventory',
+        ));
+      }
+    }
+
+    // M3 — مطابقة D-067 الثالثة: رصيدا حسابَي السيطرة 112/211 في
+    // الدفتر = مجموع أرصدة الأطراف عليهما — وبحث الحوامل اليتيمة:
+    // سطر ذمة بلا طرف أو بطرف غائب ينكسر به التجميع فخرق قائم.
+    final orphanPartyLines = await customSelect(
+      'SELECT COUNT(*) AS n FROM move_lines ml '
+      'JOIN moves m ON m.id = ml.move_id '
+      'JOIN accounts a ON a.id = ml.account_id '
+      "WHERE m.state = 'posted' AND a.code IN ('112', '211') "
+      'AND (ml.party_id IS NULL OR NOT EXISTS ('
+      '  SELECT 1 FROM parties p WHERE p.id = ml.party_id))',
+    ).get();
+    final orphanPartyCount = orphanPartyLines.first.data['n'] as int;
+    if (orphanPartyCount > 0) {
+      violations.add(IntegrityViolation(
+        checkCode: 'M3',
+        detail: '$orphanPartyCount سطر ذمة بلا طرف صحيح على 112/211',
+      ));
+    }
+    final controlCodes = <String>['112', '211'];
+    for (final code in controlCodes) {
+      // المجموع الخام (مدين − دائن) على الجهتين — موحّد الصيغة حتى لا
+      // يرفع حساب 211 (دائن الطبيعة) خرقاً كاذباً بالاتجاه الطبيعي.
+      final ledgerRow = await customSelect(
+        'SELECT COALESCE(SUM(l.debit_minor) - SUM(l.credit_minor), 0) AS s '
+        'FROM move_lines l '
+        'JOIN moves m ON m.id = l.move_id '
+        'JOIN accounts a ON a.id = l.account_id '
+        "WHERE m.state = 'posted' AND a.code = ?",
+        variables: [Variable.withString(code)],
+      ).get();
+      final ledger = ledgerRow.first.data['s'] as int;
+      final partySum = await customSelect(
+        'SELECT COALESCE(SUM(net), 0) AS s FROM ('
+        'SELECT SUM(ml.debit_minor) - SUM(ml.credit_minor) AS net '
+        'FROM move_lines ml '
+        'JOIN moves m ON m.id = ml.move_id '
+        'JOIN accounts a ON a.id = ml.account_id '
+        "WHERE m.state = 'posted' AND a.code = ? "
+        'AND ml.party_id IS NOT NULL '
+        'GROUP BY ml.party_id)',
+        variables: [Variable.withString(code)],
+      ).get();
+      final parties = partySum.first.data['s'] as int;
+      if (ledger != parties) {
+        violations.add(IntegrityViolation(
+          checkCode: 'M3',
+          detail: 'حساب $code في الدفتر $ledger لا يساوي مجموع الأطراف '
+              '$parties',
+        ));
+      }
+    }
+
+    return IntegrityReport(violations);
   }
 
 /// إنشاء جداول الفواتير الثمانية (05 §3.3/§4/§5 + أعمدة الاصطلاح D-055)

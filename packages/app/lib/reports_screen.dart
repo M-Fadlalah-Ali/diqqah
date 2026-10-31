@@ -4,6 +4,7 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'periods_screen.dart';
+import 'print_service.dart';
 
 /// تنسيق عرض المبلغ بوحداته الصغرى كما تُخزن — فواصل آلاف للقراءة فقط
 /// (عرضاً حصراً: أرقام السيناريوهات المعروفة تُرى كما هي لا محوَّلة —
@@ -105,6 +106,57 @@ Widget _reportEmpty(String message) => Center(
       ),
     );
 
+/// زر الطباعة الموحد للتقارير (D-016، دفعة إغلاق النواة س37) — توليد
+/// PDF بالقياس الافتراضي للتقارير (A4 عرضي، D-101 معروض) ومشاركته
+/// بنافذة النظام، والفشل رسالة لا صمت.
+Future<void> _printReportDoc(
+  BuildContext context, {
+  required String title,
+  required List<String> columns,
+  required List<List<String>> rows,
+  List<(String, String)> footer = const [],
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final bytes = await buildDocumentPdf(
+      title: title,
+      headerPairs: const [],
+      columns: columns,
+      rows: rows,
+      footerPairs: footer,
+      format: resolvePageFormat(docKind: 'report'),
+    );
+    if (!context.mounted) return;
+    await sharePdfBytes(bytes, '$title.pdf');
+  } catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+    );
+  }
+}
+
+/// شريط زر الطباعة فوق قائمة التقرير — ظاهر دائماً لا يختفي بالتمرير.
+class _ReportActionsBar extends StatelessWidget {
+  final VoidCallback onPrint;
+
+  const _ReportActionsBar({required this.onPrint});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            OutlinedButton.icon(
+              onPressed: onPrint,
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('طباعة / PDF'),
+            ),
+          ],
+        ),
+      );
+}
+
 /// ميزان المراجعة (س-71/س-80): المجمعان يُعرضان كما هما فلا يُطمَر خلل
 /// ولو كان مستحيلاً — والرصيد باتجاهه الطبيعي والعكسي يظهر كما هو.
 class _TrialBalanceView extends StatelessWidget {
@@ -151,18 +203,56 @@ class _TrialBalanceView extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: ListView(
+                child: Column(
                   children: [
-                    for (final row in report.rows)
-                      ListTile(
-                        title:
-                            Text('${row.account.code} ${row.account.name}'),
-                        subtitle: Text(
-                            'مدين ${formatMinorAmount(row.debitSumMinor)}'
-                            ' · دائن ${formatMinorAmount(row.creditSumMinor)}'),
-                        trailing: Text(
-                            'الرصيد ${formatMinorAmount(row.balanceMinor)}'),
+                    _ReportActionsBar(
+                      onPrint: () => _printReportDoc(
+                        context,
+                        title: 'ميزان المراجعة',
+                        columns: const ['الحساب', 'مدين', 'دائن', 'الرصيد'],
+                        rows: [
+                          for (final row in report.rows)
+                            [
+                              '${row.account.code} ${row.account.name}',
+                              formatMinorAmount(row.debitSumMinor),
+                              formatMinorAmount(row.creditSumMinor),
+                              formatMinorAmount(row.balanceMinor),
+                            ],
+                        ],
+                        footer: [
+                          (
+                            'مجموع المدين',
+                            formatMinorAmount(report.totalDebitMinor),
+                          ),
+                          (
+                            'مجموع الدائن',
+                            formatMinorAmount(report.totalCreditMinor),
+                          ),
+                          (
+                            'الحالة',
+                            report.isBalanced
+                                ? 'الميزان متوازن ✓ (F-068)'
+                                : 'الميزان غير متوازن — راجع فوراً!',
+                          ),
+                        ],
                       ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (final row in report.rows)
+                            ListTile(
+                              title: Text(
+                                  '${row.account.code} ${row.account.name}'),
+                              subtitle: Text(
+                                  'مدين ${formatMinorAmount(row.debitSumMinor)}'
+                                  ' · دائن ${formatMinorAmount(row.creditSumMinor)}'),
+                              trailing: Text(
+                                  'الرصيد ${formatMinorAmount(row.balanceMinor)}'),
+                            ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -193,16 +283,40 @@ class _CashBoxesView extends StatelessWidget {
           if (rows.isEmpty) {
             return _reportEmpty('لا صناديق بعد');
           }
-          return ListView(
+          return Column(
             children: [
-              for (final box in rows)
-                ListTile(
-                  title: Text(box.name),
-                  subtitle: Text('حساب ${box.accountCode}'
-                      ' · ${box.currencyCode}'
-                      '${box.isActive ? '' : ' — معطل'}'),
-                  trailing: Text(formatMinorAmount(box.balanceBaseMinor)),
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(
+                  context,
+                  title: 'تقرير الصناديق',
+                  columns: const ['الصندوق', 'الحساب', 'العملة', 'الحالة', 'الرصيد'],
+                  rows: [
+                    for (final box in rows)
+                      [
+                        box.name,
+                        box.accountCode,
+                        box.currencyCode,
+                        box.isActive ? 'نشط' : 'معطل',
+                        formatMinorAmount(box.balanceBaseMinor),
+                      ],
+                  ],
                 ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final box in rows)
+                      ListTile(
+                        title: Text(box.name),
+                        subtitle: Text('حساب ${box.accountCode}'
+                            ' · ${box.currencyCode}'
+                            '${box.isActive ? '' : ' — معطل'}'),
+                        trailing:
+                            Text(formatMinorAmount(box.balanceBaseMinor)),
+                      ),
+                  ],
+                ),
+              ),
             ],
           );
         },
@@ -230,16 +344,40 @@ class _ReceivablesPayablesView extends StatelessWidget {
           if (rows.isEmpty) {
             return _reportEmpty('لا ذمم — كل الحسابات مصفاة');
           }
-          return ListView(
+          return Column(
             children: [
-              for (final row in rows)
-                ListTile(
-                  title: Text(row.partyName),
-                  subtitle: Text(row.direction == PartyBalanceDirection.theyOweUs
-                      ? 'هم يدينون لنا'
-                      : 'نحن مدينون لهم'),
-                  trailing: Text(formatMinorAmount(row.amountMinor)),
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(
+                  context,
+                  title: 'الذمم المدينة والدائنة',
+                  columns: const ['الطرف', 'الاتجاه', 'المبلغ'],
+                  rows: [
+                    for (final row in rows)
+                      [
+                        row.partyName,
+                        row.direction == PartyBalanceDirection.theyOweUs
+                            ? 'هم يدينون لنا'
+                            : 'نحن مدينون لهم',
+                        formatMinorAmount(row.amountMinor),
+                      ],
+                  ],
                 ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final row in rows)
+                      ListTile(
+                        title: Text(row.partyName),
+                        subtitle: Text(row.direction ==
+                                PartyBalanceDirection.theyOweUs
+                            ? 'هم يدينون لنا'
+                            : 'نحن مدينون لهم'),
+                        trailing: Text(formatMinorAmount(row.amountMinor)),
+                      ),
+                  ],
+                ),
+              ),
             ],
           );
         },
@@ -267,17 +405,42 @@ class _InventoryView extends StatelessWidget {
           if (rows.isEmpty) {
             return _reportEmpty('لا مخزون بعد');
           }
-          return ListView(
+          return Column(
             children: [
-              for (final row in rows)
-                ListTile(
-                  title: Text('${row.sku} ${row.name}'),
-                  subtitle: Text(
-                      'المستودع: ${row.warehouseName ?? 'غير محدد'}'
-                      ' · المتوسط: ${row.avgCostBaseMinor == null ? '—' : formatMinorAmount(row.avgCostBaseMinor!)}'),
-                  trailing: Text(
-                      '${row.qtyBase} × ${formatMinorAmount(row.totalValueMinor)}'),
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(
+                  context,
+                  title: 'تقرير المخزون',
+                  columns: const ['الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'],
+                  rows: [
+                    for (final row in rows)
+                      [
+                        '${row.sku} ${row.name}',
+                        row.warehouseName ?? 'غير محدد',
+                        '${row.qtyBase}',
+                        formatMinorAmount(row.totalValueMinor),
+                        row.avgCostBaseMinor == null
+                            ? '—'
+                            : formatMinorAmount(row.avgCostBaseMinor!),
+                      ],
+                  ],
                 ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final row in rows)
+                      ListTile(
+                        title: Text('${row.sku} ${row.name}'),
+                        subtitle: Text(
+                            'المستودع: ${row.warehouseName ?? 'غير محدد'}'
+                            ' · المتوسط: ${row.avgCostBaseMinor == null ? '—' : formatMinorAmount(row.avgCostBaseMinor!)}'),
+                        trailing: Text(
+                            '${row.qtyBase} × ${formatMinorAmount(row.totalValueMinor)}'),
+                      ),
+                  ],
+                ),
+              ),
             ],
           );
         },
@@ -402,6 +565,18 @@ class _MovementViewState extends State<_MovementView> {
                 ),
                 const SizedBox(height: 8),
                 FilledButton(onPressed: _run, child: const Text('عرض')),
+                if (_rows != null)
+                  _ReportActionsBar(
+                    onPrint: () => _printReportDoc(
+                      context,
+                      title: title,
+                      columns: const ['الصنف', 'التفصيل', 'الصافي'],
+                      rows: [
+                        for (final row in _rows!)
+                          [row.title, row.subtitle, row.trailing],
+                      ],
+                    ),
+                  ),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),

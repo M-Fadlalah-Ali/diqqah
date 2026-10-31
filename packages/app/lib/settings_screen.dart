@@ -97,11 +97,16 @@ class SettingsScreen extends StatefulWidget {
   /// بعد استعادة ناجحة: البوابة تعيد بناء القاعدة والشاشات من الملف الجديد.
   final VoidCallback onRestored;
 
+  /// بعد تبديل المستخدم الحالي (D-100): الرئيسية تعاد بناؤها بفرض
+  /// صلاحيات الدور الجديد. اختياري — الاختبارات المباشرة لا تمرره.
+  final VoidCallback? onSessionChanged;
+
   const SettingsScreen({
     super.key,
     required this.db,
     required this.dbPath,
     required this.onRestored,
+    this.onSessionChanged,
   });
 
   @override
@@ -114,16 +119,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// D-060: للنسخ القديمة v1 حصراً — الجديدة تُفتح بمفتاح البرنامج بلا كلمة.
   final _restorePassword = TextEditingController();
 
+  /// بطاقة المستخدم الحالي (D-100): اختيار المستخدم وكلمة مروره.
+  final _switchPassword = TextEditingController();
+
   bool _busy = false;
 
   /// D-050: التشفير الافتراضي للنسخ الاحتياطية من م1 — الإلغاء قرار واعٍ.
   bool _encryptBackup = true;
 
+  /// فحص الثوابت (F-006/D-099): آخر نتيجة وحالة التنفيذ.
+  IntegrityReport? _integrityReport;
+  bool _integrityBusy = false;
+
+  /// المستخدمون النشطون واختيار التبديل — تُحمّل عند الفتح (بوابة
+  /// الدرس الموثق: القوائم المنسدلة قيمها الابتدائية بعد التحميل).
+  List<AppUser> _activeUsers = const [];
+  int? _selectedUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    final users = await widget.db.select(widget.db.appUsers).get();
+    if (!mounted) return;
+    final active = users.where((u) => u.isActive).toList();
+    setState(() {
+      _activeUsers = active;
+      _selectedUserId ??= active.isEmpty ? null : active.first.id;
+    });
+  }
+
   @override
   void dispose() {
     _restorePath.dispose();
     _restorePassword.dispose();
+    _switchPassword.dispose();
     super.dispose();
+  }
+
+  /// فحص الثوابت الكامل بيد المالك (F-006/D-099) — سبعة فحوص قراءة
+  /// خالصة والنتيجة تُعرض داخل البطاقة نفسها لا حواراً يُفقد.
+  Future<void> _runIntegrityCheck() async {
+    setState(() => _integrityBusy = true);
+    try {
+      final report = await widget.db.integrityCheckReport();
+      if (!mounted) return;
+      setState(() => _integrityReport = report);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تنفيذ الفحص — $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _integrityBusy = false);
+    }
+  }
+
+  /// تبديل المستخدم الحالي بكلمة المرور (D-100) — لا جلسة بلا تحقق،
+  /// وبعد النجاح تُخزَّن الجلسة وتُعاد الرئيسية بفرض صلاحيات الدور الجديد.
+  Future<void> _switchUser() async {
+    final userId = _selectedUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختر المستخدم أولاً')),
+      );
+      return;
+    }
+    final user = await widget.db.verifyUserPassword(
+      userId,
+      _switchPassword.text,
+    );
+    if (!mounted) return;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('كلمة المرور غير صحيحة أو المستخدم معطل')),
+      );
+      return;
+    }
+    await widget.db.setCurrentUserId(user.id);
+    _switchPassword.clear();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('تم التبديل إلى: ${user.name}')),
+    );
+    widget.onSessionChanged?.call();
   }
 
   String _stamp() {
@@ -457,6 +540,104 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onPressed: _busy ? null : _restore,
                     child: const Text('استعادة…'),
                   ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // فحص الثوابت بيد المالك (F-006، 07 §1.10، D-099 معروض) —
+          // الفحص الكامل بعد الفحص الافتتاحي الصامت بالرئيسية.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'فحص الثوابت (F-006)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'الفحوص الأربعة ومطابقات الدفتر الثلاثة (D-067): '
+                    'توازن القيود، وسلامة المخزون، ولا حركة يتيمة، وارتباط '
+                    'الفواتير بقيودها، ومطابقة الصناديق والمخزون والذمم بالدفتر.',
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: _integrityBusy ? null : _runIntegrityCheck,
+                    child: Text(_integrityBusy ? 'جارٍ الفحص…' : 'فحص الآن'),
+                  ),
+                  if (_integrityReport != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _integrityReport!.summary,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _integrityReport!.isClean
+                            ? Colors.green.shade700
+                            : Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    for (final v in _integrityReport!.violations)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('• $v'),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // المستخدم الحالي (F-080/D-100 معروض) — تبديل الجلسة بكلمة
+          // المرور، والرئيسية تُعاد بفرض صلاحيات الدور الجديد.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'المستخدم الحالي (F-080)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'تبديل الجلسة بكلمة المرور — والشاشة الهيكلية تُعرض '
+                    'بصلاحيات دور المستخدم الجديد.',
+                  ),
+                  const SizedBox(height: 12),
+                  if (_activeUsers.isEmpty)
+                    const Text('لا مستخدمين نشطين')
+                  else ...[
+                    DropdownButton<int>(
+                      isExpanded: true,
+                      value: _selectedUserId,
+                      items: [
+                        for (final u in _activeUsers)
+                          DropdownMenuItem(
+                            value: u.id,
+                            child: Text(u.name),
+                          ),
+                      ],
+                      onChanged: (id) => setState(() => _selectedUserId = id),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _switchPassword,
+                      obscureText: true,
+                      decoration: const InputDecoration(
+                        labelText: 'كلمة مرور المستخدم المختار',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.tonal(
+                      onPressed: _busy ? null : _switchUser,
+                      child: const Text('تبديل المستخدم'),
+                    ),
+                  ],
                 ],
               ),
             ),
