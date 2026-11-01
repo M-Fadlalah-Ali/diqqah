@@ -50,6 +50,29 @@ void main() {
     }
   }
 
+  /// درس widget_test (F-012): سلسلة IO حقيقية داخل اختبار الواجهة
+  /// تحتاج escape لزمن واقعي — استطلاع بـrunAsync وضخ حتى يتحقق الشرط
+  /// (مهلة 60×50ms) — بلا pumpAndSettle لا مهلة كاملة.
+  Future<bool> _waitUntil(
+    WidgetTester tester,
+    Future<bool> Function() condition,
+  ) async {
+    for (var i = 0; i < 60; i++) {
+      if (await condition()) return true;
+      await tester.runAsync(() =>
+          Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+    return condition();
+  }
+
+  /// ضخّات محدودة موحدة مكان pumpAndSettle (درس الجولات المعلقة).
+  Future<void> _pump(WidgetTester tester) async {
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+
   setUp(() {
     // مفاتيح الطباعة (نمط D-104) بمخزن وهمي — لا قنوات في الاختبارات،
     // والافتراضي معطل في كل المستندات (D-123) فلا قيم مسبقة.
@@ -110,7 +133,7 @@ void main() {
         ),
       ),
     ));
-    await tester.pumpAndSettle();
+    await _pump(tester);
     expect(find.text('ز'), findsNothing);
   });
 
@@ -155,12 +178,18 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(0), 'P-1');
     await tester.enterText(find.byType(TextFormField).at(1), 'صنف مصوّر');
     await tester.tap(find.text('اختر الوحدة'));
-    await tester.pumpAndSettle();
+    await _pump(tester);
     await tester.tap(find.text('قطعة').last);
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    // استطلاع قاعدة البيانات حتى يكتمل الحفظ بملفاته (IO حقيقي —
+    // بلا pumpAndSettle الذي يحرق مهلته على أي إطار مجدول)
+    final saved = await _waitUntil(tester, () async {
+      final rows = await db.select(db.items).get();
+      return rows.any((r) => r.sku == 'P-1' && r.imageFile != null);
+    });
+    expect(saved, isTrue, reason: 'الحفظ بالصورة اكتمل خلال مهلة الاستطلاع');
 
     final row = await itemBySku(db, 'P-1');
     expect(row.imageFile, isNotNull);
@@ -211,11 +240,17 @@ void main() {
     await tester.tap(find.text('حذف الصورة'));
     await tester.pump();
     await tester.tap(find.text('حفظ'));
-    await tester.pumpAndSettle();
+    // استطلاع حتى يكتمل الحفظ والمسح (نمط _waitUntil الموثق أعلاه)
+    final cleared = await _waitUntil(tester, () async {
+      final r = await itemBySku(db, 'P-2');
+      return r.imageFile == null && r.imageThumb == null;
+    });
+    expect(cleared, isTrue,
+        reason: 'س-124: الحذف بمطابقة اكتمل خلال مهلة الاستطلاع');
 
-    final cleared = await itemBySku(db, 'P-2');
-    expect(cleared.imageFile, isNull);
-    expect(cleared.imageThumb, isNull);
+    final row = await itemBySku(db, 'P-2');
+    expect(row.imageFile, isNull);
+    expect(row.imageThumb, isNull);
     expect(await File(p.join(root.path, paths.$1)).exists(), isFalse,
         reason: 'س-124: لا ملفات يتيمة بعد الحذف');
     expect(await File(p.join(root.path, paths.$2)).exists(), isFalse);
@@ -244,7 +279,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     await tester.tap(find.text('الصنف').first);
-    await tester.pumpAndSettle();
+    await _pump(tester);
     await tester.tap(find.textContaining('Z-100 زيت محلي').last);
     await tester.pump(const Duration(milliseconds: 100));
 
