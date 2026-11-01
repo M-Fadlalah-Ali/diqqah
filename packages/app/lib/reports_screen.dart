@@ -72,20 +72,20 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('تقرير المخزون'),
             subtitle: const Text(
                 'الكمية والقيمة الدفترية لكل صنف — والمتوسط عرضاً حصراً'),
-            onTap: () => _open(context, _InventoryView(db: db)),
+            onTap: () => _open(context, InventoryView(db: db)),
           ),
           ListTile(
             leading: const Icon(Icons.trending_up),
             title: const Text('مبيعات وحركة الأصناف'),
             subtitle: const Text('بيع ومردود بيع بمدى تاريخ — والصافي مشتق لا مخزن'),
-            onTap: () => _open(context, _MovementView(db: db, sales: true)),
+            onTap: () => _open(context, MovementView(db: db, sales: true)),
           ),
           ListTile(
             leading: const Icon(Icons.shopping_cart_outlined),
             title: const Text('تقرير المشتريات'),
             subtitle: const Text(
                 'المستقل — شراء ومردود شراء بمدى تاريخ (وعد D-089، س-84)'),
-            onTap: () => _open(context, _MovementView(db: db, sales: false)),
+            onTap: () => _open(context, MovementView(db: db, sales: false)),
           ),
           ListTile(
             leading: const Icon(Icons.lock_clock_outlined),
@@ -279,9 +279,12 @@ class _TrialBalanceView extends StatelessWidget {
                                   'الرصيد ${formatMinorAmount(row.balanceMinor)}'),
                               // س-146/D-137: الحساب اسم يُقرأ فيصير مدخلاً
                               // — النقر يفتح كشف حسابه.
-                              onTap: () => _open(context,
-                                  AccountStatementScreen(
-                                      db: db, accountId: row.account.id)),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => AccountStatementScreen(
+                                      db: db, accountId: row.account.id),
+                                ),
+                              ),
                             ),
                         ],
                       ),

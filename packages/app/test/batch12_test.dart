@@ -126,6 +126,6 @@ void main() {
     expect(bytes.lengthInBytes, greaterThan(1000),
         reason: 'القسيمة حقيقية بعمود المستلم وسطر الخلاصة');
     // والصور بلا مفتاح — لا قراءة ملفات (D-123) والنائب مكانه
-    expect(printImagesForKind(InvoiceKind.sale.storageValue), isFalse);
+    expect(printImagesForKind(InvoiceKind.sale), isFalse);
   });
 }
