@@ -354,4 +354,146 @@ void main() {
     await adoptLegacyHesebDatabase(secondPath);
     expect(await File(secondPath).readAsString(), 'الجديدة');
   });
+
+  // ─── دفعة (10) «الصور والباركود» — س-129/س-130، D-124/D-125 ───
+
+  /// مجلد صور بملفين (أصل ومشتق) — نمط المحرك (مسار نسبي تحت images/).
+  Future<Directory> seedImagesDir(String name) async {
+    final dir = Directory(p.join(tempDir.path, name, 'images'));
+    await dir.create(recursive: true);
+    await File(p.join(dir.path, 'item-1.jpg'))
+        .writeAsBytes(List.generate(2048, (i) => i % 256));
+    await File(p.join(dir.path, 'item-1-thumb.jpg'))
+        .writeAsBytes(List.generate(256, (i) => i % 256));
+    return Directory(p.join(tempDir.path, name));
+  }
+
+  test('س-129 (D-124): النسخة الممتدة ملفان — ملف القاعدة كما وُلد وملف '
+      'صور مجاور بنفس المفتاح، والاستعادة تعيد المجلد', () async {
+    final imagesRoot = await seedImagesDir('with_images');
+    final target = p.join(tempDir.path, 'backup-full.diqqah');
+    await backupTo(
+      db,
+      target,
+      imagesDir: imagesRoot,
+      includeImages: true,
+    );
+    // ملفان: القاعدة كما وُلدت (VACUUM INTO — لا انتفاخ بالصور) + الصور.
+    final dbFile = File(target);
+    final imagesFile = File(imagesSiblingPath(target));
+    expect(await dbFile.exists(), isTrue);
+    expect(await imagesFile.exists(), isTrue,
+        reason: 'س-129: ملف ثانٍ للصور مغلّف بنفس المفتاح');
+    // ملف القاعدة لا يحمل الصور: حجمه يقارب قاعدة فارغة لا ميغابايتات.
+    expect(await dbFile.length(), lessThan(1024 * 1024));
+
+    // الاستعادة: تصريح المحتوى أولاً ثم تعيد المجلد كاملاً.
+    final candidate = await prepareRestore(
+      target,
+      appSchemaVersion: db.schemaVersion,
+    );
+    expect(candidate.hasImages, isTrue,
+        reason: 'س-130: النسخة تتضمن صور الأصناف — يُصرَّح قبل التنفيذ');
+    expect(candidate.imagesFiles, hasLength(2));
+    final restoreDir = Directory(p.join(tempDir.path, 'landing'));
+    await restoreDir.create(recursive: true);
+    final restoredImages = Directory(p.join(restoreDir.path, 'images'));
+    await restoredImages.create(recursive: true);
+    await File(p.join(restoredImages.path, 'stale.jpg'))
+        .writeAsString('قديم');
+    // قاعدة حية سليمة تُنشأ هنا (لا بايتات وهمية — SQLite يرفض الفاسد)
+    // فتُستبدل بملف النسخة في applyRestore.
+    final livePath = p.join(restoreDir.path, 'diqqah.db');
+    final restoreDb = DiqqahDatabase(filePath: livePath);
+    await restoreDb.customSelect('SELECT 1').get();
+    final snapshotPath = await applyRestore(
+      db: restoreDb,
+      candidate: candidate,
+      currentDbPath: livePath,
+      imagesDir: restoredImages,
+    );
+    candidate.dispose();
+    await restoreDb.close();
+    // المجلد استُبدل بمحتوى النسخة: لا ملف قديم متروك.
+    expect(await File(p.join(restoredImages.path, 'item-1.jpg')).exists(),
+        isTrue);
+    expect(
+        await File(p.join(restoredImages.path, 'item-1-thumb.jpg')).exists(),
+        isTrue);
+    expect(await File(p.join(restoredImages.path, 'stale.jpg')).exists(),
+        isFalse);
+    // س-130: نسخة ما قبل الاستعادة تلحق الصور ذاته.
+    expect(
+        await File(imagesSiblingPath(snapshotPath)).exists(), isTrue);
+  });
+
+  test('س-130 (D-124): النسخة بلا صور تُصرَّح كذلك وتُفرغ مجلد الصور '
+      '— لا فجوة صامتة والصور القديمة في لقطة الرجوع', () async {
+    final imagesRoot = await seedImagesDir('no_images_case');
+    // النسخة أُنشئت بلا تضمين — الصور خارجها أصلاً.
+    final target = p.join(tempDir.path, 'backup-noimg.diqqah');
+    await backupTo(db, target, includeImages: false);
+    expect(await File(imagesSiblingPath(target)).exists(), isFalse,
+        reason: 'بلا تضمين لا ملف صور أصلاً — لا يتيمة');
+
+    final candidate = await prepareRestore(
+      target,
+      appSchemaVersion: db.schemaVersion,
+    );
+    expect(candidate.hasImages, isFalse,
+        reason: 'س-130: «النسخة بلا صور» — تصريح صادق');
+    final restoreDir = Directory(p.join(tempDir.path, 'landing2'));
+    await restoreDir.create(recursive: true);
+    final livePath = p.join(restoreDir.path, 'diqqah.db');
+    final restoreDb = DiqqahDatabase(filePath: livePath);
+    await restoreDb.customSelect('SELECT 1').get();
+    final restoredImages = Directory(p.join(restoreDir.path, 'images'));
+    await restoredImages.create(recursive: true);
+    await File(p.join(restoredImages.path, 'old.jpg')).writeAsString('قديم');
+    final snapshotPath = await applyRestore(
+      db: restoreDb,
+      candidate: candidate,
+      currentDbPath: livePath,
+      imagesDir: restoredImages,
+    );
+    candidate.dispose();
+    await restoreDb.close();
+    // عالم النسخة المنعكس بصدق: المجلد فارغ لا ملفات قديمة يتيمة،
+    // ولقطة الرجوع تحفظ القديم.
+    expect(restoredImages.listSync(), isEmpty);
+    expect(
+        await File(imagesSiblingPath(snapshotPath)).exists(), isTrue);
+  });
+
+  test('س-130 (D-124): نسخة الصور المستقلة — تُنشأ وتُستعاد منفردة '
+      'بلا مساس بالبيانات', () async {
+    final imagesRoot = await seedImagesDir('standalone');
+    final target = p.join(tempDir.path, 'images-only.diqqah.images');
+    await backupImagesTo(imagesRoot, target);
+    expect(await File(target).exists(), isTrue);
+
+    // استعادة منفردة في مجلد آخر — لا قاعدة ولا مساس بها.
+    final landing = Directory(p.join(tempDir.path, 'images_landing'));
+    final count = await restoreImagesFrom(target, landing);
+    expect(count, 2);
+    expect(
+        await File(p.join(landing.path, 'images', 'item-1.jpg')).exists(),
+        isTrue);
+    // القاعدة لم تُلمس: الصنف باقٍ كما هو.
+    final rows = await db.select(db.items).get();
+    expect(rows, isNotEmpty);
+  });
+
+  test('س-130: ملف صور فاسد يُرفض قبل أي لمس — لا فجوة صامتة', () async {
+    final imagesRoot = await seedImagesDir('corrupt_case');
+    final target = p.join(tempDir.path, 'backup-corrupt.diqqah');
+    await backupTo(db, target, includeImages: true, imagesDir: imagesRoot);
+    // إفساد ملف الصور المجاور بعد النسخ.
+    await File(imagesSiblingPath(target)).writeAsString('هذا ليس ملف صور');
+    await expectLater(
+      prepareRestore(target, appSchemaVersion: db.schemaVersion),
+      throwsA(isA<CorruptBackupException>()),
+      reason: 'فاسد يرفض الاستعادة كلها لا يُسكَت',
+    );
+  });
 }

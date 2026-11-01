@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import 'ui_fonts.dart';
+import 'print_image_prefs.dart';
 
 /// Task 51: هوية الإصدار تُحقن زمن الترجمة من CI (--dart-define) —
 /// مصدر الحقيقة pubspec.yaml، ويظهر السطر للمالك أسفل شاشة الإعدادات
@@ -66,6 +67,18 @@ String freeBackupPath(
     n++;
   }
   return target;
+}
+
+/// حجم مجلد الصور بالصياغة الإنسانية — نقية للاختبار (س-129: سطر
+/// الحجم الحالي للمجلد تحت مربع التضمين). الفراغ «بلا صور بعد».
+String formatImagesBytes(int bytes) {
+  if (bytes <= 0) return 'بلا صور بعد';
+  final kb = bytes / 1024;
+  if (kb < 1024) {
+    return '${kb.toStringAsFixed(kb < 10 ? 1 : 0)} كيلوبايت';
+  }
+  final mb = kb / 1024;
+  return '${mb.toStringAsFixed(1)} ميغابايت';
 }
 
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
@@ -129,6 +142,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// D-050: التشفير الافتراضي للنسخ الاحتياطية من م1 — الإلغاء قرار واعٍ.
   bool _encryptBackup = true;
 
+  // ── س-129/D-124 (دفعة 10): تضمين الصور في النسخ — افتراضه مفعّل،
+  // وتحته سطر حجم مجلد الصور الحي لا صمت.
+  bool _includeImages = true;
+  int _imagesBytes = 0;
+  int _imagesCount = 0;
+
   /// فحص الثوابت (F-006/D-099): آخر نتيجة وحالة التنفيذ.
   IntegrityReport? _integrityReport;
   bool _integrityBusy = false;
@@ -142,6 +161,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadUsers();
+    _loadImagesInfo();
+  }
+
+  /// حجم مجلد الصور الحي — يُقرأ عند الفتح وبعد كل استعادة (onRestored
+  /// يعيد بناء الشاشة فتُقرأ من جديد).
+  void _loadImagesInfo() {
+    final dir = Directory(imagesDirFor(widget.dbPath));
+    var bytes = 0;
+    var count = 0;
+    if (dir.existsSync()) {
+      for (final e in dir.listSync(recursive: true)) {
+        if (e is File) {
+          bytes += e.lengthSync();
+          count++;
+        }
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _imagesBytes = bytes;
+        _imagesCount = count;
+      });
+    }
   }
 
   Future<void> _loadUsers() async {
@@ -295,8 +337,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _stamp(),
         (path) => File(path).existsSync(),
       );
-      await backupTo(widget.db, target, encrypted: _encryptBackup);
+      // س-129/D-124: الصور ملف ثانٍ مجاور بنفس المفتاح — ملف القاعدة
+      // كما وُلد لا يُلمس (VACUUM INTO/س-01) فلا انتفاخ ولا كسر ذرية.
+      await backupTo(
+        widget.db,
+        target,
+        encrypted: _encryptBackup,
+        includeImages: _includeImages,
+        imagesDir: Directory(imagesDirFor(widget.dbPath)),
+      );
       if (!mounted) return;
+      final imagesPath = imagesSiblingPath(target);
+      final hasImagesFile = File(imagesPath).existsSync();
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
@@ -309,9 +361,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح البرنامج '
                       '(D-060): تُفتح داخل التطبيق نفسه فحسب على أي جهاز'
                   : 'ملف واحد للقاعدة كاملة — غير مشفرة'),
+              const SizedBox(height: 8),
+              // س-129: تصريح محتوى النسخة بالصور لا صمت أبداً.
+              Text(hasImagesFile
+                  ? 'النسخة تتضمن صور الأصناف ($_imagesCount ملفاً — '
+                      'صور الأصناف: ${formatImagesBytes(_imagesBytes)}) في ملف ثانٍ '
+                      'مغلّف بنفس المفتاح (س-129)'
+                  : 'النسخة بلا صور — مجلد الصور فارغ أو غائب'),
               const SizedBox(height: 12),
               const Text('مسار النسخة:'),
               SelectableText(target),
+              if (hasImagesFile) ...[
+                const SizedBox(height: 8),
+                const Text('ملف الصور:'),
+                SelectableText(imagesPath),
+              ],
             ],
           ),
           actions: [
@@ -319,7 +383,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                _exportBackup(target);
+                _exportBackup(
+                    hasImagesFile ? imagesPath : target);
               },
               child: const Text('إخراج النسخة'),
             ),
@@ -391,23 +456,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
+    RestoreCandidate? candidate;
     try {
-      final candidate = await prepareRestore(
+      candidate = await prepareRestore(
         path,
         password: _restorePassword.text.isEmpty ? null : _restorePassword.text,
         appSchemaVersion: widget.db.schemaVersion,
       );
+      if (!mounted) return;
+      // س-130/D-124: تصريح محتوى النسخة بالصور **قبل** أي تنفيذ —
+      // فلا فجوة صامتة أبداً، والتراجع هنا لم يُمسّ شيئاً.
+      final currentImages = Directory(imagesDirFor(widget.dbPath));
+      final currentHasFiles = currentImages.existsSync() &&
+          currentImages.listSync(recursive: true).any((e) => e is File);
+      final declare = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('محتوى النسخة (س-130)'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(candidate!.hasImages
+                  ? 'النسخة تتضمن صور الأصناف '
+                      '(${candidate.imagesFiles.length} ملفاً)'
+                  : 'النسخة بلا صور'),
+              if (!candidate.hasImages && currentHasFiles) ...[
+                const SizedBox(height: 8),
+                const Text(
+                    'مجلد الصور الحالي سيُستبدل بفراغ — والصور القديمة '
+                    'محفوظة في نسخة ما قبل الاستعادة (طريق الرجوع).'),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('تراجع'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('متابعة'),
+            ),
+          ],
+        ),
+      );
+      if (declare != true) {
+        candidate.dispose();
+        return; // إلغاء آمن — لم يُمسّ شيئاً
+      }
       String snapshotPath;
       try {
         snapshotPath = await applyRestore(
           db: widget.db,
           candidate: candidate,
           currentDbPath: widget.dbPath,
+          imagesDir: currentImages,
         );
       } finally {
         candidate.dispose();
       }
       if (!mounted) return;
+      _loadImagesInfo();
       // F-154: سطر الإحالة — أين نسخة الرجوع
       await showDialog<void>(
         context: context,
@@ -421,6 +531,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'نسخة ما قبل الاستعادة (طريق الرجوع) في:'),
               const SizedBox(height: 12),
               SelectableText(snapshotPath),
+              if (File(imagesSiblingPath(snapshotPath)).existsSync()) ...[
+                const SizedBox(height: 8),
+                const Text('ولقطة صورها المرافقة:'),
+                SelectableText(imagesSiblingPath(snapshotPath)),
+              ],
             ],
           ),
           actions: [
@@ -441,6 +556,124 @@ class _SettingsScreenState extends State<SettingsScreen> {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('تعذرت الاستعادة — $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// قيمة مفتاح طباعة الصور للعرض — من المخزن الحي (نمط الخط D-104).
+  bool _printImageValue(String key) => printImageValueOf(key);
+
+  /// س-130: نسخة الصور المستقلة — مجلد الصور وحده في ملف بنفس التغليف.
+  Future<void> _backupImagesStandalone() async {
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final dirPath = p.dirname(widget.dbPath);
+      // اسم مستقل عن نسخ القاعدة — واللواحق -2 و-3 تفرد الاسم عند
+      // التصادم (نمط freeBackupPath — علّة CI #40/#41).
+      var target = p.join(dirPath, 'diqqah-images-${_stamp()}.diqqah.images');
+      var n = 2;
+      while (File(target).existsSync()) {
+        target =
+            p.join(dirPath, 'diqqah-images-${_stamp()}-$n.diqqah.images');
+        n++;
+      }
+      await backupImagesTo(
+        Directory(imagesDirFor(widget.dbPath)),
+        target,
+        encrypted: _encryptBackup,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('أُنشئت نسخة الصور'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('ملف صور مستقل ($_imagesCount ملفاً — '
+                  'صور الأصناف: ${formatImagesBytes(_imagesBytes)})'),
+              const SizedBox(height: 12),
+              SelectableText(target),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _exportBackup(target);
+              },
+              child: const Text('إخراج النسخة'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('حسناً'),
+            ),
+          ],
+        ),
+      );
+    } on CorruptBackupException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر إنشاء نسخة الصور — $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// س-130: استعادة صور من ملف مستقل — تستبدل مجلد الصور بلا مساس
+  /// بالبيانات، وتصرّح بالعدد لا تسكت.
+  Future<void> _restoreImagesStandalone() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        initialDirectory: defaultImportDirectory(
+          userProfile: Platform.environment['USERPROFILE'],
+          home: Platform.environment['HOME'],
+        ),
+      );
+      final path = result?.paths.single;
+      if (path == null || !mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('استعادة صور من ملف مستقل؟'),
+          content: const Text(
+              'سيُستبدل مجلد الصور الحالي كاملاً بمحتوى الملف — '
+              'بلا أي مساس بالبيانات. التراجع الآن لم يُمسّ شيئاً.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('استعادة الصور'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      setState(() => _busy = true);
+      final count = await restoreImagesFrom(
+        path,
+        Directory(imagesDirFor(widget.dbPath)),
+      );
+      if (!mounted) return;
+      _loadImagesInfo();
+      messenger.showSnackBar(SnackBar(
+        content: Text('استُعيدت صور الأصناف ($count ملفاً) — بلا مساس بالبيانات'),
+      ));
+    } on CorruptBackupException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذرت استعادة الصور — $e')),
+      );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -483,6 +716,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: const Text(
                         'الافتراضي من م1 (D-050/D-060) — لا يفتح النسخة إلا '
                         'التطبيق نفسه على أي جهاز'),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  // س-129/D-124 (دفعة 10): تضمين الصور في ملف ثانٍ —
+                  // افتراضه مفعّل وتحته سطر حجم المجلد الحي لا صمت.
+                  CheckboxListTile(
+                    value: _includeImages,
+                    onChanged: _busy
+                        ? null
+                        : (v) => setState(() => _includeImages = v ?? true),
+                    title: const Text('تضمين صور الأصناف'),
+                    subtitle: Text(
+                        'صور الأصناف: ${formatImagesBytes(_imagesBytes)}'
+                        '${_imagesCount > 0 ? ' ($_imagesCount ملفاً)' : ''}'
+                        ' — في ملف ثانٍ مجاور بنفس المفتاح (س-129)'),
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
@@ -640,6 +888,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: const Text('تبديل المستخدم'),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── صور الأصناف في المطبوعات (س-127/س-128، D-123) ──
+          // بلفظ المالك: «يمكن إلغاؤه افتراضياً ويحتاج تفعيله الدخول إلى
+          // الإعدادات ثم اختيار أين نريد تفعيلها افتراضياً» — الافتراضي
+          // معطل في كل المستندات، ومفاتيح التقارير مستقلة عن الفواتير.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'صور الأصناف في المطبوعات (D-123)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'معطلة افتراضياً في كل المستندات — فعّلها أين تشاء. '
+                    'عمود صورة مربع بالاحتواء، وبلا صورة دائرة بأول حرف.',
+                  ),
+                  const SizedBox(height: 8),
+                  for (final (key, label) in kPrintImageChoices)
+                    SwitchListTile(
+                      value: _printImageValue(key),
+                      onChanged: (v) =>
+                          setState(() => savePrintImagePref(key, v)),
+                      title: Text(label),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── نسخة صور مستقلة (س-130، D-124) — أداة مكمّلة لا بديل:
+          // مجلد الصور وحده في ملف، تُستعاد منفردة بلا مساس بالبيانات.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'نسخة الصور المستقلة (D-124)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'مجلد الصور وحده في ملف `.diqqah.images` بنفس التغليف — '
+                    'تُستعاد منفردة فتستبدل الصور بلا مساس بالبيانات.',
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy ? null : _backupImagesStandalone,
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('نسخ الصور'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _busy ? null : _restoreImagesStandalone,
+                          icon: const Icon(Icons.restore),
+                          label: const Text('استعادة صور'),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

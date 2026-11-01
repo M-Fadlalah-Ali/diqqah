@@ -1,4 +1,6 @@
+import 'dart:convert' show utf8;
 import 'dart:io';
+import 'dart:typed_data' show ByteData, Endian, Uint8List;
 
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
@@ -26,11 +28,19 @@ import 'database.dart';
 /// افتراضياً (D-050) فتُغلف النسخة بمفتاح البرنامج حصراً — تُفتح داخل
 /// التطبيق نفسه وحده على أي جهاز، بلا أي كلمة. كاذبة = ملف SQLite خام
 /// بعد الإلغاء الواعي. الملف الهدف إن وُجد يُستبدل.
+///
+/// س-129/D-124 (دفعة 10): [includeImages] يضمّن صور الأصناف في ملف
+/// ثانٍ مجاور (`<target>.images`) مغلّف بنفس المفتاح — ملف القاعدة
+/// نفسه لا يُلمس أبداً فلا انتفاخ ولا كسر للذرية (VACUUM INTO/س-01).
+/// مجلد الصور غائب أو فارغ = لا ملف صور أصلاً فيتصريح الاستعادة
+/// «بلا صور» بصدق.
 Future<void> backupTo(
   DiqqahDatabase db,
   String targetPath, {
   bool encrypted = true,
   BackupCipher? cipher,
+  bool includeImages = false,
+  Directory? imagesDir,
 }) async {
   final temp = File('$targetPath.tmp');
   if (await temp.exists()) await temp.delete();
@@ -45,6 +55,17 @@ Future<void> backupTo(
   } finally {
     if (await temp.exists()) await temp.delete();
   }
+  // س-129: ملف الصور المجاور بنفس مفتاح التشفير — بعد نجاح ملف القاعدة
+  // حصراً كي لا يبقى ملف صور يتيمة لنسخة فشلت.
+  if (includeImages && imagesDir != null) {
+    final bundle = collectImagesBundle(imagesDir);
+    if (bundle != null) {
+      final resolved = cipher ?? BackupCipher();
+      final wrapped = encrypted ? await resolved.encrypt(bundle) : bundle;
+      await File(imagesSiblingPath(targetPath))
+          .writeAsBytes(wrapped, flush: true);
+    }
+  }
 }
 
 /// مرشّح استعادة اجتاز كل الفحوص — ملف خام سليم جاهز للاستبدال.
@@ -56,7 +77,23 @@ class RestoreCandidate {
   final int schemaVersion;
   final Directory _tempDir;
 
-  RestoreCandidate._(this.plainPath, this._tempDir, this.schemaVersion);
+  /// س-130 (دفعة 10): هل النسخة تتضمن صور الأصناف؟ — يُقرأ من ملف
+  /// الصور المجاور إن وُجد، ويُصرّح به قبل الاستعادة لا بعدها فلا
+  /// فجوة صامتة أبداً.
+  final bool hasImages;
+
+  /// ملفات الصور المحمولة داخل النسخة (مسار نسبي، بايتات) — مستخرجة
+  /// إلى الذاكرة قبل أي لمس للقاعدة الحية (فحص قبل استبدال). والكمية
+  /// محدودة بناتج المحرك (30..60KB للأصل) فالاحتفاظ بالذاكرة مقبول.
+  final List<(String, List<int>)> imagesFiles;
+
+  RestoreCandidate._(
+    this.plainPath,
+    this._tempDir,
+    this.schemaVersion, {
+    this.hasImages = false,
+    this.imagesFiles = const [],
+  });
 
   void dispose() {
     try {
@@ -129,7 +166,26 @@ Future<RestoreCandidate> prepareRestore(
       throw BackupNewerSchemaException(version);
     }
     closeSqlite();
-    return RestoreCandidate._(plainPath, tempDir, version);
+    // س-130 (دفعة 10): ملف الصور المجاور إن وُجد يُفحص ويُفك **قبل**
+    // أي لمس للقاعدة الحية — فاسد يرفض الاستعادة كلها لا يُسكَت
+    // («لا فجوة صامتة» D-124)، وسليم يحمل ملفاته في الذاكرة.
+    final sibling = File(imagesSiblingPath(backupPath));
+    var hasImages = false;
+    var imagesFiles = const <(String, List<int>)>[];
+    if (await sibling.exists()) {
+      imagesFiles = await _decodeImagesBlob(
+        await sibling.readAsBytes(),
+        resolvedCipher,
+      );
+      hasImages = imagesFiles.isNotEmpty;
+    }
+    return RestoreCandidate._(
+      plainPath,
+      tempDir,
+      version,
+      hasImages: hasImages,
+      imagesFiles: imagesFiles,
+    );
   } catch (e) {
     closeSqlite();
     try {
@@ -155,10 +211,18 @@ Future<RestoreCandidate> prepareRestore(
 /// تتبنى معرّف الجهاز الذي استقرت عليه (التقاطه قبل الغلق)، فيخرج
 /// جهازان استقيا من نسخة واحدة بمعرّفين مختلفين، ويبقى معرّف نفس
 /// الجهاز ثابتاً فوق قاعدته (F-015: يتولد مرة ويبقى).
+///
+/// س-130/D-124 (دفعة 10): [imagesDir] مجلد صور القاعدة الحية —
+/// تُلتقط لقطة صور مرافقة لنسخة الرجوع (`<snapshot>.images`) ثم
+/// يُستبدل المجلد بمحتوى النسخة: نسخة بصور تُستبدل بملفاتها، ونسخة
+/// بلا صور يُفرَّغ المجلد (عالم النسخة المنعكس بصدق — والصور القديمة
+/// محفوظة في لقطة ما قبل الاستعادة دائماً). null = لا مساس بالصور
+/// (الاستدعاءات القديمة والاختبارات الضيقة).
 Future<String> applyRestore({
   required DiqqahDatabase db,
   required RestoreCandidate candidate,
   required String currentDbPath,
+  Directory? imagesDir,
 }) async {
   // D-054: معرّف الجهاز المستقر عليه يُلتقط قبل الغلق — قد يُولد الآن
   // إن لم يوجد بعد (وإدراجه الأول يقع في اللقطة نفسها فلا يضيع).
@@ -175,6 +239,16 @@ Future<String> applyRestore({
 
   // لقطة ما قبل الاستعادة — متسقة ذرياً حتى والقاعدة في منتصف عمل.
   await db.customStatement("VACUUM INTO '${_sqlString(snapshotPath)}'");
+
+  // س-130: لقطة الصور المرافقة — طريق الرجوع يحفظ الصور ذاته (D-124).
+  // خام غير مشفرة كنسخة القاعدة نفسها: صيغة الحزمة ذاتها بلا غلاف مفتاح.
+  if (imagesDir != null) {
+    final bundle = collectImagesBundle(imagesDir);
+    if (bundle != null) {
+      await File(imagesSiblingPath(snapshotPath))
+          .writeAsBytes(bundle, flush: true);
+    }
+  }
 
   await db.close();
   for (final suffix in ['', '-wal', '-shm']) {
@@ -206,6 +280,15 @@ Future<String> applyRestore({
   } finally {
     raw.dispose();
   }
+
+  // س-130: استبدال مجلد الصور بعد نجاح القاعدة — بنسخة الصور أو
+  // بالفراغ (تصريح الاستعادة سبق وأخبر المالك بذلك قبل التنفيذ).
+  if (imagesDir != null) {
+    await replaceImagesDir(
+      imagesDir,
+      candidate.hasImages ? candidate.imagesFiles : const [],
+    );
+  }
   return snapshotPath;
 }
 
@@ -233,6 +316,199 @@ class CorruptBackupException implements Exception {
 
   @override
   String toString() => message;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// صور الأصناف — دفعة (10) «الصور والباركود» (س-129/س-130، D-124/D-125).
+//
+// المعمارية: الصور ملفات بجوار ملف القاعدة لا مدموغة فيه (حماية «ملف
+// واحد كامل» وذرية الاستعادة)، والنسخ الاحتياطي يضمّنها في ملف ثانٍ
+// مجاور بلاحقة `.images` — حزمة مضغوطة (zlib من المكتبة القياسية بلا
+// حزمة خارجية جديدة) مغلّفة بنفس مفتاح التشفير BackupCipher. صيغة
+// الحزمة الداخلية خاصة بالبرنامج: بطاقة تعريف + عدّاد + (طول مسار،
+// مسار نسبي، طول بيانات، بيانات) — وسلامة المحتوى كلها ضمانة تغليف
+// GCM نفسه فلا حاجة بصمات لكل ملف.
+// ═══════════════════════════════════════════════════════════════════
+
+/// مجلد صور الأصناف بجوار ملف القاعدة — المصدر الوحيد للاشتقاق (D-125).
+String imagesDirFor(String dbPath) => p.join(p.dirname(dbPath), 'images');
+
+/// ملف صور نسخة قاعدة — نفس الاسم الأساسي بلاحقة `.images` (س-129:
+/// النسخة الممتدة ملفان)، ونسخة ما قبل الاستعادة تأخذ الاسم النمطي
+/// ذاته فتُستعاد كزوج لاحقاً بلا أي تعليمات.
+String imagesSiblingPath(String backupPath) => '$backupPath.images';
+
+/// الاسم النسبي لملفَي صورة صنف — بمعرّف الصنف الدائم (هوية لا تتغير
+/// — D-073) فلا حاجة لتوليد أسماء عشوائية ولا تصادم بين الأصناف.
+String itemImageRelativeName(int itemId, {required bool thumb}) =>
+    thumb ? 'images/item-$itemId-thumb.jpg' : 'images/item-$itemId.jpg';
+
+/// بطاقة تعريف الحزمة: «DQIMG01\0».
+final List<int> _imagesMagic = utf8.encode('DQIMG01') + const [0x00];
+
+/// يبني حزمة صور مضغوطة من خريطة (مسار نسبي ← بايتات).
+Uint8List buildImagesBundle(Map<String, List<int>> files) {
+  final entries = files.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+  final out = BytesBuilder();
+  out.add(_imagesMagic);
+  final countBytes = ByteData(4)..setUint32(0, entries.length, Endian.big);
+  out.add(countBytes.buffer.asUint8List());
+  for (final e in entries) {
+    final pathBytes = utf8.encode(e.key);
+    if (pathBytes.length > 0xFFFF) {
+      throw const CorruptBackupException('مسار صورة طويل عن الحد');
+    }
+    final lenBytes = ByteData(2)..setUint16(0, pathBytes.length, Endian.big);
+    out.add(lenBytes.buffer.asUint8List());
+    out.add(pathBytes);
+    final dataBytes = ByteData(4)..setUint32(0, e.value.length, Endian.big);
+    out.add(dataBytes.buffer.asUint8List());
+    out.add(e.value);
+  }
+  // الضغط من المكتبة القياسية حصراً — لا حزمة خارجية جديدة بيد المالك.
+  return Uint8List.fromList(ZLibCodec().encode(out.toBytes()));
+}
+
+/// يفك حزمة صور إلى خريطتها — أي انحراف عن البطاقة أو الطول يرمي
+/// رفضاً آمناً واحداً (لا فجوة صامتة D-124).
+Map<String, List<int>> parseImagesBundle(List<int> plain) {
+  for (var i = 0; i < _imagesMagic.length; i++) {
+    if (i >= plain.length || plain[i] != _imagesMagic[i]) {
+      throw const CorruptBackupException(
+          'ملف الصور ليس حزمة صور دِقَّة — تحقق من الملف');
+    }
+  }
+  var pos = _imagesMagic.length;
+  List<int> take(int n) {
+    if (pos + n > plain.length) {
+      throw const CorruptBackupException('حزمة الصور مقطوعة — الملف تالف');
+    }
+    final v = plain.sublist(pos, pos + n);
+    pos += n;
+    return v;
+  }
+
+  final countData = ByteData.sublistView(Uint8List.fromList(take(4)));
+  final count = countData.getUint32(0, Endian.big);
+  if (count > 100000) {
+    throw const CorruptBackupException('حزمة الصور شاذة العدد — الملف تالف');
+  }
+  final out = <String, List<int>>{};
+  for (var i = 0; i < count; i++) {
+    final pathLen =
+        ByteData.sublistView(Uint8List.fromList(take(2))).getUint16(0, Endian.big);
+    final path = utf8.decode(take(pathLen));
+    final dataLen =
+        ByteData.sublistView(Uint8List.fromList(take(4))).getUint32(0, Endian.big);
+    if (dataLen > 64 * 1024 * 1024) {
+      throw const CorruptBackupException('ملف صورة ضخم شاذاً — الحزمة تالف');
+    }
+    out[path] = take(dataLen);
+  }
+  return out;
+}
+
+/// يجمع مجلد الصور في حزمة مضغوطة — null إن غاب المجلد أو فرغ فلا
+/// ملف صور يتيمة (تصريح الاستعادة «بلا صور» بصدق س-130).
+List<int>? collectImagesBundle(Directory? dir) {
+  if (dir == null || !dir.existsSync()) return null;
+  final files = <String, List<int>>{};
+  for (final entity in dir.listSync(recursive: true)) {
+    if (entity is! File) continue;
+    final rel = p.relative(entity.path, from: dir.path).replaceAll('\\', '/');
+    final bytes = entity.readAsBytesSync();
+    if (bytes.isEmpty) continue;
+    files[rel] = bytes;
+  }
+  if (files.isEmpty) return null;
+  return buildImagesBundle(files);
+}
+
+/// يستبدل محتوى مجلد الصور بالملفات المعطاة — الفراغ مشروع (عالم
+/// النسخة المنعكس بصدق) ونسخة ما قبل الاستعادة محفوظة دائماً قبلها.
+Future<int> replaceImagesDir(
+  Directory dir,
+  List<(String, List<int>)> files,
+) async {
+  if (dir.existsSync()) {
+    dir.deleteSync(recursive: true);
+  }
+  dir.createSync(recursive: true);
+  for (final (rel, bytes) in files) {
+    final safe = rel.replaceAll('\\', '/');
+    if (safe.contains('..') || p.isAbsolute(safe)) {
+      throw const CorruptBackupException('مسار صورة غير سليم داخل الحزمة');
+    }
+    final target = File(p.join(dir.path, safe));
+    await target.create(recursive: true);
+    await target.writeAsBytes(bytes, flush: true);
+  }
+  return files.length;
+}
+
+/// فك غلاف ملف صور (مشفر بمفتاح البرنامج أو خام مضغوط) — أي شكل غريب
+/// رفض آمن واحد (فحص قبل أي لمس — F-013 روحاً).
+Future<List<(String, List<int>)>> _decodeImagesBlob(
+  List<int> blob,
+  BackupCipher cipher,
+) async {
+  List<int> plain;
+  switch (BackupCipher.identify(blob)) {
+    case BackupKind.encrypted:
+      // ملفات الصور من الجيل الجاري حصراً — مفتاح البرنامج بلا كلمة.
+      plain = await cipher.decrypt(blob);
+      break;
+    case BackupKind.plainSqlite:
+      throw const CorruptBackupException(
+          'ملف الصور يحمل قاعدة لا صور — تحقق من الملف المختار');
+    case BackupKind.unknown:
+      plain = blob; // خام مضغوط — يفحصه فك zlib أدناه
+      break;
+  }
+  try {
+    final Map<String, List<int>> parsed = parseImagesBundle(
+      ZLibCodec().decode(plain),
+    );
+    return [
+      for (final e in parsed.entries) (e.key, e.value),
+    ];
+  } on CorruptBackupException {
+    rethrow;
+  } catch (_) {
+    throw const CorruptBackupException(
+        'ملف صور النسخة تالف — تعذر فك حزم الصور');
+  }
+}
+
+/// س-130: نسخة صور مستقلة — أداة مكمّلة لا بديل (D-124): مجلد الصور
+/// وحده في ملف `.diqqah.images` بنفس التغليف، وتُستعاد منفردة فتستبدل
+/// مجلد الصور بلا مساس بالبيانات.
+Future<void> backupImagesTo(
+  Directory imagesDir,
+  String targetPath, {
+  bool encrypted = true,
+  BackupCipher? cipher,
+}) async {
+  final bundle = collectImagesBundle(imagesDir);
+  if (bundle == null) {
+    throw const CorruptBackupException('لا صور بعد — مجلد الصور فارغ أو غائب');
+  }
+  final wrapped = encrypted
+      ? await (cipher ?? BackupCipher()).encrypt(bundle)
+      : bundle;
+  await File(targetPath).writeAsBytes(wrapped, flush: true);
+}
+
+/// س-130: استعادة صور من ملف مستقل — تستبدل مجلد الصور بلا مساس
+/// بالبيانات، وتعيد عدد الملفات المستعادة للتصريح بالنجاح.
+Future<int> restoreImagesFrom(
+  String imagesFilePath,
+  Directory imagesDir, {
+  BackupCipher? cipher,
+}) async {
+  final blob = await File(imagesFilePath).readAsBytes();
+  final files = await _decodeImagesBlob(blob, cipher ?? BackupCipher());
+  return replaceImagesDir(imagesDir, files);
 }
 
 /// نسخة من مخطط أحدث من التطبيق — تُرفض برسالة «حدّث التطبيق» (F-156).

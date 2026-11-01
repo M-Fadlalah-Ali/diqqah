@@ -195,6 +195,16 @@ Future<Uint8List> buildDocumentPdf({
   required List<(String, String)> footerPairs,
   required PdfPageFormat format,
   String? fontKey,
+
+  /// س-127/س-128 (دفعة 10، D-123): صور بنود الصف الأول — يُمرر غير null
+  /// حصراً حين مفتاح نوع المستند مفعّل من الإعدادات (الافتراضي معطل
+  /// في كل المستندات بلفظ المالك). العمود مربع قبل اسم الصنف بنمط
+  /// النسب (D-103)، والاحتواء لا القص (D-121)، وبلا صورة يعرض النائب
+  /// البصري بأول حرف (س-125/D-122).
+  List<Uint8List?>? rowLeadingImages,
+
+  /// أول حرف اسم الصنف لكل صف — حرف النائب البصري بالحالات بلا صورة.
+  List<String>? rowPlaceholderLetters,
 }) async {
   final key = fontKey ?? activeFontKey;
   final (regular, bold) = await _fontsFor(key);
@@ -244,6 +254,18 @@ Future<Uint8List> buildDocumentPdf({
                     style:
                         pw.TextStyle(font: regular, fontSize: m.headerTextSize)),
               )
+            else if (rowLeadingImages != null)
+              _imageTable(
+                columns: columns,
+                rows: rows,
+                images: rowLeadingImages,
+                letters: rowPlaceholderLetters,
+                regular: regular,
+                bold: bold,
+                imageColWidth: m.tableCellSize * 4.2,
+                headerSize: m.tableHeaderSize,
+                cellSize: m.tableCellSize,
+              )
             else
               pw.TableHelper.fromTextArray(
                 headers: columns,
@@ -288,6 +310,105 @@ Future<Uint8List> buildDocumentPdf({
   );
 
   return doc.save();
+}
+
+/// جدول الطباعة بعمود الصورة (س-127/س-128، دفعة 10) — العمود الأول
+/// مربع بعرض نسبي من قياس الصفحة (D-103)، والصورة فيه بالاحتواء لا
+/// القص (D-121)، وبلا صورة دائرة النائب بأول حرف (س-125/D-122).
+/// ارتفاع الصف ثابت بعرض العمود فلا يتفاضل الجدول (س-127).
+pw.Widget _imageTable({
+  required List<String> columns,
+  required List<List<String>> rows,
+  required List<Uint8List?>? images,
+  required List<String>? letters,
+  required pw.Font regular,
+  required pw.Font bold,
+  required double imageColWidth,
+  required double headerSize,
+  required double cellSize,
+}) {
+  pw.Widget imageCell(int index) {
+    final side = imageColWidth - 6;
+    final bytes = images != null && index < images.length
+        ? images[index]
+        : null;
+    if (bytes != null && bytes.isNotEmpty) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.all(3),
+        child: pw.Center(
+          child: pw.SizedBox(
+            width: side,
+            height: side,
+            child: pw.Image(
+              pw.MemoryImage(bytes),
+              fit: pw.BoxFit.contain, // D-121: احتواء لا قص ولا تمدد
+            ),
+          ),
+        ),
+      );
+    }
+    final letter = letters != null && index < letters.length
+        ? letters[index]
+        : '؟';
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(3),
+      child: pw.Center(
+        child: pw.Container(
+          width: side,
+          height: side,
+          alignment: pw.Alignment.center,
+          decoration: const pw.BoxDecoration(
+            color: PdfColors.grey200,
+            shape: pw.BoxShape.circle,
+          ),
+          child: pw.Text(
+            letter.isEmpty ? '؟' : letter.characters.first,
+            style: pw.TextStyle(
+              font: bold,
+              fontSize: cellSize * 1.3,
+              color: PdfColors.grey700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  pw.Widget textCell(String text, {required bool header}) => pw.Padding(
+        padding: const pw.EdgeInsets.all(4),
+        child: pw.Text(
+          text,
+          textAlign: pw.TextAlign.right,
+          style: pw.TextStyle(
+            font: header ? bold : regular,
+            fontSize: header ? headerSize : cellSize,
+          ),
+        ),
+      );
+
+  return pw.Table(
+    border: pw.TableBorder.all(color: PdfColors.grey400),
+    columnWidths: {0: pw.FixedColumnWidth(imageColWidth)},
+    children: [
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+        children: [
+          textCell('الصورة', header: true),
+          for (final c in columns) textCell(c, header: true),
+        ],
+      ),
+      for (var i = 0; i < rows.length; i++)
+        pw.TableRow(
+          decoration: i.isOdd
+              ? const pw.BoxDecoration(color: PdfColors.grey50)
+              : null,
+          children: [
+            imageCell(i),
+            for (final cell in rows[i]) textCell(cell, header: false),
+          ],
+        ),
+    ],
+  );
 }
 
 /// مشاركة ملف PDF بنافذة النظام (نمط D-056 المعتمد للنسخ الاحتياطية:

@@ -4,6 +4,9 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'input_formatters.dart';
+import 'item_images.dart';
+import 'item_media.dart';
+import 'item_crop_screen.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 
 /// شاشة الأصناف (F-030/F-031 — دفعة م1 الثانية، س-36..س-41).
@@ -164,7 +167,18 @@ class ItemEditScreen extends StatefulWidget {
   final DiqqahDatabase db;
   final Item? existing;
 
-  const ItemEditScreen({super.key, required this.db, this.existing});
+  /// فواصل الاختبارات حصراً — الإنتاج يستدعي مسارات المنصة الحقيقية
+  /// (image_picker/mobile_scanner) بلا قنوات في الاختبارات (نمط الحقن).
+  final Future<List<int>?> Function({required bool fromCamera})? onPickSource;
+  final Future<String?> Function()? onScanBarcode;
+
+  const ItemEditScreen({
+    super.key,
+    required this.db,
+    this.existing,
+    this.onPickSource,
+    this.onScanBarcode,
+  });
 
   @override
   State<ItemEditScreen> createState() => _ItemEditScreenState();
@@ -184,6 +198,26 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   static const int _baseCurrencyId = 1;
 
   bool _saving = false;
+
+  // ── صورة الصنف (س-123/س-124، D-120/D-121/D-125) ──
+  /// معاينة الإدخال قبل الحفظ — لا ملف يُكتب إلا عند الحفظ فلا ملفات
+  /// يتيمة عند الإلغاء (س-124).
+  List<int>? _pendingOriginal;
+  List<int>? _pendingThumb;
+  bool _imageBusy = false;
+
+  /// طلب حذف صورة قائمة (وضع التعديل) — ينفذ عند الحفظ مع مسح الملفين.
+  bool _deleteImage = false;
+
+  // ── الباركود (س-131/س-132، D-126) ──
+  final _barcodeController = TextEditingController();
+
+  /// رموز الصنف القائمة (وضع التعديل — من الجدول الجاهز F-035).
+  List<ItemBarcode> _barcodes = const [];
+
+  /// رموز الصنف الجديد قبل أول حفظ (وضع الإضافة) — تُفحص وتُدرج عند
+  /// الحفظ فلا رمز يتيم لصنف لم يُحفظ.
+  final List<String> _pendingBarcodes = [];
 
   bool get _isEdit => widget.existing != null;
 
@@ -206,6 +240,17 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       _kind = ItemKind.good;
     }
     _loadUnits();
+    if (_isEdit) {
+      _loadBarcodes();
+    }
+  }
+
+  /// رموز الصنف القائمة — قسم الباركود في وضع التعديل (س-131).
+  Future<void> _loadBarcodes() async {
+    final rows =
+        await widget.db.barcodesOfItem(widget.existing!.id);
+    if (!mounted) return;
+    setState(() => _barcodes = rows);
   }
 
   @override
@@ -215,7 +260,36 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     _category.dispose();
     _purchase.dispose();
     _sale.dispose();
+    _barcodeController.dispose();
     super.dispose();
+  }
+
+  /// اسم الصنف الحالي للنائب البصري — الجديد من الحقل قبل حفظه.
+  String get _currentItemName {
+    final fromCard = _name.text.trim();
+    if (fromCard.isNotEmpty) return fromCard;
+    return widget.existing?.name ?? 'صنف';
+  }
+
+  /// مسارَي الصورة القائمة (وضع التعديل) — للحذف عند الاستبدال (س-124).
+  (String?, String?) get _existingImagePaths =>
+      (widget.existing?.imageFile, widget.existing?.imageThumb);
+
+  bool get _hasExistingImage =>
+      _existingImagePaths.$1 != null || _existingImagePaths.$2 != null;
+
+  /// كتابة الملفين وتثبيت المسارين النسبيين على الصف (س-123/D-125).
+  Future<void> _writeImagesFor(int itemId) async {
+    final paths = await writeItemImagesFiles(
+      itemId: itemId,
+      original: _pendingOriginal!,
+      thumb: _pendingThumb!,
+    );
+    await widget.db.setItemImages(
+      itemId,
+      imageFile: paths.$1,
+      imageThumb: paths.$2,
+    );
   }
 
   /// قائمة الوحدات تُحمّل مرة وتُحدَّث بعد كل إضافة وحدة — لا تدفق هنا
@@ -243,10 +317,140 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         isActive: item.isActive,
       );
 
+  /// س-123/س-124: دخول الصورة من الكاميرا أو المعرض — لا صورة تدخل إلا
+  /// عبر المحرك الإلزامي (D-120) بإطارها المربع (D-121)، وفشل الإذن أو
+  /// الكاميرا أو صورة فاسدة رسالة عربية والبطاقة تعمل بلا صورة أبداً.
+  Future<void> _pickImage({required bool fromCamera}) async {
+    if (_imageBusy || _saving) return;
+    final picker = widget.onPickSource ?? pickItemSourceBytes;
+    try {
+      final raw = await picker(fromCamera: fromCamera);
+      if (raw == null || !mounted) return; // إلغاء المستخدم — لم يحدث شيء
+      setState(() => _imageBusy = true);
+      // فاسد يُرفض هنا قبل أي شاشة (س-123: صورة فاسدة تُرفض ولا تُفسد
+      // البطاقة) — والأبعاد المُدرّاة تسبق شاشة الإطار فلا فك مزدوج.
+      final size = inspectItemImage(raw);
+      if (!mounted) return;
+      final crop = await Navigator.of(context).push<ItemImageCrop>(
+        MaterialPageRoute<ItemImageCrop>(
+          builder: (_) => ItemCropScreen(
+            rawBytes: raw,
+            imageWidth: size.width,
+            imageHeight: size.height,
+          ),
+        ),
+      );
+      if (crop == null || !mounted) {
+        if (mounted) setState(() => _imageBusy = false);
+        return;
+      }
+      final result = ingestItemImage(raw, crop: crop);
+      if (!mounted) return;
+      setState(() {
+        _pendingOriginal = result.originalJpeg;
+        _pendingThumb = result.thumbJpeg;
+        _deleteImage = false;
+        _imageBusy = false;
+      });
+    } on ItemImageException catch (e) {
+      if (!mounted) return;
+      setState(() => _imageBusy = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(e.toString())));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _imageBusy = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('تعذر تجهيز الصورة — $e')),
+        );
+    }
+  }
+
+  /// س-124: الحذف بمطابقة — للقائمة يمسح الحقل، والملفان يمسحان عند
+  /// الحفظ (وضع التعديل) فلا يتيمة ولا بقاء بصمة قديمة.
+  void _requestImageDelete() {
+    setState(() {
+      _pendingOriginal = null;
+      _pendingThumb = null;
+      _deleteImage = true;
+    });
+  }
+
+  /// س-131: إضافة رمز — التفرد برسالة الصنف الحامل الحرفية، وقارئ
+  /// البلوتوث يكتب في الخانة مباشرة بلا كاميرا أصلاً (س-132).
+  Future<void> _addBarcode() async {
+    final code = _barcodeController.text.trim();
+    if (code.isEmpty || _saving) return;
+    final holder = await widget.db.barcodeHolder(code);
+    if (!mounted) return;
+    if (holder != null &&
+        (widget.existing == null || holder.itemId != widget.existing!.id)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('الرمز مستخدم للصنف: ${holder.displayLabel}'),
+        ));
+      return;
+    }
+    if (_isEdit) {
+      if (_barcodes.any((b) => b.barcode.trim() == code)) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+              const SnackBar(content: Text('الرمز مضاف لهذا الصنف مسبقاً')));
+        return;
+      }
+      await widget.db
+          .insertItemBarcode(itemId: widget.existing!.id, barcode: code);
+      if (!mounted) return;
+      setState(() => _barcodeController.clear());
+      await _loadBarcodes();
+      return;
+    }
+    if (_pendingBarcodes.contains(code)) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+            const SnackBar(content: Text('الرمز مضاف لهذا الصنف مسبقاً')));
+      return;
+    }
+    setState(() {
+      _pendingBarcodes.add(code);
+      _barcodeController.clear();
+    });
+  }
+
+  /// س-131: حذف رمز من قسم الباركود — وضع التعديل مباشرة والجديد من
+  /// قائمة الانتظار.
+  Future<void> _deleteBarcode(ItemBarcode b) async {
+    await widget.db.deleteItemBarcode(b.id);
+    if (!mounted) return;
+    await _loadBarcodes();
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _saving = true);
     try {
+      // س-131: رموز الصنف الجديد تُفحص قبل الإدراج — مكرر يرفض الحفظ
+      // كله برسالة الصنف الحامل ويبقى النموذج كما هو (إلغاء آمن).
+      if (!_isEdit && _pendingBarcodes.isNotEmpty) {
+        for (final code in _pendingBarcodes) {
+          final holder = await widget.db.barcodeHolder(code);
+          if (!mounted) return;
+          if (holder != null) {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(
+                content: Text('الرمز مستخدم للصنف: ${holder.displayLabel}'),
+              ));
+            return;
+          }
+        }
+      }
       final draft = ItemDraft(
         sku: _sku.text,
         name: _name.text,
@@ -275,7 +479,9 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           );
         return;
       }
+      int? savedItemId;
       if (_isEdit) {
+        savedItemId = widget.existing!.id;
         await widget.db.updateItemDetails(
           widget.existing!,
           name: draft.name.trim(),
@@ -287,7 +493,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           priceCurrencyId: _baseCurrencyId,
         );
       } else {
-        await widget.db.insertItem(
+        savedItemId = await widget.db.insertItem(
           sku: draft.sku.trim(),
           name: draft.name.trim(),
           category: draft.category.trim(),
@@ -297,6 +503,27 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           salePriceMinor: draft.salePriceMinor,
           priceCurrencyId: _baseCurrencyId,
         );
+        // س-131: رموز الصنف الجديد تُدرج بعد نجاح الإدراج حصراً.
+        for (final code in _pendingBarcodes) {
+          await widget.db
+              .insertItemBarcode(itemId: savedItemId, barcode: code);
+        }
+      }
+      // س-123/س-124: ملفات الصورة بعد نجاح الصف — الاستبدال يحذف
+      // الملفين القديمين ويحفظ الجديدين (لا ملفات يتيمة)، والحذف
+      // يمسح الحقل والملفين معاً.
+      if (_isEdit && _deleteImage && _hasExistingImage) {
+        await widget.db.clearItemImages(savedItemId);
+        await deleteItemImagesFiles(
+            _existingImagePaths.$1, _existingImagePaths.$2);
+      } else if (_pendingOriginal != null &&
+          _pendingThumb != null &&
+          savedItemId != null) {
+        if (_hasExistingImage) {
+          await deleteItemImagesFiles(
+              _existingImagePaths.$1, _existingImagePaths.$2);
+        }
+        await _writeImagesFor(savedItemId);
       }
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -522,6 +749,140 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                   '(D-066 الاصطلاح) — التغيير يُفتح مع دفعة العملات',
             ),
           ),
+          // ── صورة الصنف (س-123/س-124، D-120/D-121/D-122/D-125) ──
+          const SizedBox(height: 24),
+          Text('صورة الصنف', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'التقاط أو اختيار يمرّ المحرك الإلزامي تلقائياً: إطار مربع '
+            '(الصورة كاملة افتراضياً) ثم تصغير وضغط خفيف، ومشتق مصغر '
+            'لسطور الفواتير — ولا خيار يسكته (D-120)',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _imageBusy
+                  ? const SizedBox(
+                      width: 72,
+                      height: 72,
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : ItemImageBox(
+                      imagePath: _deleteImage
+                          ? null
+                          : widget.existing?.imageFile,
+                      pendingBytes: _pendingOriginal,
+                      itemName: _currentItemName,
+                      size: 72,
+                    ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    if (supportsCameraScan)
+                      OutlinedButton.icon(
+                        onPressed: _imageBusy || _saving
+                            ? null
+                            : () => _pickImage(fromCamera: true),
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        label: const Text('التقاط'),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: _imageBusy || _saving
+                          ? null
+                          : () => _pickImage(fromCamera: false),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('من المعرض'),
+                    ),
+                    if (_pendingOriginal != null || _hasExistingImage)
+                      OutlinedButton.icon(
+                        onPressed:
+                            _imageBusy || _saving ? null : _requestImageDelete,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('حذف الصورة'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // ── الباركود (س-131/س-132، D-126 — جدول جاهز من اليوم الأول
+          // F-035) ──
+          const SizedBox(height: 24),
+          Text('الباركود', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'أكثر من رمز للصنف ممكن — والتفرد مضمون (س-131). قارئ البلوتوث '
+            'يكتب في الخانة مباشرة، والمسح بكاميرا الجوال بزره (س-132)',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _barcodeController,
+            decoration: InputDecoration(
+              labelText: 'رمز الباركود',
+              hintText: 'اكتب الرمز أو امسحه ثم أضف',
+              border: const OutlineInputBorder(),
+              suffixIcon: supportsCameraScan
+                  ? IconButton(
+                      tooltip: 'مسح بالكاميرا',
+                      icon: const Icon(Icons.qr_code_scanner),
+                      onPressed:
+                          _saving ? null : () async {
+                            final scan = widget.onScanBarcode ?? scanBarcode;
+                            final code = await scan();
+                            if (code == null || !mounted) return;
+                            _barcodeController.text = code;
+                            await _addBarcode();
+                          },
+                    )
+                  : null,
+            ),
+            onSubmitted: (_) => _addBarcode(),
+          ),
+          const SizedBox(height: 8),
+          if (_isEdit)
+            if (_barcodes.isEmpty)
+              const Text('لا رموز بعد لهذا الصنف')
+            else
+              ...[
+                for (final b in _barcodes)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.qr_code_2),
+                    title: Text(b.barcode),
+                    trailing: IconButton(
+                      tooltip: 'حذف الرمز',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: _saving ? null : () => _deleteBarcode(b),
+                    ),
+                  ),
+              ]
+          else
+            if (_pendingBarcodes.isEmpty)
+              const Text('لا رموز بعد — تُحفظ مع الصنف أول مرة')
+            else
+              ...[
+                for (final code in _pendingBarcodes)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.qr_code_2),
+                    title: Text(code),
+                    trailing: IconButton(
+                      tooltip: 'إزالة الرمز',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: _saving
+                          ? null
+                          : () => setState(
+                              () => _pendingBarcodes.remove(code)),
+                    ),
+                  ),
+              ],
           if (_isEdit) ...[
             const SizedBox(height: 24),
             // س-40: زر تعطيل/تفعيل — وزر الحذف غير موجود أصلاً في البطاقة

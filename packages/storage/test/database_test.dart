@@ -18,7 +18,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011: كل تغيير مخطط إصدار وترحيلة — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 11);
+    expect(db.schemaVersion, 12);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -480,7 +480,7 @@ void main() {
     // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
     // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 11);
+    expect(migrated.schemaVersion, 12);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');
@@ -527,7 +527,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 11);
+    expect(migrated.schemaVersion, 12);
     final row = (await migrated.customSelect(
       'SELECT discount_rate, state FROM invoices',
     ).getSingle()).data;
@@ -541,5 +541,81 @@ void main() {
           'UPDATE invoices SET discount_rate = 9999'),
       throwsA(anything),
     );
+  });
+
+  // ─── دفعة (10) «الصور والباركود» — س-123..س-132/D-118..D-126 ───
+
+  Future<int> seedItem(String sku) => db.insertItem(
+        sku: sku,
+        name: 'صنف $sku',
+        kind: 'good',
+        baseUnitId: 1,
+        purchasePriceMinor: 100,
+        salePriceMinor: 150,
+        priceCurrencyId: 1,
+      );
+
+  test('س-123 (D-125): عمودا الصورة يثبتان ويمسحان — مسارات نسبية حصراً',
+      () async {
+    final id = await seedItem('IMG-1');
+    await db.setItemImages(
+      id,
+      imageFile: 'images/item-$id.jpg',
+      imageThumb: 'images/item-$id-thumb.jpg',
+    );
+    final row = await (db.select(db.items)..where((t) => t.id.equals(id)))
+        .getSingle();
+    expect(row.imageFile, 'images/item-$id.jpg');
+    expect(row.imageThumb, 'images/item-$id-thumb.jpg');
+    // س-124: الحذف بمطابقة يمسح الحقل (والملفات بيد الواجهة).
+    await db.clearItemImages(id);
+    final cleared =
+        await (db.select(db.items)..where((t) => t.id.equals(id)))
+            .getSingle();
+    expect(cleared.imageFile, isNull);
+    expect(cleared.imageThumb, isNull);
+  });
+
+  test('س-131 (D-126): الباركود — إضافة وحذف وأكثر من رمز للصنف', () async {
+    final id = await seedItem('BC-1');
+    final b1 = await db.insertItemBarcode(
+        itemId: id, barcode: '6290000000017');
+    final b2 = await db.insertItemBarcode(
+        itemId: id, barcode: '6290000000024');
+    expect(b1, isNot(b2), reason: 'أكثر من رمز للصنف تمهيداً لوحدات التعبئة');
+    var codes = await db.barcodesOfItem(id);
+    expect(codes.map((c) => c.barcode),
+        ['6290000000017', '6290000000024']);
+    await db.deleteItemBarcode(b2);
+    codes = await db.barcodesOfItem(id);
+    expect(codes, hasLength(1));
+  });
+
+  test('س-131: حامل الرمز المكرر يعرض الصنف الحامل بصيغة «الاسم (الكود)»',
+      () async {
+    final id = await seedItem('BC-2');
+    await db.insertItemBarcode(itemId: id, barcode: '6290000000031');
+    final holder = await db.barcodeHolder('6290000000031');
+    expect(holder, isNotNull);
+    expect(holder!.itemId, id);
+    expect(holder.displayLabel, 'صنف BC-2 (BC-2)');
+    // الرمز المجهول لا حامل له.
+    expect(await db.barcodeHolder('6290000000099'), isNull);
+  });
+
+  test('س-132 (D-126): فهرس الرموز والمطابقة الكاملة للقارئ', () async {
+    final a = await seedItem('BC-3');
+    final b = await seedItem('BC-4');
+    await db.insertItemBarcode(itemId: a, barcode: '6290000000048');
+    await db.insertItemBarcode(itemId: b, barcode: '6290000000055');
+    final index = await db.barcodeIndexByItem();
+    expect(index[a], ['6290000000048']);
+    expect(index[b], ['6290000000055']);
+    // المطابقة الكاملة — طريق قارئ البلوتوث.
+    expect(await db.itemIdByBarcode('6290000000048'), a);
+    expect(await db.itemIdByBarcode(' 6290000000055 '), b,
+        reason: 'التقليم قبل المطابقة الحرفية');
+    expect(await db.itemIdByBarcode('6290000000999'), isNull,
+        reason: 'رمز غير مرتبط بأي صنف — رسالة س-132');
   });
 }

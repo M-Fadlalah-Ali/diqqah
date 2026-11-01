@@ -54,20 +54,29 @@ String itemSkuKey(String raw) => raw.trim();
 
 /// حقول الصنف القابلة للبحث الجامع (س-38، D-064 نفسه): الاسم والكود
 /// والتصنيف — والتطبيع العربي للبحث حصراً دالة الأطراف النقية ذاتها.
+///
+/// س-132 (دفعة 10): خانة بحث بنود الفواتير تطابق الاسم والكود
+/// **والباركود** — القائمة اختيارية فلا يتغير سلوك البحث القائم حيثما
+/// لم تُمرَّر باركودات.
 class ItemSearchFields {
   final String name;
   final String sku;
   final String category;
 
+  /// رموز الباركود المرتبطة بالصنف — مطابقة حرفية مقلمة (تفرد الجدول
+  /// F-035) بلا تطبيع عربي: الرموز لاتينية/رقمية بقارئ الآلة.
+  final List<String> barcodes;
+
   const ItemSearchFields({
     required this.name,
     required this.sku,
     this.category = '',
+    this.barcodes = const [],
   });
 
   /// مطابقة «كلمات متفرقة تلتقي» (D-064): كل كلمة مكتوبة تجد موضعها في
-  /// الاسم أو الكود أو التصنيف بأي ترتيب — «زيت 100» تجيء بـ«زيت محلي
-  /// (100)» فيكفي. الخانة الفارغة تجيء بالجميع.
+  /// الاسم أو الكود أو التصنيف أو الباركود بأي ترتيب — «زيت 100» تجيء
+  /// بـ«زيت محلي (100)» فيكفي. الخانة الفارغة تجيء بالجميع.
   bool matchesQuery(String query) {
     final tokens = query
         .split(RegExp(r'\s+'))
@@ -78,13 +87,42 @@ class ItemSearchFields {
     final nameN = normalizeArabicForSearch(name);
     final skuN = normalizeArabicForSearch(sku);
     final categoryN = normalizeArabicForSearch(category);
+    final barcodeNs = [
+      for (final b in barcodes) b.trim().toLowerCase(),
+    ].where((b) => b.isNotEmpty).toList(growable: false);
     for (final token in tokens) {
-      final hit =
-          nameN.contains(token) || skuN.contains(token) || categoryN.contains(token);
+      var hit = nameN.contains(token) ||
+          skuN.contains(token) ||
+          categoryN.contains(token);
+      if (!hit && barcodeNs.isNotEmpty) {
+        for (final b in barcodeNs) {
+          if (b.contains(token)) {
+            hit = true;
+            break;
+          }
+        }
+      }
       if (!hit) return false;
     }
     return true;
   }
+}
+
+/// س-132: مطابقة رمز باركود **كامل** يجلب الصنف مباشرة — قارئ
+/// البلوتوث يكتب الرمز فيفوز الصنف بلا لفّة قوائم. يعيد معرّف الصنف أو
+/// null — المطابقة الحرفية المقلمة حصراً (تفرد جدول الباركود F-035).
+int? itemIdByExactBarcode(
+  String query,
+  Map<int, List<String>> barcodesByItem,
+) {
+  final q = query.trim();
+  if (q.isEmpty) return null;
+  for (final entry in barcodesByItem.entries) {
+    for (final b in entry.value) {
+      if (b.trim() == q) return entry.key;
+    }
+  }
+  return null;
 }
 
 /// صورة صنف قائم للتحقق والفهرسة — بلا أي اعتماد تخزين أو واجهة.

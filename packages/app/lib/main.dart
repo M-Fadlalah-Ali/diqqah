@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'first_run_screen.dart';
 import 'home_screen.dart';
+import 'item_images.dart';
+import 'print_image_prefs.dart';
 import 'ui_fonts.dart';
 
 /// D-104 (دفعة 8 س39): تسجيل عائلتي الخط (ساحل/تجوال) وقراءة الخيار
@@ -15,6 +17,7 @@ import 'ui_fonts.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await loadFontChoice();
+  await loadPrintImagePrefs();
   await preloadAppFonts();
   runApp(const DiqqahApp());
 }
@@ -102,6 +105,9 @@ class _AppGateState extends State<AppGate> {
     }
     final hasAnyUser = await db.hasAnyUser();
     if (!mounted) return;
+    // دفعة (10): جذر مجلد الصور بجوار القاعدة — المواضع كلها تقرأ منه
+    // (D-125)، والاختبارات تضبطه يدوياً على مجلد مؤقت.
+    ItemImagesStore.root = imagesDirFor(dbPath);
     setState(() {
       _db = db;
       _dbPath = dbPath;

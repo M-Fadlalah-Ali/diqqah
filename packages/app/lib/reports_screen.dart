@@ -1,8 +1,13 @@
+import 'dart:io' show File;
+import 'dart:typed_data' show Uint8List;
+
 import 'package:flutter/material.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'item_images.dart';
+import 'print_image_prefs.dart';
 import 'periods_screen.dart';
 import 'print_service.dart';
 
@@ -106,15 +111,32 @@ Widget _reportEmpty(String message) => Center(
       ),
     );
 
+/// قراءة بايتات صورة صنف للمطبوع — الغائب/الفاسد null فالنائب مكانه
+/// (س-125) ولا يكسر الطباعة أبداً.
+Future<Uint8List?> loadReportImageBytes(String? relativePath) async {
+  final abs = ItemImagesStore.resolve(relativePath);
+  if (abs == null || !File(abs).existsSync()) return null;
+  try {
+    return await File(abs).readAsBytes();
+  } catch (_) {
+    return null;
+  }
+}
+
 /// زر الطباعة الموحد للتقارير (D-016، دفعة إغلاق النواة س37) — توليد
 /// PDF بالقياس الافتراضي للتقارير (A4 عرضي، D-101 معروض) ومشاركته
 /// بنافذة النظام، والفشل رسالة لا صمت.
+///
+/// س-128 (دفعة 10): صور الصفوف تمرر غير null حصراً حين مفتاح التقرير
+/// مفعّل من الإعدادات (D-123) — والافتراضي معطل فلا قراءة ملفات أبداً.
 Future<void> _printReportDoc(
   BuildContext context, {
   required String title,
   required List<String> columns,
   required List<List<String>> rows,
   List<(String, String)> footer = const [],
+  List<Uint8List?>? rowImages,
+  List<String>? rowLetters,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   try {
@@ -124,6 +146,8 @@ Future<void> _printReportDoc(
       columns: columns,
       rows: rows,
       footerPairs: footer,
+      rowLeadingImages: rowImages,
+      rowPlaceholderLetters: rowLetters,
       format: resolvePageFormat(docKind: 'report'),
     );
     if (!context.mounted) return;
@@ -388,6 +412,10 @@ class _ReceivablesPayablesView extends StatelessWidget {
 
 /// تقرير المخزون (س-74/س-82): الكمية والقيمة من السجل والمتوسط عرضاً
 /// حصراً بالرسة المعتمدة.
+///
+/// س-128 (دفعة 10/D-118): عمود صورة في الشاشة والمطبوع — بمفتاحه
+/// المستقل من الإعدادات (D-123، افتراضه معطل) والنائب البصري لمن بلا
+/// صورة (س-125/D-122).
 class _InventoryView extends StatelessWidget {
   final DiqqahDatabase db;
 
@@ -397,40 +425,75 @@ class _InventoryView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('تقرير المخزون')),
-      body: FutureBuilder<List<InventoryReportRow>>(
-        future: db.inventoryReport(),
+      body: FutureBuilder<List<dynamic>>(
+        future: Future.wait([
+          db.inventoryReport(),
+          db.select(db.items).get(),
+        ]),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
-          final rows = snapshot.data!;
+          final rows =
+              snapshot.data![0] as List<InventoryReportRow>;
+          final items = snapshot.data![1] as List<Item>;
+          final itemById = {for (final it in items) it.id: it};
+          final withImages = printImageInventory.value;
           if (rows.isEmpty) {
             return _reportEmpty('لا مخزون بعد');
           }
           return Column(
             children: [
               _ReportActionsBar(
-                onPrint: () => _printReportDoc(
-                  context,
-                  title: 'تقرير المخزون',
-                  columns: const ['الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'],
-                  rows: [
-                    for (final row in rows)
-                      [
-                        '${row.sku} ${row.name}',
-                        row.warehouseName ?? 'غير محدد',
-                        '${row.qtyBase}',
-                        formatMinorAmount(row.totalValueMinor),
-                        row.avgCostBaseMinor == null
-                            ? '—'
-                            : formatMinorAmount(row.avgCostBaseMinor!),
-                      ],
-                  ],
-                ),
+                onPrint: () async {
+                  // الصور تُقرأ حصراً بمفتاح مفعّل (D-123) — والافتراضي
+                  // معطل في كل التقريرات فلا قراءة ملفات بلا سبب.
+                  List<Uint8List?>? rowImages;
+                  List<String>? rowLetters;
+                  if (withImages) {
+                    rowImages = [
+                      for (final row in rows)
+                        await loadReportImageBytes(
+                            itemById[row.itemId]?.imageFile),
+                    ];
+                    rowLetters = [
+                      for (final row in rows)
+                        itemById[row.itemId]?.name ?? 'صنف',
+                    ];
+                  }
+                  if (!context.mounted) return;
+                  await _printReportDoc(
+                    context,
+                    title: 'تقرير المخزون',
+                    columns: const ['الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'],
+                    rows: [
+                      for (final row in rows)
+                        [
+                          '${row.sku} ${row.name}',
+                          row.warehouseName ?? 'غير محدد',
+                          '${row.qtyBase}',
+                          formatMinorAmount(row.totalValueMinor),
+                          row.avgCostBaseMinor == null
+                              ? '—'
+                              : formatMinorAmount(row.avgCostBaseMinor!),
+                        ],
+                    ],
+                    rowImages: rowImages,
+                    rowLetters: rowLetters,
+                  );
+                },
               ),
               Expanded(
                 child: ListView(
                   children: [
                     for (final row in rows)
                       ListTile(
+                        leading: withImages
+                            ? ItemImageBox(
+                                imagePath:
+                                    itemById[row.itemId]?.imageThumb,
+                                itemName: row.name,
+                                size: 44,
+                              )
+                            : null,
                         title: Text('${row.sku} ${row.name}'),
                         subtitle: Text(
                             'المستودع: ${row.warehouseName ?? 'غير محدد'}'
@@ -450,13 +513,22 @@ class _InventoryView extends StatelessWidget {
 }
 
 /// صورة عرض موحدة لحركة صنف — تُبنى من صفوف البيع أو الشراء فتُقرأ
-/// الدفعتان بلسان واحد.
+/// الدفعتان بلسان واحد. س-128: الصورة ترويسة تأكيد أعلى الكشف —
+/// تنظر إلى وجه الصنف قبل أرقامه، بمفتاحها المستقل (D-123).
 class _MovementDisplay {
   final String title;
   final String subtitle;
   final String trailing;
+  final int itemId;
+  final String name;
 
-  const _MovementDisplay(this.title, this.subtitle, this.trailing);
+  const _MovementDisplay(
+    this.title,
+    this.subtitle,
+    this.trailing, {
+    required this.itemId,
+    required this.name,
+  });
 }
 
 /// شاشة الحركة بمدى تاريخ (س-75/س-83 للمبيعات وس-84 للمشتريات): المدى
@@ -478,6 +550,13 @@ class _MovementViewState extends State<_MovementView> {
   final TextEditingController _to = TextEditingController();
   String? _error;
   List<_MovementDisplay>? _rows;
+
+  /// خريطة الأصناف لمسارات صورها (س-128) — تُحمّل مع كل عرض.
+  Map<int, Item> _itemById = {};
+
+  String? _thumbPathOf(int itemId) => _itemById[itemId]?.imageThumb;
+
+  String? _filePathOf(int itemId) => _itemById[itemId]?.imageFile;
 
   @override
   void initState() {
@@ -515,6 +594,9 @@ class _MovementViewState extends State<_MovementView> {
       _rows = null;
     });
     try {
+      final items = await widget.db.select(widget.db.items).get();
+      final itemById = {for (final it in items) it.id: it};
+      _itemById = itemById;
       final List<_MovementDisplay> out;
       if (widget.sales) {
         final rows = await widget.db.salesMovementReport(
@@ -528,6 +610,8 @@ class _MovementViewState extends State<_MovementView> {
               'بيع ${r.qtySoldBase} × ${formatMinorAmount(r.salesValueBaseMinor)}'
                   ' · مردود ${r.qtyReturnedBase} × ${formatMinorAmount(r.returnsValueBaseMinor)}',
               'الصافي ${r.netQtyBase} × ${formatMinorAmount(r.netValueBaseMinor)}',
+              itemId: r.itemId,
+              name: itemById[r.itemId]?.name ?? r.name,
             ),
         ];
       } else {
@@ -542,6 +626,8 @@ class _MovementViewState extends State<_MovementView> {
               'شراء ${r.qtyPurchasedBase} × ${formatMinorAmount(r.purchasesValueBaseMinor)}'
                   ' · مردود ${r.qtyReturnedBase} × ${formatMinorAmount(r.returnsValueBaseMinor)}',
               'الصافي ${r.netQtyBase} × ${formatMinorAmount(r.netValueBaseMinor)}',
+              itemId: r.itemId,
+              name: itemById[r.itemId]?.name ?? r.name,
             ),
         ];
       }
@@ -590,15 +676,34 @@ class _MovementViewState extends State<_MovementView> {
                 FilledButton(onPressed: _run, child: const Text('عرض')),
                 if (_rows != null)
                   _ReportActionsBar(
-                    onPrint: () => _printReportDoc(
-                      context,
-                      title: title,
-                      columns: const ['الصنف', 'التفصيل', 'الصافي'],
-                      rows: [
-                        for (final row in _rows!)
-                          [row.title, row.subtitle, row.trailing],
-                      ],
-                    ),
+                    onPrint: () async {
+                      // س-128: صور الحركة بمفتاحها المستقل (D-123) —
+                      // الافتراضي معطل فلا قراءة ملفات بلا مفتاح.
+                      List<Uint8List?>? rowImages;
+                      List<String>? rowLetters;
+                      if (printImageMovement.value) {
+                        rowImages = [
+                          for (final row in _rows!)
+                            await loadReportImageBytes(
+                                _filePathOf(row.itemId)),
+                        ];
+                        rowLetters = [
+                          for (final row in _rows!) row.name,
+                        ];
+                      }
+                      if (!context.mounted) return;
+                      await _printReportDoc(
+                        context,
+                        title: title,
+                        columns: const ['الصنف', 'التفصيل', 'الصافي'],
+                        rows: [
+                          for (final row in _rows!)
+                            [row.title, row.subtitle, row.trailing],
+                        ],
+                        rowImages: rowImages,
+                        rowLetters: rowLetters,
+                      );
+                    },
                   ),
                 if (_error != null)
                   Padding(
@@ -621,6 +726,13 @@ class _MovementViewState extends State<_MovementView> {
                         children: [
                           for (final row in _rows!)
                             ListTile(
+                              leading: printImageMovement.value
+                                  ? ItemImageBox(
+                                      imagePath: _thumbPathOf(row.itemId),
+                                      itemName: row.name,
+                                      size: 44,
+                                    )
+                                  : null,
                               title: Text(row.title),
                               subtitle: Text(row.subtitle),
                               trailing: Text(row.trailing),

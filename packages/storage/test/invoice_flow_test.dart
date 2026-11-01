@@ -203,7 +203,7 @@ void main() {
   });
 
   test('بذر v7 (س-51): العملتان ببنيتهما والمستودع والصندوق على 1111', () async {
-    expect(db.schemaVersion, 11);
+    expect(db.schemaVersion, 12);
     final currencies = await db.currenciesOf();
     expect(currencies, hasLength(2),
         reason: 'قبل م3 لا عملة ثالثة — الأساسية والدولار حصراً (D-070)');
@@ -919,7 +919,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 11);
+    expect(migrated.schemaVersion, 12);
     final items = await migrated.select(migrated.items).get();
     expect(items, hasLength(1));
     expect(items.first.sku, 'SKU-OLD');

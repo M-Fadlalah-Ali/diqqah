@@ -1,12 +1,30 @@
+import 'dart:io' show File;
+import 'dart:typed_data' show Uint8List;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'item_images.dart';
+import 'item_media.dart';
+import 'print_image_prefs.dart';
 import 'print_service.dart';
 import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
+
+/// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
+/// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
+Future<Uint8List?> loadItemImageBytes(String? relativePath) async {
+  final abs = ItemImagesStore.resolve(relativePath);
+  if (abs == null || !File(abs).existsSync()) return null;
+  try {
+    return await File(abs).readAsBytes();
+  } catch (_) {
+    return null; // فاسد لا يكسر الطباعة أبداً — النائب مكانه
+  }
+}
 
 /// شاشة الفواتير — دفعة (6-ج) واجهات الإدخال (س-86..س-88، D-094 معروض):
 /// الوحدة مفتوحة من الهيكلية بعد اعتماد المالك لبوابة (6-ب) بلفظه
@@ -265,6 +283,14 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   List<Item> _items = [];
   Map<int, String> _unitNames = {};
 
+  /// فهرس الباركودات (س-132 — D-126): البحث السريع والمطابقة الكاملة
+  /// بقارئ البلوتوث.
+  Map<int, List<String>> _barcodesByItem = {};
+
+  /// خانة بحث بنود الفواتير السريعة (س-132): تطابق الاسم والكود
+  /// والباركود، والرمز الكامل يجلب الصنف مباشرة.
+  final TextEditingController _quickSearch = TextEditingController();
+
   /// المتاح لكل صنف من المستودع المختار (D-106 قراءة خالصة — س-108).
   Map<int, int> _stockAvail = {};
 
@@ -315,6 +341,9 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final currencies = await widget.db.currenciesOf();
     final items = await widget.db.select(widget.db.items).get();
     final units = await widget.db.select(widget.db.units).get();
+    // س-132: فهرس الباركودات للبحث السريع — قراءة واحدة عند الفتح،
+    // والإضافة من البطاقات تتجدد بفتح جديد للنموذج.
+    final barcodes = await widget.db.barcodeIndexByItem();
     // المتاح لكل صنف من المستودع المختار (س-108/D-106 قراءة خالصة) —
     // إصلاح علة س-119 (D-114): القراءة كانت قبل تعيين المستودع الافتراضي
     // فتُقرأ خريطة فارغة أولَ فتح وتبقى حتى تبديل المستودع يدوياً —
@@ -333,6 +362,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _currencies = currencies;
       _items = items.where((i) => i.isActive).toList();
       _unitNames = {for (final u in units) u.id: u.name};
+      _barcodesByItem = barcodes;
       _stockAvail = avail;
       // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط —
       // والمستودع المعين قبل قراءة المتاح (إصلاح س-119/D-114 أعلاه).
@@ -362,6 +392,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     _discount.dispose();
     _original.dispose();
     _narration.dispose();
+    _quickSearch.dispose();
     for (final l in _lines) {
       l.dispose();
     }
@@ -433,6 +464,82 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         FocusScope.of(context).requestFocus(_lines.last.qtyFocus);
       }
     });
+  }
+
+  /// تعيين صنف بند بأي مسار (القائمة أو البحث السريع) — تعبئة السعر
+  /// الافتراضي س-108 سارية في كل المسارات.
+  void _setLineItem(_LineUi line, int itemId) {
+    setState(() {
+      line.itemId = itemId;
+      _fillDefaultPrice(line);
+    });
+  }
+
+  /// البنود ذات الصنف الفارغ — مسار البحث السريع يملأ الأول أولاً.
+  _LineUi? get _firstEmptyLine {
+    for (final l in _lines) {
+      if (l.itemId == null) return l;
+    }
+    return null;
+  }
+
+  /// س-132: خانة بحث البنود — الرمز الكامل يجلب الصنف مباشرة (قارئ
+  /// البلوتوث يكتب الرمز ويعطي Enter بلا كاميرا أصلاً)، ورمز غير
+  /// مرتبط برسالته الحرفية، والبحث الجزئي يبقى للاقتراحات.
+  void _applyQuickSearch({required bool fromSubmit}) {
+    final q = _quickSearch.text.trim();
+    if (q.isEmpty) return;
+    final exact = itemIdByExactBarcode(q, _barcodesByItem);
+    if (exact == null) {
+      if (fromSubmit && _quickSuggestions(q).isEmpty) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+              const SnackBar(content: Text('رمز غير مرتبط بأي صنف')));
+      }
+      setState(() {}); // لا مطابقة كاملة — الاقتراحات تبقى معروضة
+      return;
+    }
+    var target = _firstEmptyLine;
+    if (target == null) {
+      _addLineFocused();
+      target = _lines.last;
+    }
+    _setLineItem(target, exact);
+    _quickSearch.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(target!.qtyFocus);
+      }
+    });
+  }
+
+  /// اقتراحات البحث الجزئي — الاسم والكود والباركود (س-132) بحد أعلى
+  /// للقائمة كي لا تطغى على النموذج.
+  List<Item> _quickSuggestions(String query) {
+    if (query.trim().isEmpty) return const [];
+    final out = <Item>[];
+    for (final it in _items) {
+      if (ItemSearchFields(
+        name: it.name,
+        sku: it.sku,
+        category: it.category ?? '',
+        barcodes: _barcodesByItem[it.id] ?? const [],
+      ).matchesQuery(query)) {
+        out.add(it);
+        if (out.length >= 5) break;
+      }
+    }
+    return out;
+  }
+
+  /// مسح باركود من خانة البحث (أندرويد — س-132): الرمز يعود فالمطابقة
+  /// تجري كسرها البلوتوث ذاتها، وغير المرتبط برسالته.
+  Future<void> _scanFromQuickSearch() async {
+    final code = await scanBarcode(context);
+    if (code == null || !mounted) return;
+    _quickSearch.text = code;
+    _applyQuickSearch(fromSubmit: true);
   }
 
   Item? _itemOf(int? itemId) {
@@ -721,6 +828,51 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 // س-117 (D-112): الفاصلة العشرية مقبولة حتى خانتين
                 // (3.5% مثال المالك) — ولا تناقض مع منع فواصل الألوف
                 // عن النسب فهما فاصلتان مختلفتان.
+                // س-132: خانة بحث بنود الفواتير — الاسم والكود والباركود،
+                // والرمز الكامل يجلب الصنف مباشرة (قارئ بلوتوث بلا
+                // كاميرا أصلاً)، وزر المسح بكاميرا الجوال على أندرويد.
+                // موضعها بعد البنود كي لا تزيح حقول النماذج المعروفة
+                // عن مواضعها المجرَّبة (درس كسر CI).
+                TextField(
+                  controller: _quickSearch,
+                  decoration: InputDecoration(
+                    labelText:
+                        'بحث سريع بالاسم أو الكود أو الباركود (س-132)',
+                    helperText: 'الرمز الكامل يجلب الصنف مباشرة — قارئ '
+                        'البلوتوث يكتب فيه ويعطي Enter',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: supportsCameraScan
+                        ? IconButton(
+                            tooltip: 'مسح باركود',
+                            icon: const Icon(Icons.qr_code_scanner),
+                            onPressed: _scanFromQuickSearch,
+                          )
+                        : null,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) =>
+                      _applyQuickSearch(fromSubmit: true),
+                ),
+                for (final suggestion in _quickSuggestions(_quickSearch.text))
+                  ListTile(
+                    dense: true,
+                    leading: ItemImageBox(
+                      imagePath: suggestion.imageThumb,
+                      itemName: suggestion.name,
+                      size: 36,
+                    ),
+                    title: Text('${suggestion.sku} ${suggestion.name}'),
+                    subtitle: Text(_itemSubtitle(suggestion)),
+                    onTap: () {
+                      var target = _firstEmptyLine;
+                      if (target == null) {
+                        _addLineFocused();
+                        target = _lines.last;
+                      }
+                      _setLineItem(target, suggestion.id);
+                      _quickSearch.clear();
+                    },
+                  ),
                 TextField(
                   controller: _discount,
                   keyboardType:
@@ -812,24 +964,49 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
               }),
             ),
             if (line.itemId != null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(_itemSubtitle(_itemOf(line.itemId)!),
-                    style: Theme.of(context).textTheme.bodySmall),
-              ),
-            if (unitName.isNotEmpty)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('الوحدة: $unitName (الأساسية)'),
-              ),
-            if (line.itemId != null)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  // س-120 (D-115): إجمالي السطر لحظياً — الكمية × السعر
-                  // − خصم السطر، ويتجدد مع كل ضغطة (مستمعو الحقول أعلاه).
-                  'إجمالي السطر: ${formatMinorAmount(_lineGrossMinor(line))}',
-                  style: Theme.of(context).textTheme.bodySmall,
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // س-126 (D-118): مصغر الصورة بجوار اسم الصنف فور
+                    // اختياره — المشتق المصغر حصراً لا الأصل (أداء
+                    // القوائم الطويلة).
+                    ItemImageBox(
+                      imagePath: _itemOf(line.itemId)?.imageThumb,
+                      itemName: _itemOf(line.itemId)!.name,
+                      size: 44,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                                _itemSubtitle(_itemOf(line.itemId)!),
+                                style:
+                                    Theme.of(context).textTheme.bodySmall),
+                          ),
+                          if (unitName.isNotEmpty)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text('الوحدة: $unitName (الأساسية)'),
+                            ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              // س-120 (D-115): إجمالي السطر لحظياً — الكمية × السعر
+                              // − خصم السطر، ويتجدد مع كل ضغطة (مستمعو الحقول أعلاه).
+                              'إجمالي السطر: ${formatMinorAmount(_lineGrossMinor(line))}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             Row(
@@ -945,6 +1122,26 @@ class InvoiceDetailScreen extends StatelessWidget {
     required this.invoiceId,
   });
 
+  /// صور بنود الفاتورة إن كان مفتاح نوعها مفعّلاً (س-127/D-123) —
+  /// والافتراضي معطل فلا قراءة ملفات أبداً بلا مفتاح، والغائب/الفاسد
+  /// null فيعرض النائب البصري بالمطبوع (س-125).
+  Future<(List<Uint8List?>?, List<String>?)> _printoutImages(
+    InvoiceDocument invoice,
+    List<InvoiceLineDocument> lines,
+    Map<int, Item> itemById,
+  ) async {
+    if (!printImagesForKind(InvoiceKind.fromStorage(invoice.kind))) {
+      return (null, null);
+    }
+    final images = <Uint8List?>[];
+    final letters = <String>[];
+    for (final line in lines) {
+      images.add(await loadItemImageBytes(itemById[line.itemId]?.imageFile));
+      letters.add(itemById[line.itemId]?.name ?? 'صنف');
+    }
+    return (images, letters);
+  }
+
   /// توليد قسيمة الفاتورة ومشاركتها بنافذة النظام — البيانات تُجلب
   /// هنا حصراً (لا تعتمد على حالة الشاشة)، والفشل رسالة لا صمت.
   Future<void> _sharePrintout(BuildContext context) async {
@@ -959,9 +1156,9 @@ class InvoiceDetailScreen extends StatelessWidget {
         return;
       }
       final items = await db.select(db.items).get();
-      final itemNames = <int, String>{
-        for (final item in items) item.id: item.name,
-      };
+      final itemById = {for (final item in items) item.id: item};
+      final (rowImages, rowLetters) =
+          await _printoutImages(invoice, lines, itemById);
       final bytes = await buildDocumentPdf(
         title: invoiceDisplayLabel(invoice),
         headerPairs: [
@@ -974,12 +1171,14 @@ class InvoiceDetailScreen extends StatelessWidget {
         rows: [
           for (final line in lines)
             [
-              itemNames[line.itemId] ?? 'صنف #${line.itemId}',
+              itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
               '${line.qtyBase}',
               formatMinorAmount(line.unitPriceMinor),
               formatMinorAmount(line.lineTotalDocMinor),
             ],
         ],
+        rowLeadingImages: rowImages,
+        rowPlaceholderLetters: rowLetters,
         footerPairs: [
           (
             'الإجمالي',
@@ -1021,9 +1220,9 @@ class InvoiceDetailScreen extends StatelessWidget {
               final lines = await db.invoiceLines(invoiceId);
               if (invoice == null || !context.mounted) return;
               final items = await db.select(db.items).get();
-              final itemNames = <int, String>{
-                for (final item in items) item.id: item.name,
-              };
+              final itemById = {for (final item in items) item.id: item};
+              final (rowImages, rowLetters) =
+                  await _printoutImages(invoice, lines, itemById);
               final bytes = await buildDocumentPdf(
                 title: invoiceDisplayLabel(invoice),
                 headerPairs: [
@@ -1037,12 +1236,14 @@ class InvoiceDetailScreen extends StatelessWidget {
                 rows: [
                   for (final line in lines)
                     [
-                      itemNames[line.itemId] ?? 'صنف #${line.itemId}',
+                      itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
                       '${line.qtyBase}',
                       formatMinorAmount(line.unitPriceMinor),
                       formatMinorAmount(line.lineTotalDocMinor),
                     ],
                 ],
+                rowLeadingImages: rowImages,
+                rowPlaceholderLetters: rowLetters,
                 footerPairs: [
                   (
                     'الإجمالي',

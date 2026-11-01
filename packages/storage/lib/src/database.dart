@@ -58,6 +58,15 @@ class Items extends Table {
   /// قيمة صفرية — ضريبة افتراضية غير معرفة (05)
   IntColumn get defaultTaxId => integer().nullable().named('default_tax_id')();
 
+  /// صورة الصنف — دفعة (10) بترحيلة v12 (س-123/D-120/D-125): مساران
+  /// نسبيان لمجلد القاعدة («صور بجوار ملف القاعدة لا مدموغة فيه»)،
+  /// الأصل 512 والمشتق المصغر 128 — null يعني الصنف بلا صورة والحالة
+  /// طبيعية تُعرض بالنائب البصري (س-125/D-122).
+  TextColumn get imageFile => text().nullable().named('image_file')();
+
+  /// المشتق المصغر لسطور الفواتير حصراً (س-126) — لا الأصل.
+  TextColumn get imageThumb => text().nullable().named('image_thumb')();
+
   BoolColumn get isActive => boolean().named('is_active')();
 
   /// اصطلاح «كل جدول» (D-055) — uuid إلزامي عند كل إدراج.
@@ -575,6 +584,13 @@ class AppMeta extends Table {
 /// مطابقة فاتورة مسودة، وتوسعة حاجز سالب الصندوق للخروج بالتحويل)
 /// + بذر تفعيل حسابَي فروق العملة 44/55 (F-123/D-085 معروضان) —
 /// ومحرك السندات والتحويل والتسوية كامل الفحص خلفياً.
+/// v9 (دفعة 6): حواجز الإقفال D-088. v10 (س37): صلاحيات الشاشات
+/// F-080/D-100. v11 (س40): الخصم العشري ×100 D-112. v12 (دفعة 10:
+/// الصور والباركود س-123..س-132/D-118..D-126): عمودا الصورة على
+/// items (image_file/image_thumb مساران نسبيان لمجلد بجوار القاعدة)
+/// بـADD COLUMN بحرس pragma (درس v3/v10 المجرّب) — وجدول الباركود
+/// الجاهز من اليوم الأول (F-035) لا يُمسّ بل يُفتح مساره: لا جداول
+/// جديدة ولا أعمدة عليه.
 @DriftDatabase(tables: [
   Items,
   Roles,
@@ -624,7 +640,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -836,6 +852,29 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               await customStatement(
                   'UPDATE invoices SET discount_rate = discount_rate * 100');
               await _createInvoiceTriggers();
+            }
+            // 11→12 (ومن إصدار أدنى مباشرة): دفعة (10) الصور والباركود
+            // (س-123..س-132/D-118..D-126) — عمودا الصورة على items
+            // بـADD COLUMN بحرس pragma (درس v3/v10: الترقيات من إصدار
+            // أدنى تكون قد بنته createAll بشكله الحالي فالإضافة العمياء
+            // تصطدم بـduplicate column). مساران nullable فلا إعادة بناء
+            // ولا قيم تُهجّر: الصنف بلا صورة null طبيعياً والنائب
+            // البصري يعرضه (س-125). جدول الباركود جاهز من اليوم الأول
+            // (F-035) فلا حاجة لأي بنية جديدة.
+            if (version == 12) {
+              final itemCols = (await customSelect(
+                      "SELECT name FROM pragma_table_info('items')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!itemCols.contains('image_file')) {
+                await customStatement(
+                    'ALTER TABLE items ADD COLUMN image_file TEXT NULL');
+              }
+              if (!itemCols.contains('image_thumb')) {
+                await customStatement(
+                    'ALTER TABLE items ADD COLUMN image_thumb TEXT NULL');
+              }
             }
           }
         },
@@ -1213,6 +1252,126 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // صورة الصنف والباركود — دفعة (10) «الصور والباركود»
+  // (س-123..س-132، D-118..D-126). الملفات نفسها تديرها الواجهة
+  // (كتابة/حذف في مجلد بجوار القاعدة D-125) — والتخزين هنا يحمل
+  // المسارين النسبيين وقراءات الباركود حصراً.
+  // ─────────────────────────────────────────────────────────────────
+
+  /// تثبيت مسارَي صورة صنف بعد كتابة الملفين (س-123) — المسارات نسبية
+  /// لمجلد القاعدة كي تعمل بعد الاستعادة على أي جهاز بلا هجرة مسارات.
+  Future<void> setItemImages(
+    int itemId, {
+    required String imageFile,
+    required String imageThumb,
+  }) async {
+    await (update(items)..where((t) => t.id.equals(itemId))).write(
+      ItemsCompanion(
+        imageFile: Value(imageFile),
+        imageThumb: Value(imageThumb),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// حذف صورة صنف بمطابقة (س-124: الحذف بمطابقة يمسح الحقل والملفين
+  /// — ملفات المجلد بيد الواجهة).
+  Future<void> clearItemImages(int itemId) async {
+    await (update(items)..where((t) => t.id.equals(itemId))).write(
+      ItemsCompanion(
+        imageFile: const Value(null),
+        imageThumb: const Value(null),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// س-131: إضافة رمز باركود لصنف — التفرد مضمون بالفهرس القائم
+  /// (F-035) وholderBarcode قبل الاستدعاء يحمي برسالة الصنف الحامل
+  /// بدل استثناء خام. أكثر من رمز للصنف مشروع تمهيداً لوحدات التعبئة
+  /// (م2 — F-035).
+  Future<int> insertItemBarcode({
+    required int itemId,
+    required String barcode,
+  }) async {
+    final clean = barcode.trim();
+    assert(clean.isNotEmpty, 'الرمز إلزامي (س-131)');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return into(itemBarcodes).insert(
+      ItemBarcodesCompanion.insert(
+        itemId: itemId,
+        barcode: clean,
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
+  /// س-131: حذف رمز من بطاقة صنف — حذف فيزيائي لارتباط عرض لا حاجة
+  /// لتاريخه (لا محاسبة على رمز)، والرمز الوحيد المتأثر هو هذا الصف.
+  Future<void> deleteItemBarcode(int barcodeId) async {
+    await (delete(itemBarcodes)..where((t) => t.id.equals(barcodeId))).go();
+  }
+
+  /// رموز صنف مرتبة — عرض قسم الباركود في البطاقة (س-131).
+  Future<List<ItemBarcode>> barcodesOfItem(int itemId) async {
+    return (select(itemBarcodes)
+          ..where((t) => t.itemId.equals(itemId))
+          ..orderBy([(t) => OrderingTerm.asc(t.id)]))
+        .get();
+  }
+
+  /// صف حامل رمز مكرر — رسالة س-131 الحرفية: «الرمز مستخدم للصنف:
+  /// <الاسم (الكود)>» — الاسم والكود من صنفه الحي (المعطل ما زال
+  /// حاجزاً فاسمه وكوده محجوزان).
+  Future<BarcodeHolderRow?> barcodeHolder(String barcode) async {
+    final rows = await customSelect(
+      'SELECT b.id AS barcode_id, b.item_id AS item_id, '
+      'i.sku AS sku, i.name AS name '
+      'FROM item_barcodes b JOIN items i ON i.id = b.item_id '
+      'WHERE b.barcode = ?1 AND b.is_deleted = 0 AND i.is_deleted = 0 '
+      'LIMIT 1',
+      variables: [Variable.withString(barcode.trim())],
+    ).get();
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    return BarcodeHolderRow(
+      barcodeId: r.data['barcode_id'] as int,
+      itemId: r.data['item_id'] as int,
+      sku: r.data['sku'] as String,
+      name: r.data['name'] as String,
+    );
+  }
+
+  /// س-132: فهرس الرموز كلها بمعرفات أصنافها — خانة بحث البنود
+  /// (المطابقة الكاملة قارئ البلوتوث) وخانة اقتراحاتها.
+  Future<Map<int, List<String>>> barcodeIndexByItem() async {
+    final rows = await customSelect(
+      'SELECT item_id, barcode FROM item_barcodes '
+      'WHERE is_deleted = 0 ORDER BY id',
+    ).get();
+    final out = <int, List<String>>{};
+    for (final r in rows) {
+      out.putIfAbsent(r.data['item_id'] as int, () => []).add(
+            r.data['barcode'] as String,
+          );
+    }
+    return out;
+  }
+
+  /// س-132: صنف رمز كامل — الطريق المباشر للقارئ. null = رمز غير
+  /// مرتبط بأي صنف (رسالة السيناريو الحرفية).
+  Future<int?> itemIdByBarcode(String barcode) async {
+    final rows = await customSelect(
+      'SELECT item_id FROM item_barcodes '
+      'WHERE barcode = ?1 AND is_deleted = 0 LIMIT 1',
+      variables: [Variable.withString(barcode.trim())],
+    ).get();
+    return rows.isEmpty ? null : rows.first.data['item_id'] as int;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -5678,6 +5837,25 @@ class VoucherListRow {
   String get counterpartLabel =>
       partyName ??
       (directAccountCode == null ? '—' : 'حساب $directAccountCode');
+}
+
+/// صف حامل رمز باركود مكرر (س-131، دفعة 10) — يحمل عرض الصنف الحامل
+/// بصيغة «الاسم (الكود)» المعتمدة كما تحمله رسائل الأصناف.
+class BarcodeHolderRow {
+  final int barcodeId;
+  final int itemId;
+  final String sku;
+  final String name;
+
+  const BarcodeHolderRow({
+    required this.barcodeId,
+    required this.itemId,
+    required this.sku,
+    required this.name,
+  });
+
+  /// العرض المعتمد «الاسم (الكود)» — صياغة رسالة الرفض تري صاحبها.
+  String get displayLabel => itemDisplayLabel(name, sku);
 }
 
 /// صف قائمة تحويلات الصناديق للتصفح (س-16/05 §6).

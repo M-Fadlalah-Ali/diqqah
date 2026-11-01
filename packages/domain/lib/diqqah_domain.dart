@@ -4,6 +4,7 @@ export 'src/backup.dart';
 export 'src/integrity.dart';
 export 'src/invoice.dart';
 export 'src/item.dart';
+export 'src/item_image.dart';
 export 'src/journal.dart';
 export 'src/money.dart';
 export 'src/party.dart';
