@@ -189,11 +189,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     // العودة لأعلى البطاقة كي تُبنى حقول الكود والاسم والوحدة (درس
-    // السرد الكسول: موضع التمرير باقٍ بعد شاشة الإطار)
-    await tester.drag(find.byType(ListView).first, const Offset(0, 5000));
-    await tester.pump();
-    await tester.drag(find.byType(ListView).first, const Offset(0, 5000));
-    await tester.pump();
+    // السرد الكسول) — وعلة الجولة 131: السحبة أثناء خروج شاشة القص
+    // تصيب طبقتها الخارجة لا البطاقة (نمط علة س30 نفسه) — ضخّ كامل
+    // لانتقال الرجوع أولاً ثم سحبات محدودة حتى يُبنى حقل الكود أعلى
+    // البطاقة لا سحبتان عمياء لا أثر لهما.
+    await tester.pump(const Duration(milliseconds: 400));
+    for (var i = 0;
+        i < 8 && find.text('كود الصنف (الأساس)').evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, 5000));
+      await tester.pump();
+    }
+    await tester.pump(const Duration(milliseconds: 100));
 
     await tester.enterText(find.byType(TextFormField).at(0), 'P-1');
     await tester.enterText(find.byType(TextFormField).at(1), 'صنف مصوّر');
@@ -366,35 +373,38 @@ void main() {
     expect(String.fromCharCodes(plain.take(4)), '%PDF');
   });
 
-  testWidgets('س-128 (D-118): الصورة في تقرير المخزون — مفتاح مستقل '
-      'والنائب البصري لمن بلا صورة', (tester) async {
+  testWidgets('س-128 (D-118) أ: تقرير المخزون بلا صور افتراضاً — المفتاح '
+      'المعطل لا يضيف موضع صورة', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db); // زيت 4 متاح — صف مخزون قائم
     useTempImagesRoot();
 
-    // افتراضه معطل: بلا موضع صورة — ضخّات محدودة لا pumpAndSettle
-    // (درس س22..س26 ودرس حلقة المستقبل الجديد)
+    // ضخّات محدودة لا pumpAndSettle (درس س22..س26 ودرس حلقة المستقبل)
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
     await tester.pump();
     await tester.tap(find.text('تقرير المخزون'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byType(ItemImageBox), findsNothing);
+    expect(find.byType(ItemImageBox), findsNothing,
+        reason: 'الافتراضي معطل في التقريرين أيضاً (D-123) — بلا موضع '
+            'صورة ولا قراءة ملفات بلا سبب');
+  });
 
-    // درس الجولة 130: pumpWidget يحافظ على حالة الملاح (شجرة الجذر
-    // تُحدَّث في موضعها لا من الصفر) فطريق التقرير المدفوع بالطور الأول
-    // يبقى فوق الشجرة المحدثة ويصير «تقرير المخزون» نصّين (بلاطة
-    // القائمة وعنوان الشاشة المدفوعة) — اللمسة الغامضة ترفض. الرجوع
-    // يفرّغ المكدس أولاً ثم الفتح الجديد بشارة المفتاح المفعلة.
-    await tester.pageBack();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump(const Duration(milliseconds: 100));
+  testWidgets('س-128 (D-118) ب: تفعيل مفتاح المخزون وحده يجعل الصورة '
+      'عموداً في التقرير — والنائب البصري لمن بلا صورة', (tester) async {
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
+    await seedKnownCycle(db); // زيت 4 متاح — صف مخزون قائم
+    useTempImagesRoot();
 
-    // المفتاح المستقل من الإعدادات ثم فتح جديد
+    // المفتاح المستقل — بلا إعادة فتح ولا مكدس ملاح (درس الجولة 131:
+    // تقسيم الطورين اختبارين مستقلين أضمن من الرجوع وإعادة الفتح)
     savePrintImagePref('inventory', true);
+    expect(printImagesForKind(InvoiceKind.sale), isFalse,
+        reason: 'مفتاح المخزون لا يُسوق بقية المفاتيح — استقلال D-123');
+
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
     await tester.pump();
     await tester.tap(find.text('تقرير المخزون'));
