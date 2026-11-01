@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/items_screen.dart';
 
+import 'test_guard.dart';
+
 /// اختبارات شاشة الأصناف — دفعة م1 (2) على السيناريوهات س-36..س-41
 /// (06 §1-ج) بقرارات D-073..D-075.
 ///
@@ -11,7 +13,27 @@ import 'package:diqqah_app/items_screen.dart';
 /// والضخّات محدودة لا pumpAndSettle (نمط parties_screen_test الموثق س22..س26)
 /// ومؤشر الكتابة مثبت — كلها دروس CI 2026-10-29/30 حرفاً.
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
+
+  /// درس السرد الكسول بوجه الجولة 128: قسمَا الصورة والباركود في البطاقة
+  /// (دفعة 10) أطالا محتواها فالسحبة الثابتة (-320) لم تعد تكفي — الزر
+  /// أسفل البطاقة لا يُبنى أصلاً في ListView الكسول فيجد الملف zero
+  /// widgets (علّة س-39/س-40 بالتشغيل 128). تمرير محدود حتى يُبنى النص
+  /// ثم ensureVisible قبل اللمس — النمط نفسه الموثق في batch9/batch10.
+  Future<void> _scrollToText(WidgetTester tester, String text) async {
+    for (var i = 0; i < 12 && find.text(text).evaluate().isEmpty; i++) {
+      await tester.drag(find.byType(ListView).last, const Offset(0, -260));
+      await tester.pump();
+    }
+    final f = find.text(text);
+    if (f.evaluate().isNotEmpty) {
+      await tester.ensureVisible(f.last);
+      await tester.pump();
+    }
+  }
 
   testWidgets('س-36: بطاقة صنف جديد — التحقق يتقدم رسالةً رسالة (الاسم ثم '
       'الكود ثم الوحدة)، وإضافة وحدة من البطاقة تختار فوراً، وبالحفظ يظهر '
@@ -292,11 +314,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    // استقرار كامل لانتقال الدخول قبل السحبة (علة س30)
+    // استقرار كامل لانتقال الدخول قبل التمرير (علة س30)
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await _scrollToText(tester, 'تعطيل الصنف');
     await tester.tap(find.text('تعطيل الصنف'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -311,11 +331,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    // استقرار كامل قبل السحبة الثانية (علة س30)
+    // استقرار كامل قبل التمرير الثاني (علة س30)
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    await _scrollToText(tester, 'إعادة تفعيل الصنف');
     await tester.tap(find.text('إعادة تفعيل الصنف'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

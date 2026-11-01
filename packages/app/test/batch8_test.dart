@@ -15,12 +15,16 @@ import 'package:diqqah_app/input_formatters.dart';
 import 'package:diqqah_app/ui_fonts.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات دفعة (8) «تكميلات ما قبل الإغلاق» — س-105..س-116 وقراراتها
 /// D-102..D-107 بلفظ المالك واعتماده (س39) — بنمط القاعدة
 /// `inMemorySyncClose` حصراً وضخّات محدودة لا pumpAndSettle (درس
 /// س22..س26 الموثق)، والحكم بنصوص فريدة (درس س35).
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   /// درس السرد الكسول (س35/س36): ListView يبني الظاهر حصراً — حقل أسفل

@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/vouchers_screen.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة السندات — دفعة (6-ج) على السيناريوهات المعروضة
 /// س-89..س-92 (06 §1-ط، D-094..D-096 معروض) بأرقام الدورة المعروفة:
@@ -25,6 +26,9 @@ import 'seed_cycle.dart';
   }
 
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   testWidgets('س-89: قائمة السندات تعرض ضخ رأس المال بتسميته الكاملة '

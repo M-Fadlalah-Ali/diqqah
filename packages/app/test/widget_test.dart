@@ -14,8 +14,12 @@ import 'package:diqqah_app/settings_screen.dart';
 import 'package:diqqah_app/invoices_screen.dart';
 import 'package:diqqah_app/boxes_screen.dart';
 import 'package:diqqah_app/roles_screen.dart';
+import 'test_guard.dart';
 
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   // تثبيت المؤشر الوامض تجريبياً — F-016 يفتح شاشة بحقل بحث، والوميض مصدر
   // إطارات لا نهائية لأي ضخّ غير محدود (النمط نفسه الموثق في parties_screen_test)
   EditableText.debugDeterministicCursor = true;

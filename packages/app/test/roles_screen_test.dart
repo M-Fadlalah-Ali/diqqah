@@ -3,11 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/roles_screen.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة الصلاحيات بوضع الكتابة الكامل — دفعة إغلاق النواة
 /// (س37، F-080/D-100 معروض): الأدوار النمطية الأربعة مزروعة بأذوناتها،
 /// وإنشاء أدوار مخصصة، وتعديل أذونات دور، وتعيين دور لمستخدم.
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   Future<void> open(WidgetTester tester, DiqqahDatabase db) async {

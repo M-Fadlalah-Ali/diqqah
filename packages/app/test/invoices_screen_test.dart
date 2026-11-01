@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/invoices_screen.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة الفواتير — دفعة (6-ج) على السيناريوهات المعروضة
 /// س-86..س-88 (06 §1-ط، D-094..D-096 معروض) بأرقام الدورة المعروفة
@@ -26,6 +27,9 @@ import 'seed_cycle.dart';
   }
 
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   testWidgets('س-86: قائمة الفواتير تعرض المرحّلة بأرقامها المعروفة '

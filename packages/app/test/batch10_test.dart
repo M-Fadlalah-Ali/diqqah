@@ -18,6 +18,7 @@ import 'package:diqqah_app/settings_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات دفعة (10) «الصور والباركود» — س-123..س-132 وقراراتها
 /// D-118..D-126 بلفوظ المالك الحرفية من نقاش الجولات الأربع واعتماده
@@ -27,6 +28,11 @@ import 'seed_cycle.dart';
 /// ومجلد الصور جذر مؤقت لكل اختبار (D-125: ملفات بجوار القاعدة لا
 /// دمج فيها)، وقارئ الكاميرا حقن اختباري فلا قناة منصة أبداً.
 ///
+/// درس IO المتزامن (علّة CI 2026-11-01 — الجولة 128): بيئة testWidgets
+/// الوهمية لا تكمل عمليات الملفات غير المتزامنة خارج runAsync — فكل
+/// تهيئة المجلدات والملفات بـSync وكتابة الصور مُغلّفة بـrunAsync
+/// (نمط widget_test الموثق)، والاستطلاع بزمن واقعي يُشبع السلاسل الحية.
+///
 /// نقاط المالك الحرفية التي أنجبت هذه الدفعة: «يهمني جداً جداً وجود
 /// صورة الصنف في البطاقة والفاتورة بأنواعها عند الإدخال وعند الطباعة»
 /// و«طبعاً صورة واحدة تكفي، لسنا في موقع على الانترنت» و«يمكن إلغاؤه
@@ -34,6 +40,9 @@ import 'seed_cycle.dart';
 /// تفعيلها افتراضياً» و«فكرة الصورة في تقرير جرد المواد أو حركة
 /// المادة ضرورية».
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   /// درس السرد الكسول: ListView يبني الظاهر حصراً — التمرير حتى يظهر
@@ -97,8 +106,10 @@ void main() {
       '+iiigD//2Q==';
   final jpeg1x1 = base64Decode(jpeg1x1Base64);
 
-  Future<Directory> useTempImagesRoot() async {
-    final root = await Directory.systemTemp.createTemp('diqqah_b10_');
+  /// IO متزامن حصراً — createTemp غير المتزامن داخل الزمن الوهمي لا
+  /// يكتمل أبداً فعلِقت به سبعة اختبارات 10 دقائق (الجولة 128).
+  Directory useTempImagesRoot() {
+    final root = Directory.systemTemp.createTempSync('diqqah_b10_');
     ItemImagesStore.root = root.path;
     return root;
   }
@@ -142,8 +153,8 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
-    final root = await useTempImagesRoot();
-    addTearDown(() => root.delete(recursive: true));
+    final root = useTempImagesRoot();
+    addTearDown(() => root.deleteSync(recursive: true));
 
     await tester.pumpWidget(MaterialApp(
       home: ItemEditScreen(
@@ -196,10 +207,12 @@ void main() {
     expect(row.imageThumb, isNotNull);
     final original = File(p.join(root.path, row.imageFile!));
     final thumb = File(p.join(root.path, row.imageThumb!));
-    expect(await original.exists(), isTrue);
-    expect(await thumb.exists(), isTrue);
-    expect(await original.length(), greaterThan(0));
-    expect(await thumb.length(), greaterThan(0));
+    // المسار يُثبت على الصف بعد اكتمال الكتابة حصراً — الفحص متزامن
+    // (exists غير المتزامن تعليق آخر من نفس العلة)
+    expect(original.existsSync(), isTrue);
+    expect(thumb.existsSync(), isTrue);
+    expect(original.lengthSync(), greaterThan(0));
+    expect(thumb.lengthSync(), greaterThan(0));
     // D-125: الصور بجوار القاعدة في مجلدها لا داخل ملف القاعدة
     expect(p.basename(p.dirname(row.imageFile!)), 'images');
   });
@@ -209,8 +222,8 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
-    final root = await useTempImagesRoot();
-    addTearDown(() => root.delete(recursive: true));
+    final root = useTempImagesRoot();
+    addTearDown(() => root.deleteSync(recursive: true));
 
     final id = await db.insertItem(
       sku: 'P-2',
@@ -221,11 +234,12 @@ void main() {
       salePriceMinor: 0,
       priceCurrencyId: 1,
     );
-    final paths = await writeItemImagesFiles(
-      itemId: id,
-      original: jpeg1x1,
-      thumb: jpeg1x1,
-    );
+    // كتابة الملفين IO حقيقي — runAsync يهرب للزمن الواقعي (درس F-012)
+    final paths = await tester.runAsync(() => writeItemImagesFiles(
+          itemId: id,
+          original: jpeg1x1,
+          thumb: jpeg1x1,
+        ));
     await db.setItemImages(id, imageFile: paths.$1, imageThumb: paths.$2);
 
     final item = await itemBySku(db, 'P-2');
@@ -240,10 +254,15 @@ void main() {
     await tester.tap(find.text('حذف الصورة'));
     await tester.pump();
     await tester.tap(find.text('حفظ'));
-    // استطلاع حتى يكتمل الحفظ والمسح (نمط _waitUntil الموثق أعلاه)
+    // استطلاع حتى يكتمل الحفظ والمسح معاً — شرط القاعدة وحده سباق:
+    // مسح الحقل يسبق مسح الملفين فتخرج قيمة حقيقية قبل زوال الملفات
+    // (علّة سباق محتملة كُشفت بالمراجعة — الشرط يجمع القاعدة والملفات)
     final cleared = await _waitUntil(tester, () async {
       final r = await itemBySku(db, 'P-2');
-      return r.imageFile == null && r.imageThumb == null;
+      return r.imageFile == null &&
+          r.imageThumb == null &&
+          !File(p.join(root.path, paths.$1)).existsSync() &&
+          !File(p.join(root.path, paths.$2)).existsSync();
     });
     expect(cleared, isTrue,
         reason: 'س-124: الحذف بمطابقة اكتمل خلال مهلة الاستطلاع');
@@ -251,9 +270,9 @@ void main() {
     final row = await itemBySku(db, 'P-2');
     expect(row.imageFile, isNull);
     expect(row.imageThumb, isNull);
-    expect(await File(p.join(root.path, paths.$1)).exists(), isFalse,
+    expect(File(p.join(root.path, paths.$1)).existsSync(), isFalse,
         reason: 'س-124: لا ملفات يتيمة بعد الحذف');
-    expect(await File(p.join(root.path, paths.$2)).exists(), isFalse);
+    expect(File(p.join(root.path, paths.$2)).existsSync(), isFalse);
   });
 
   testWidgets('س-126 (D-118): مصغّر الصورة في بطاقة بند الفاتورة فور '
@@ -261,15 +280,16 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
-    final root = await useTempImagesRoot();
-    addTearDown(() => root.delete(recursive: true));
+    final root = useTempImagesRoot();
+    addTearDown(() => root.deleteSync(recursive: true));
 
     final oil = await itemBySku(db, 'Z-100');
-    final paths = await writeItemImagesFiles(
-      itemId: oil.id,
-      original: jpeg1x1,
-      thumb: jpeg1x1,
-    );
+    // كتابة الملفين IO حقيقي — runAsync يهرب للزمن الواقعي (درس F-012)
+    final paths = await tester.runAsync(() => writeItemImagesFiles(
+          itemId: oil.id,
+          original: jpeg1x1,
+          thumb: jpeg1x1,
+        ));
     await db.setItemImages(oil.id, imageFile: paths.$1, imageThumb: paths.$2);
 
     await tester.pumpWidget(
@@ -340,7 +360,7 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db); // زيت 4 متاح — صف مخزون قائم
-    await useTempImagesRoot();
+    useTempImagesRoot();
 
     // افتراضه معطل: بلا موضع صورة — ضخّات محدودة لا pumpAndSettle
     // (درس س22..س26 ودرس حلقة المستقبل الجديد)
@@ -378,13 +398,14 @@ void main() {
       'وبطاقة النسخة المستقلة ظاهرتان', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
-    final root = await Directory.systemTemp.createTemp('diqqah_b10_set_');
-    addTearDown(() => root.delete(recursive: true));
+    // IO متزامن حصراً — نمط widget_test (علّة createTemp الوهمية)
+    final root = Directory.systemTemp.createTempSync('diqqah_b10_set_');
+    addTearDown(() => root.deleteSync(recursive: true));
     final dbPath = p.join(root.path, 'diqqah.db');
     final imagesDir = Directory(p.join(root.path, 'images'));
-    await imagesDir.create(recursive: true);
-    await File(p.join(imagesDir.path, 'item-9.jpg'))
-        .writeAsBytes(List.filled(2048, 7));
+    imagesDir.createSync(recursive: true);
+    File(p.join(imagesDir.path, 'item-9.jpg'))
+        .writeAsBytesSync(List.filled(2048, 7));
 
     await tester.pumpWidget(MaterialApp(home: SettingsScreen(
       db: db,
@@ -408,7 +429,7 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
-    await useTempImagesRoot();
+    useTempImagesRoot();
 
     // صنف آخر حامل رمز — لرسالة التفرد بصيغة «الاسم (الكود)»
     final otherId = await db.insertItem(
@@ -461,7 +482,7 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
-    await useTempImagesRoot();
+    useTempImagesRoot();
 
     final oil = await itemBySku(db, 'Z-100');
     await db.insertItemBarcode(itemId: oil.id, barcode: '6290000000017');

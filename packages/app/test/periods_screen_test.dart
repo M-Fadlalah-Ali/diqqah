@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/periods_screen.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة الفترات والإقفال — س-85 من دفعة م1 (6-ب): الإقفال بقائمة
 /// مسوداته وتأكيدها الصريح (س-20) والفك بسبب نصي إلزامي (س2) — والسبب
@@ -11,6 +12,9 @@ import 'package:diqqah_app/periods_screen.dart';
 ///
 /// نمط inMemorySyncClose وضخّات محدودة — درس س22..س26 الموثق.
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   /// مسودة سند فوق مارس كي تُعرض قائمة الحسم (س-20)

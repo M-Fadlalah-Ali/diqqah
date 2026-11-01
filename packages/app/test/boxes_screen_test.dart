@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/boxes_screen.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة الصناديق — دفعة (6-ج) على السيناريو المعروض س-93
 /// (06 §1-ط، D-095 معروض) بأرقام الدورة المعروفة: الصندوق المبذر
@@ -26,6 +27,9 @@ import 'seed_cycle.dart';
   }
 
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   testWidgets('س-93: القائمة تعرض الصندوق المبذر ببطاقة حسابه ورصيد '

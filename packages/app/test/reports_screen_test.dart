@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/reports_screen.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة التقارير — دفعة م1 (6-ب) على السيناريوهات المعروضة
 /// س-79..س-84 (06 §1-ح) بقرارات D-091..D-093، وبأرقام الدورة المعروفة
@@ -15,6 +16,9 @@ import 'seed_cycle.dart';
 /// درس س22..س26 الموثق: المؤشر الوامض وتدفقات drift يمنعان الاستقرار
 /// أبداً، والإغلاق عادي في الteardown بلا رقصة ضخّات.
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   testWidgets('س-79/س-80: قائمة التقارير تفتح ميزان المراجعة بمجموعيه '

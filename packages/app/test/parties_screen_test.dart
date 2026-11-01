@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/parties_screen.dart';
+import 'test_guard.dart';
 
 /// اختبارات شاشة الأطراف — دفعة م1 (1) على السيناريوهات المعتمدة
 /// س-29..س-35 (06 §1-ب) بقرارات D-062..D-066.
@@ -14,6 +15,9 @@ import 'package:diqqah_app/parties_screen.dart';
 /// drift الموثق closeStreamsSynchronously (س26). الإغلاق نفسه إغلاق عادي
 /// في الteardown — لا runAsync ولا رقصة ضخّات.
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   // مؤشر الكتابة الوامض يجعل pumpAndSettle تدور إلى مهلتها (10 دقائق لكل
   // موضع — علّة CI 2026-10-29: الوظيفة عالقت 40+ دقيقة بلا نتيجة). التثبيت
   // التجريبي للمؤشر يقضي على المصدر: لا وميض فلا إطارات لا نهائية.

@@ -9,6 +9,7 @@ import 'package:diqqah_app/reports_screen.dart';
 import 'package:diqqah_app/input_formatters.dart';
 
 import 'seed_cycle.dart';
+import 'test_guard.dart';
 
 /// اختبارات دفعة (9) «تكميلات التجربة الأولى» — س-117..س-122 وقراراتها
 /// D-112..D-117 بلفظ المالك واعتماده «ابدأ التنفيذ» (س40) — بنمط
@@ -20,6 +21,9 @@ import 'seed_cycle.dart';
 /// المتاحة» و«افتقدت في الفواتير إجمالي السطر» و«رصيد الصندوق في
 /// السندات غير موجود».
 void main() {
+  // المهلة الحارسة 120ث قبل أي تسجيل اختبار — dart_test.yaml لا يسري
+  // على testWidgets (درس الجولات 124..128 الموثق في test_guard.dart).
+  installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
 
   /// درس السرد الكسول: ListView يبني الظاهر حصراً — التمرير حتى يظهر
