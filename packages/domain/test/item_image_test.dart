@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data' show Uint8List;
 
 import 'package:image/image.dart' as img;
 import 'package:test/test.dart';
@@ -50,11 +51,15 @@ void main() {
   bool isJpeg(List<int> bytes) =>
       bytes.length > 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
 
+  /// فك ناتج المحرك — decodeImage بصورة 4.x يقبل Uint8List حصراً.
+  img.Image decode(List<int> bytes) =>
+      img.decodeImage(Uint8List.fromList(bytes))!;
+
   test('س-123 (D-120/D-121): المحرك يخرج مربع 512 بمشتق 128 وJPEG حصراً',
       () {
     final result = ingestItemImage(gradientJpeg());
-    final original = img.decodeImage(result.originalJpeg)!;
-    final thumb = img.decodeImage(result.thumbJpeg)!;
+    final original = decode(result.originalJpeg);
+    final thumb = decode(result.thumbJpeg);
     expect(original.width, kItemImageMaxSide);
     expect(original.height, kItemImageMaxSide);
     expect(thumb.width, kItemImageThumbSide);
@@ -69,7 +74,7 @@ void main() {
   test('س-123: الحشو الهادئ — الصورة غير المربعة تتمركز والفائض أبيض',
       () {
     final result = ingestItemImage(gradientJpeg());
-    final original = img.decodeImage(result.originalJpeg)!;
+    final original = decode(result.originalJpeg);
     // 640×480 داخل لوحة 640: الحشو عمودي أعلى وأسفل — الزوايا بيضاء.
     final corner = original.getPixel(2, 2);
     expect(corner.r, greaterThan(245));
@@ -83,7 +88,7 @@ void main() {
   test('س-123: صورة ضخمة (4000×3000) تصير مربعاً مصغراً بلا انفجار ذاكرة',
       () {
     final result = ingestItemImage(gradientJpeg(width: 4000, height: 3000));
-    final original = img.decodeImage(result.originalJpeg)!;
+    final original = decode(result.originalJpeg);
     expect(original.width, kItemImageMaxSide);
     expect(original.height, kItemImageMaxSide);
   });
@@ -154,7 +159,7 @@ void main() {
       crop: const ItemImageCrop(x: 0, y: 0, side: 320),
       // ربع اللوحة العلوي — تدرج صاعد فالقسم الأعلى أفتح من المركز.
     );
-    final original = img.decodeImage(result.originalJpeg)!;
+    final original = decode(result.originalJpeg);
     expect(original.width, kItemImageMaxSide);
     expect(original.height, kItemImageMaxSide);
   });

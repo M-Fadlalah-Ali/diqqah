@@ -1,6 +1,7 @@
 import 'dart:convert' show utf8;
 import 'dart:io';
-import 'dart:typed_data' show ByteData, Endian, Uint8List;
+import 'dart:typed_data'
+    show ByteData, BytesBuilder, Endian, Uint8List;
 
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';

@@ -75,7 +75,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
             }
           }
         },
-        errorBuilder: (context, error) => Center(
+        errorBuilder: (context, error, child) => Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(

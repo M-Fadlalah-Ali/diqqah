@@ -120,7 +120,7 @@ void main() {
     addTearDown(db.close);
     await seedKnownCycle(db);
     final root = await useTempImagesRoot();
-    addTearDown(root.delete(recursive: true));
+    addTearDown(() => root.delete(recursive: true));
 
     await tester.pumpWidget(MaterialApp(
       home: ItemEditScreen(
@@ -174,7 +174,7 @@ void main() {
     addTearDown(db.close);
     await seedKnownCycle(db);
     final root = await useTempImagesRoot();
-    addTearDown(root.delete(recursive: true));
+    addTearDown(() => root.delete(recursive: true));
 
     final id = await db.insertItem(
       sku: 'P-2',
@@ -220,7 +220,7 @@ void main() {
     addTearDown(db.close);
     await seedKnownCycle(db);
     final root = await useTempImagesRoot();
-    addTearDown(root.delete(recursive: true));
+    addTearDown(() => root.delete(recursive: true));
 
     final oil = await itemBySku(db, 'Z-100');
     final paths = await writeItemImagesFiles(
@@ -332,7 +332,7 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     final root = await Directory.systemTemp.createTemp('diqqah_b10_set_');
-    addTearDown(root.delete(recursive: true));
+    addTearDown(() => root.delete(recursive: true));
     final dbPath = p.join(root.path, 'diqqah.db');
     final imagesDir = Directory(p.join(root.path, 'images'));
     await imagesDir.create(recursive: true);

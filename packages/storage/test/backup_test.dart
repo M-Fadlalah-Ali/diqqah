@@ -429,8 +429,9 @@ void main() {
 
   test('س-130 (D-124): النسخة بلا صور تُصرَّح كذلك وتُفرغ مجلد الصور '
       '— لا فجوة صامتة والصور القديمة في لقطة الرجوع', () async {
-    final imagesRoot = await seedImagesDir('no_images_case');
-    // النسخة أُنشئت بلا تضمين — الصور خارجها أصلاً.
+    await seedImagesDir('no_images_case');
+    // النسخة أُنشئت بلا تضمين — الصور خارجها أصلاً (والمجلد البذري هنا
+    // للتوثيق حصراً: النسخة بلا imagesDir فلا ملف صور أصلاً).
     final target = p.join(tempDir.path, 'backup-noimg.diqqah');
     await backupTo(db, target, includeImages: false);
     expect(await File(imagesSiblingPath(target)).exists(), isFalse,

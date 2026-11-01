@@ -178,8 +178,9 @@ ItemImageIngestResult ingestItemImage(
     final k = kItemImagePreScaleCap / originalCanvasSide;
     work = img.copyResize(
       image,
-      width: (image.width * k).round().clamp(1, kItemImagePreScaleCap),
-      height: (image.height * k).round().clamp(1, kItemImagePreScaleCap),
+      width: (image.width * k).round().clamp(1, kItemImagePreScaleCap).toInt(),
+      height:
+          (image.height * k).round().clamp(1, kItemImagePreScaleCap).toInt(),
       interpolation: img.Interpolation.cubic,
     );
   }
