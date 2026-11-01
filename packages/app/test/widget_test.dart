@@ -154,7 +154,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(InvoicesScreen), findsOneWidget);
     expect(find.textContaining('لا فواتير بعد'), findsOneWidget);
-    await tester.pageBack();
+    // س-135/D-129: توطين الواجهة عربياً غيّر تلميح زر الرجوع —
+    // pageBack يبحث عن «Back» الإنجليزية فلم يجدها، والنمط الموحد
+    // find.backButton() بعدها إعادة بناء كاملة.
+    await tester.tap(find.backButton());
     await tester.pumpAndSettle();
 
     // الصناديق — القائمة تعرض الصندوق المبذر بحسابه
@@ -169,7 +172,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(BoxesScreen), findsOneWidget);
     expect(find.textContaining('حساب 1111 · SYP'), findsOneWidget);
-    await tester.pageBack();
+    // س-135/D-129: توطين الواجهة عربياً غيّر تلميح زر الرجوع —
+    // pageBack يبحث عن «Back» الإنجليزية فلم يجدها، والنمط الموحد
+    // find.backButton() بعدها إعادة بناء كاملة.
+    await tester.tap(find.backButton());
     await tester.pumpAndSettle();
 
     // الصلاحيات — عرض قراءة حصراً (D-097)

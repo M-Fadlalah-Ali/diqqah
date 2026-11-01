@@ -1474,16 +1474,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             subtitle: Text(
                 'المكافئ الأساسي ${formatMinorAmount(invoice.totalBaseMinor)}'),
           ),
-          if (_isSale && _lines.isNotEmpty)
+          // زر «تسليم الكل» (س43 «لا بأس») — يظهر ما دام سطر غير مستلم
+          // ويُسحب كلياً من الشاشة عند اكتمال التسليم (لا زر ميت معطل).
+          if (_isSale && _lines.isNotEmpty && _hasUndelivered)
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: FilledButton.tonalIcon(
-                  // زر «تسليم الكل» (س43 «لا بأس») — يظهر ما دام سطر
-                  // غير مستلم فلا زر ميت حين يكتمل التسليم.
-                  onPressed:
-                      _busy || !_hasUndelivered ? null : _deliverAll,
+                  onPressed: _busy ? null : _deliverAll,
                   icon: const Icon(Icons.done_all_outlined),
                   label: const Text('تسليم الكل'),
                 ),
