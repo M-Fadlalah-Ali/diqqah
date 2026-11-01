@@ -3497,38 +3497,6 @@ Future<int?> latestSupplierPartyIdForItem(int itemId) async {
   return rows.first.data['party_id'] as int?;
 }
 
-/// صف شاشة «متابعة التسليم» (س-139/D-133) — كل سطر بيع غير مستلم
-/// بفاتورته وتاريخه وطرفه ومورده، الأقدم أولاً.
-class UndeliveredLineRow {
-  final int lineId;
-  final int invoiceId;
-  final String invoiceKind;
-  final String invoiceNumber;
-  final String invoiceDate;
-  final int itemId;
-  final String itemSku;
-  final String itemName;
-  final int qtyBase;
-  final String? partyName;
-  final int? supplierPartyId;
-  final String? supplierName;
-
-  const UndeliveredLineRow({
-    required this.lineId,
-    required this.invoiceId,
-    required this.invoiceKind,
-    required this.invoiceNumber,
-    required this.invoiceDate,
-    required this.itemId,
-    required this.itemSku,
-    required this.itemName,
-    required this.qtyBase,
-    required this.partyName,
-    required this.supplierPartyId,
-    required this.supplierName,
-  });
-}
-
 /// س-139/D-133: قارئة سطور البيع غير المستلمة — من المرحّل حصراً
 /// (المسودة ليست بيعاً واقعياً بعد)، والمردودات ليست تسليم زبون فلا
 /// تدخل، والأقدم أولاً بلفظ البوابة، والقراءة خالصة بلا جداول جديدة
@@ -5218,50 +5186,6 @@ Future<TrialBalanceReport> trialBalanceReport() async {
 // التوازن: مجموع الكشف ورصيده النهائي يطابقان صف الحساب في ميزان
 // المراجعة حصراً (روح F-068).
 
-/// سطر في كشف الحساب (س-146/D-137) — قيدٌ بتاريخه ورقمه وبيانه
-/// ومدينه ودائنه والرصيد التراكمي بعده.
-class AccountStatementEntry {
-  final int moveId;
-  final String moveDate;
-  final String moveNumber;
-  final String? narration;
-  final int debitMinor;
-  final int creditMinor;
-
-  /// الرصيد التراكمي بعد القيد باتجاه الحساب الطبيعي (نمط الميزان:
-  /// موجب على جانبه الطبيعي وسالب على المعاكس — لا يُقلب خفية).
-  final int runningBalanceMinor;
-
-  const AccountStatementEntry({
-    required this.moveId,
-    required this.moveDate,
-    required this.moveNumber,
-    required this.narration,
-    required this.debitMinor,
-    required this.creditMinor,
-    required this.runningBalanceMinor,
-  });
-}
-
-/// كشف الحساب كاملاً (س-146/D-137) — «دفتر الأستاذ» المعروف: كل قيود
-/// الحساب بترتيب الزمن، والمجاميع والرصيد النهائي يطابقان صف الحساب
-/// في ميزان المراجعة حصراً.
-class AccountStatementReport {
-  final AccountInfo account;
-  final List<AccountStatementEntry> entries;
-  final int totalDebitMinor;
-  final int totalCreditMinor;
-  final int closingBalanceMinor;
-
-  const AccountStatementReport({
-    required this.account,
-    required this.entries,
-    required this.totalDebitMinor,
-    required this.totalCreditMinor,
-    required this.closingBalanceMinor,
-  });
-}
-
 /// س-146/D-137: قارئة كشف الحساب من سطور القيود المرحّلة — بترتيب
 /// الزمن (تاريخ القيد ثم معرفه)، والرصيد التراكمي باتجاه الحساب
 /// الطبيعي بدالة صيغة الميزان ذاتها كي يطابق صف الميزان حرفاً،
@@ -5326,52 +5250,6 @@ Future<AccountStatementReport> accountStatementReport(int accountId) async {
   );
 }
 
-/// سطر في كشف حساب الطرف (س-147) — قيدٌ على طرف بذمّته.
-class PartyStatementEntry {
-  final int moveId;
-  final String moveDate;
-  final String moveNumber;
-  final String? narration;
-  final String accountCode;
-  final int debitMinor;
-  final int creditMinor;
-
-  /// الصافي التراكمي بعد القيد: موجب «هم يدينون لنا» وسالب «نحن
-  /// مدينون لهم» — بصيغة الذمم ذاتها (مدين − دائن).
-  final int runningNetDebitMinor;
-
-  const PartyStatementEntry({
-    required this.moveId,
-    required this.moveDate,
-    required this.moveNumber,
-    required this.narration,
-    required this.accountCode,
-    required this.debitMinor,
-    required this.creditMinor,
-    required this.runningNetDebitMinor,
-  });
-}
-
-/// كشف حساب الطرف كاملاً (س-147) — ضابطه: صافيه النهائي يطابق صف
-/// الطرف في تقرير الذمم حصراً (مدين − دائن على أرجل طرفه).
-class PartyStatementReport {
-  final int partyId;
-  final String partyName;
-  final List<PartyStatementEntry> entries;
-  final int totalDebitMinor;
-  final int totalCreditMinor;
-  final int closingNetDebitMinor;
-
-  const PartyStatementReport({
-    required this.partyId,
-    required this.partyName,
-    required this.entries,
-    required this.totalDebitMinor,
-    required this.totalCreditMinor,
-    required this.closingNetDebitMinor,
-  });
-}
-
 /// س-147: قارئة كشف حساب الطرف من أرجل طرفه على كل الحسابات (الذمم
 /// 112/211 وغيرهما إن ظهر طرف على حساب) — بترتيب الزمن، والحساب
 /// الغائب برسالته.
@@ -5422,28 +5300,6 @@ Future<PartyStatementReport> partyStatementReport(int partyId) async {
     totalCreditMinor: creditTotal,
     closingNetDebitMinor: debitTotal - creditTotal,
   );
-}
-
-/// حركة الصنف الواحد (س-145/D-136) — لقطات مخزونه من سجل الحركات
-/// حصراً بفاتورتها وتاريخها، بترتيب الورود (لقطات لا تعدل — F-140).
-class ItemStockMoveRow {
-  final int moveId;
-  final bool isIn;
-  final int qtyBase;
-  final String? warehouseName;
-  final int valueBaseMinor;
-  final String dateText;
-  final String? docLabel;
-
-  const ItemStockMoveRow({
-    required this.moveId,
-    required this.isIn,
-    required this.qtyBase,
-    required this.warehouseName,
-    required this.valueBaseMinor,
-    required this.dateText,
-    required this.docLabel,
-  });
 }
 
 /// س-145/D-136: قارئة حركة الصنف الواحد — من stock_moves مع فاتورتها
@@ -5976,6 +5832,150 @@ Future<void> _createClosingTriggers() async {
 /// رفض مدقق الدفتر — يحمل الأخطاء النوعية المحمولة (نمط الأطراف: أنواع
 /// بيانات لا نصوص جاهزة) وأوصافها العربية تخدم صفوف فشل التنفيذ حصراً؛
 /// الواجهة حرية صياغتها المعروضة.
+/// صف شاشة «متابعة التسليم» (س-139/D-133) — كل سطر بيع غير مستلم
+/// بفاتورته وتاريخه وطرفه ومورده، الأقدم أولاً.
+class UndeliveredLineRow {
+  final int lineId;
+  final int invoiceId;
+  final String invoiceKind;
+  final String invoiceNumber;
+  final String invoiceDate;
+  final int itemId;
+  final String itemSku;
+  final String itemName;
+  final int qtyBase;
+  final String? partyName;
+  final int? supplierPartyId;
+  final String? supplierName;
+
+  const UndeliveredLineRow({
+    required this.lineId,
+    required this.invoiceId,
+    required this.invoiceKind,
+    required this.invoiceNumber,
+    required this.invoiceDate,
+    required this.itemId,
+    required this.itemSku,
+    required this.itemName,
+    required this.qtyBase,
+    required this.partyName,
+    required this.supplierPartyId,
+    required this.supplierName,
+  });
+}
+
+/// سطر في كشف الحساب (س-146/D-137) — قيدٌ بتاريخه ورقمه وبيانه
+/// ومدينه ودائنه والرصيد التراكمي بعده.
+class AccountStatementEntry {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String? narration;
+  final int debitMinor;
+  final int creditMinor;
+
+  /// الرصيد التراكمي بعد القيد باتجاه الحساب الطبيعي (نمط الميزان:
+  /// موجب على جانبه الطبيعي وسالب على المعاكس — لا يُقلب خفية).
+  final int runningBalanceMinor;
+
+  const AccountStatementEntry({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.narration,
+    required this.debitMinor,
+    required this.creditMinor,
+    required this.runningBalanceMinor,
+  });
+}
+
+/// كشف الحساب كاملاً (س-146/D-137) — «دفتر الأستاذ» المعروف: كل قيود
+/// الحساب بترتيب الزمن، والمجاميع والرصيد النهائي يطابقان صف الحساب
+/// في ميزان المراجعة حصراً.
+class AccountStatementReport {
+  final AccountInfo account;
+  final List<AccountStatementEntry> entries;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+  final int closingBalanceMinor;
+
+  const AccountStatementReport({
+    required this.account,
+    required this.entries,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+    required this.closingBalanceMinor,
+  });
+}
+
+/// سطر في كشف حساب الطرف (س-147) — قيدٌ على طرف بذمّته.
+class PartyStatementEntry {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String? narration;
+  final String accountCode;
+  final int debitMinor;
+  final int creditMinor;
+
+  /// الصافي التراكمي بعد القيد: موجب «هم يدينون لنا» وسالب «نحن
+  /// مدينون لهم» — بصيغة الذمم ذاتها (مدين − دائن).
+  final int runningNetDebitMinor;
+
+  const PartyStatementEntry({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.narration,
+    required this.accountCode,
+    required this.debitMinor,
+    required this.creditMinor,
+    required this.runningNetDebitMinor,
+  });
+}
+
+/// كشف حساب الطرف كاملاً (س-147) — ضابطه: صافيه النهائي يطابق صف
+/// الطرف في تقرير الذمم حصراً (مدين − دائن على أرجل طرفه).
+class PartyStatementReport {
+  final int partyId;
+  final String partyName;
+  final List<PartyStatementEntry> entries;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+  final int closingNetDebitMinor;
+
+  const PartyStatementReport({
+    required this.partyId,
+    required this.partyName,
+    required this.entries,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+    required this.closingNetDebitMinor,
+  });
+}
+
+/// حركة الصنف الواحد (س-145/D-136) — لقطات مخزونه من سجل الحركات
+/// حصراً بفاتورتها وتاريخها، بترتيب الورود (لقطات لا تعدل — F-140).
+class ItemStockMoveRow {
+  final int moveId;
+  final bool isIn;
+  final int qtyBase;
+  final String? warehouseName;
+  final int valueBaseMinor;
+  final String dateText;
+  final String? docLabel;
+
+  const ItemStockMoveRow({
+    required this.moveId,
+    required this.isIn,
+    required this.qtyBase,
+    required this.warehouseName,
+    required this.valueBaseMinor,
+    required this.dateText,
+    required this.docLabel,
+  });
+}
+
 class LedgerValidationException implements Exception {
   final List<MoveValidationError> errors;
 
