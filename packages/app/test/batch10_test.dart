@@ -120,6 +120,16 @@ void main() {
         .getSingle();
   }
 
+  /// درس العزل (علّة CI الجولة 132): خرائط مفاتيح الطباعة ValueNotifier
+  /// عامة على مستوى الملف فتسري تفعيلات اختبار على ما بعده (تفعيل sale
+  /// بس-127 وصل س-128-ب) — كل اختبار مفاتيح يعيد الافتراضي أولاً كي
+  /// يكون حكمه بذاته لا بإرث اختبار سابق (مخزن prefs وهمي أصلاً في setUp).
+  void resetPrintImagePrefs() {
+    for (final (key, _) in kPrintImageChoices) {
+      savePrintImagePref(key, false);
+    }
+  }
+
   testWidgets('س-125 (D-122): النائب البصري — دائرة بأول حرف لمن بلا '
       'صورة، وصورة حقيقية لمن أدخلها', (tester) async {
     await tester.pumpWidget(const MaterialApp(
@@ -332,6 +342,7 @@ void main() {
   test('س-127 (D-123): الطباعة بالصور معطلة افتراضياً في كل الأنواع '
       '— والتفعيل من الإعدادات وحدها، والعمود يدخل PDF بالاحتواء',
       () async {
+    resetPrintImagePrefs();
     // الافتراضي معطل في الأنواع الأربعة والتقريرين (بلفظ المالك)
     for (final kind in InvoiceKind.values) {
       expect(printImagesForKind(kind), isFalse);
@@ -399,8 +410,10 @@ void main() {
     await seedKnownCycle(db); // زيت 4 متاح — صف مخزون قائم
     useTempImagesRoot();
 
-    // المفتاح المستقل — بلا إعادة فتح ولا مكدس ملاح (درس الجولة 131:
+    // المفتاح المستقل — إعادة الضبط أولاً (درس العزل أعلاه) ثم تفعيل
+    // المخزون وحده — بلا إعادة فتح ولا مكدس ملاح (درس الجولة 131:
     // تقسيم الطورين اختبارين مستقلين أضمن من الرجوع وإعادة الفتح)
+    resetPrintImagePrefs();
     savePrintImagePref('inventory', true);
     expect(printImagesForKind(InvoiceKind.sale), isFalse,
         reason: 'مفتاح المخزون لا يُسوق بقية المفاتيح — استقلال D-123');
