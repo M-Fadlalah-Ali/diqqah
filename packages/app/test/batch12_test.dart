@@ -17,6 +17,10 @@ import 'test_guard.dart';
 void main() {
   installTestTimeoutGuard();
   EditableText.debugDeterministicCursor = true;
+  // توليد القسيمة باختبار نقي — rootBundle للخط المدمج يحتاج ربطاً مهيأ
+  // (درس print_service_test)، وأي IO حقيقي داخل testWidgets يعلق
+  // بالزمن الوهمي (درس الجولات 124..128 الموثق).
+  TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('س-137/D-131: مربع «مستلم» بتفاصيل فاتورة البيع — التحديد '
       'يحفظ بقاعدة البيانات فوراً على المرحّلة، وزر «تسليم الكل» يختفي '
@@ -108,8 +112,8 @@ void main() {
     expect(lines.single.delivered, isTrue);
   });
 
-  testWidgets('س-140/D-134: قسيمة فاتورة البيع تحمل عمود «مستلم» وسطر '
-      'الخلاصة «مستلم X من Y» — بأرقام الفاتورة كما هي', (tester) async {
+  test('س-140/D-134: قسيمة فاتورة البيع تحمل عمود «مستلم» وسطر '
+      'الخلاصة «مستلم X من Y» — بأرقام الفاتورة كما هي', () async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
