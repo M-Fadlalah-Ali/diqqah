@@ -235,11 +235,12 @@ void main() {
       priceCurrencyId: 1,
     );
     // كتابة الملفين IO حقيقي — runAsync يهرب للزمن الواقعي (درس F-012)
-    final paths = await tester.runAsync(() => writeItemImagesFiles(
+    // — وتوقيع runAsync يعيد T? فالتأكيد بعد الانتظار (درس analyze الجولة 129)
+    final paths = (await tester.runAsync(() => writeItemImagesFiles(
           itemId: id,
           original: jpeg1x1,
           thumb: jpeg1x1,
-        ));
+        )))!;
     await db.setItemImages(id, imageFile: paths.$1, imageThumb: paths.$2);
 
     final item = await itemBySku(db, 'P-2');
@@ -285,11 +286,12 @@ void main() {
 
     final oil = await itemBySku(db, 'Z-100');
     // كتابة الملفين IO حقيقي — runAsync يهرب للزمن الواقعي (درس F-012)
-    final paths = await tester.runAsync(() => writeItemImagesFiles(
+    // — وتوقيع runAsync يعيد T? فالتأكيد بعد الانتظار (درس analyze الجولة 129)
+    final paths = (await tester.runAsync(() => writeItemImagesFiles(
           itemId: oil.id,
           original: jpeg1x1,
           thumb: jpeg1x1,
-        ));
+        )))!;
     await db.setItemImages(oil.id, imageFile: paths.$1, imageThumb: paths.$2);
 
     await tester.pumpWidget(
