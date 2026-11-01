@@ -46,9 +46,10 @@ void main() {
   EditableText.debugDeterministicCursor = true;
 
   /// درس السرد الكسول: ListView يبني الظاهر حصراً — التمرير حتى يظهر
-  /// النص المطلوب قبل لمسه (نمط batch9 الموثق).
+  /// النص المطلوب قبل لمسه (نمط batch9 الموثق) — والسقف 14 سحبة كي
+  /// تكفي أعمق بطاقة (النسخة المستقلة أسفل الإعدادات بوجه الجولة 130).
   Future<void> _scrollToText(WidgetTester tester, String text) async {
-    for (var i = 0; i < 10 && find.text(text).evaluate().isEmpty; i++) {
+    for (var i = 0; i < 14 && find.text(text).evaluate().isEmpty; i++) {
       await tester.drag(find.byType(ListView).first, const Offset(0, -260));
       await tester.pump();
     }
@@ -173,7 +174,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     // شاشة الإطار المربع (D-121) مفتوحة — والافتراضي الصورة كاملة
     expect(find.text('إطار صورة الصنف'), findsOneWidget);
-    await tester.ensureVisible(find.text('تأكيد الإطار'));
+    // درس السرد الكسول بوجه الجولة 130: زر التأكيد أسفل شاشة القص لا يُبنى
+    // في ListView الكسول قبل التمرير — ensureVisible لا تجد ما لم يُبنَ
+    // (StateError: No element) — scrollUntilVisible تسحب حتى يوجد ثم
+    // تضعه كله في المرئي قبل اللمس
+    await tester.scrollUntilVisible(
+      find.text('تأكيد الإطار'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.pump();
     await tester.tap(find.text('تأكيد الإطار'));
     await tester.pump();
@@ -374,6 +383,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(ItemImageBox), findsNothing);
 
+    // درس الجولة 130: pumpWidget يحافظ على حالة الملاح (شجرة الجذر
+    // تُحدَّث في موضعها لا من الصفر) فطريق التقرير المدفوع بالطور الأول
+    // يبقى فوق الشجرة المحدثة ويصير «تقرير المخزون» نصّين (بلاطة
+    // القائمة وعنوان الشاشة المدفوعة) — اللمسة الغامضة ترفض. الرجوع
+    // يفرّغ المكدس أولاً ثم الفتح الجديد بشارة المفتاح المفعلة.
+    await tester.pageBack();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+
     // المفتاح المستقل من الإعدادات ثم فتح جديد
     savePrintImagePref('inventory', true);
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
@@ -422,6 +441,10 @@ void main() {
         reason: 'س-129: مربع التضمين افتراضه مفعّل بحجم المجلد ظاهراً');
     expect(find.textContaining('كيلوبايت'), findsWidgets,
         reason: 'سطر الحجم الحالي للمجلد لا صمت');
+    // درس السرد الكسول بوجه الجولة 130: بطاقة النسخة المستقلة أسفل
+    // الإعدادات لا تُبنى في ListView الكسول قبل التمرير — التوقع على
+    // ما لم يُبنَ صفرٌ دائماً
+    await _scrollToText(tester, 'نسخة الصور المستقلة (D-124)');
     expect(find.text('نسخة الصور المستقلة (D-124)'), findsOneWidget,
         reason: 'س-130: الأداة المكمّلة بجوار الأساس');
   });
