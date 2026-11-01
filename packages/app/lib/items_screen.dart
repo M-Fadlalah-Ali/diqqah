@@ -516,9 +516,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         await widget.db.clearItemImages(savedItemId);
         await deleteItemImagesFiles(
             _existingImagePaths.$1, _existingImagePaths.$2);
-      } else if (_pendingOriginal != null &&
-          _pendingThumb != null &&
-          savedItemId != null) {
+      } else if (_pendingOriginal != null && _pendingThumb != null) {
         if (_hasExistingImage) {
           await deleteItemImagesFiles(
               _existingImagePaths.$1, _existingImagePaths.$2);

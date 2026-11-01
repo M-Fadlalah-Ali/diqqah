@@ -53,7 +53,7 @@ class _ItemCropScreenState extends State<ItemCropScreen> {
     final current = _transform.value.getMaxScaleOnAxis();
     final k = current <= 0 ? clamped : clamped / current;
     _transform.value =
-        _transform.value.scaled(Matrix4.diagonal3Values(k, k, 1.0));
+        _transform.value.scaledByDouble(k, k, 1.0, 1.0);
     setState(() => _zoom = clamped);
   }
 

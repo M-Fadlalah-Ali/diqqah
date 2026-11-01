@@ -205,12 +205,16 @@ ItemImageIngestResult ingestItemImage(
     dstY: (scaledCanvasSide - work.height) ~/ 2,
   );
 
-  var cx = (effective.x * kScaled).round().clamp(0, scaledCanvasSide - 1);
-  var cy = (effective.y * kScaled).round().clamp(0, scaledCanvasSide - 1);
-  var cs = (effective.side * kScaled).round().clamp(
-        1,
-        scaledCanvasSide - math.min(cx, cy),
-      );
+  // clamp يعيد num في Dart فالتحويل الصريح إلزامي لمسارِ القص الصحيحين
+  // (درس جولة CI: كل clamp إلى معامل int يحتاج toInt صريحة).
+  final cx =
+      (effective.x * kScaled).round().clamp(0, scaledCanvasSide - 1).toInt();
+  final cy =
+      (effective.y * kScaled).round().clamp(0, scaledCanvasSide - 1).toInt();
+  final cs = (effective.side * kScaled)
+      .round()
+      .clamp(1, scaledCanvasSide - math.min(cx, cy))
+      .toInt();
 
   final cropped = img.copyCrop(
     square,
