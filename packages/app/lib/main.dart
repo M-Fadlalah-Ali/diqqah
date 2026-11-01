@@ -105,9 +105,11 @@ class _AppGateState extends State<AppGate> {
     }
     final hasAnyUser = await db.hasAnyUser();
     if (!mounted) return;
-    // دفعة (10): جذر مجلد الصور بجوار القاعدة — المواضع كلها تقرأ منه
-    // (D-125)، والاختبارات تضبطه يدوياً على مجلد مؤقت.
-    ItemImagesStore.root = imagesDirFor(dbPath);
+    // دفعة (10): جذر مسارات الصور هو مجلد القاعدة لا مجلد الصور نفسه —
+    // لأعمدة القاعدة مسارات نسبية لمجلد القاعدة («images/item-N.jpg»)
+    // والقراءة تضمها على الجذر (D-125)؛ ومجلد الصور نفسه يشتق منه
+    // النسخ والاستعادة (imagesDirFor). الاختبارات تضبطه يدوياً.
+    ItemImagesStore.root = p.dirname(dbPath);
     setState(() {
       _db = db;
       _dbPath = dbPath;

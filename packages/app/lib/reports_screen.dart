@@ -416,24 +416,35 @@ class _ReceivablesPayablesView extends StatelessWidget {
 /// س-128 (دفعة 10/D-118): عمود صورة في الشاشة والمطبوع — بمفتاحه
 /// المستقل من الإعدادات (D-123، افتراضه معطل) والنائب البصري لمن بلا
 /// صورة (س-125/D-122).
-class _InventoryView extends StatelessWidget {
+/// درس السرد الموثق (علّة CI 2026-10-29 س23) بوجهه المستقبلي: المستقبل
+/// يُنشأ مرة واحدة لعمر الحالة لا في build — إنشاؤه في build يعيد
+/// FutureBuilder الانتظار عند كل إطار فيحلّق الجلب والتحديث بلا نهاية
+/// ويحرق pumpAndSettle بمهلته الكاملة.
+class _InventoryView extends StatefulWidget {
   final DiqqahDatabase db;
 
   const _InventoryView({required this.db});
+
+  @override
+  State<_InventoryView> createState() => _InventoryViewState();
+}
+
+class _InventoryViewState extends State<_InventoryView> {
+  /// المستقبل مرة واحدة — صفوف التقرير مع الأصناف لمسارات صورها.
+  late final Future<List<dynamic>> _data = Future.wait([
+    widget.db.inventoryReport(),
+    widget.db.select(widget.db.items).get(),
+  ]);
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('تقرير المخزون')),
       body: FutureBuilder<List<dynamic>>(
-        future: Future.wait([
-          db.inventoryReport(),
-          db.select(db.items).get(),
-        ]),
+        future: _data,
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
-          final rows =
-              snapshot.data![0] as List<InventoryReportRow>;
+          final rows = snapshot.data![0] as List<InventoryReportRow>;
           final items = snapshot.data![1] as List<Item>;
           final itemById = {for (final it in items) it.id: it};
           final withImages = printImageInventory.value;
@@ -488,8 +499,7 @@ class _InventoryView extends StatelessWidget {
                       ListTile(
                         leading: withImages
                             ? ItemImageBox(
-                                imagePath:
-                                    itemById[row.itemId]?.imageThumb,
+                                imagePath: itemById[row.itemId]?.imageThumb,
                                 itemName: row.name,
                                 size: 44,
                               )

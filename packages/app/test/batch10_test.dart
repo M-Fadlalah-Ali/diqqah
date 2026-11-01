@@ -145,6 +145,13 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
+    // العودة لأعلى البطاقة كي تُبنى حقول الكود والاسم والوحدة (درس
+    // السرد الكسول: موضع التمرير باقٍ بعد شاشة الإطار)
+    await tester.drag(find.byType(ListView).first, const Offset(0, 5000));
+    await tester.pump();
+    await tester.drag(find.byType(ListView).first, const Offset(0, 5000));
+    await tester.pump();
+
     await tester.enterText(find.byType(TextFormField).at(0), 'P-1');
     await tester.enterText(find.byType(TextFormField).at(1), 'صنف مصوّر');
     await tester.tap(find.text('اختر الوحدة'));
@@ -300,11 +307,14 @@ void main() {
     await seedKnownCycle(db); // زيت 4 متاح — صف مخزون قائم
     await useTempImagesRoot();
 
-    // افتراضه معطل: بلا موضع صورة
+    // افتراضه معطل: بلا موضع صورة — ضخّات محدودة لا pumpAndSettle
+    // (درس س22..س26 ودرس حلقة المستقبل الجديد)
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
     await tester.pump();
     await tester.tap(find.text('تقرير المخزون'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(ItemImageBox), findsNothing);
 
     // المفتاح المستقل من الإعدادات ثم فتح جديد
@@ -312,7 +322,9 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
     await tester.pump();
     await tester.tap(find.text('تقرير المخزون'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(ItemImageBox), findsWidgets,
         reason: 'بلفظ المالك: «فكرة الصورة في تقرير جرد المواد أو حركة '
             'المادة ضرورية»');

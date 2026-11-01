@@ -357,7 +357,10 @@ void main() {
 
   // ─── دفعة (10) «الصور والباركود» — س-129/س-130، D-124/D-125 ───
 
-  /// مجلد صور بملفين (أصل ومشتق) — نمط المحرك (مسار نسبي تحت images/).
+  /// مجلد صور بملفَي أصل ومشتق — يعيد مجلد الصور نفسه (اصطلاح
+  /// backupTo/applyRestore: مجلد الصور ذاته ومسارات الحزمة نسبية إليه
+  /// — 'item-1.jpg' — بينما أعمدة القاعدة نسبية لمجلد القاعدة
+  /// 'images/item-1.jpg' — الاصطلاحان طبقتان مختلفتان موثقتان).
   Future<Directory> seedImagesDir(String name) async {
     final dir = Directory(p.join(tempDir.path, name, 'images'));
     await dir.create(recursive: true);
@@ -365,7 +368,7 @@ void main() {
         .writeAsBytes(List.generate(2048, (i) => i % 256));
     await File(p.join(dir.path, 'item-1-thumb.jpg'))
         .writeAsBytes(List.generate(256, (i) => i % 256));
-    return Directory(p.join(tempDir.path, name));
+    return dir;
   }
 
   test('س-129 (D-124): النسخة الممتدة ملفان — ملف القاعدة كما وُلد وملف '
@@ -414,7 +417,8 @@ void main() {
     );
     candidate.dispose();
     await restoreDb.close();
-    // المجلد استُبدل بمحتوى النسخة: لا ملف قديم متروك.
+    // المجلد استُبدل بمحتوى النسخة: مسارات الحزمة نسبية لمجلد الصور
+    // نفسه ('item-1.jpg') فلا ملف قديم متروك ولا تكرار مجلدات.
     expect(await File(p.join(restoredImages.path, 'item-1.jpg')).exists(),
         isTrue);
     expect(
@@ -473,13 +477,13 @@ void main() {
     await backupImagesTo(imagesRoot, target);
     expect(await File(target).exists(), isTrue);
 
-    // استعادة منفردة في مجلد آخر — لا قاعدة ولا مساس بها.
+    // استعادة منفردة في مجلد آخر — لا قاعدة ولا مساس بها — ومسارات
+    // الحزمة نسبية لمجلد الصور نفسه.
     final landing = Directory(p.join(tempDir.path, 'images_landing'));
     final count = await restoreImagesFrom(target, landing);
     expect(count, 2);
     expect(
-        await File(p.join(landing.path, 'images', 'item-1.jpg')).exists(),
-        isTrue);
+        await File(p.join(landing.path, 'item-1.jpg')).exists(), isTrue);
     // القاعدة لم تُلمس: الصنف باقٍ كما هو.
     final rows = await db.select(db.items).get();
     expect(rows, isNotEmpty);
