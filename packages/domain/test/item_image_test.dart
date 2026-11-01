@@ -137,8 +137,10 @@ void main() {
     );
     expect(zoomed.side, closeTo(320, 0.01),
         reason: 'تقريب 2× ينصف ضلع المستطيل المرئي');
-    expect(zoomed.x, closeTo(200, 0.01));
-    expect(zoomed.y, closeTo(100, 0.01));
+    // الإزاحة النصفية: المرئي [160,480] موسّطاً على اللوحة (u_min =
+    // -tx/(z*fit) = 200/1.25) — والحساب مستقَق رياضياً لا معمولياً.
+    expect(zoomed.x, closeTo(160, 0.01));
+    expect(zoomed.y, closeTo(80, 0.01));
 
     // شبكة الأمان: إزاحة شاذة تُقيَّد داخل اللوحة.
     final clamped = computeItemCropRect(
