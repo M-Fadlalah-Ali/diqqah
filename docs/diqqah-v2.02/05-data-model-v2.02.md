@@ -86,7 +86,7 @@
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
 | `invoice` | kind(`sale/purchase/sale_return/purchase_return`), number, party_id, warehouse_id, invoice_date, due_date?, currency_id, fx_rate, totals..., discount_rate?, discount_amount_base_minor?, state(`draft/posted/paid/partially_paid`), move_id, original_invoice_id?(للمردود) | إلغاء المرحّلة = مردود لا حذف؛ **حُذفت `cancelled` من التعداد بقرار المالك (م-22/D-043): الإلغاء حذف منطقي للمسودة (F-059) والمرحّل يعالج بمردود أو عكس حصراً (07 §1.3) فلا مسار تشغيلي يصل إليها**؛ خصم الفاتورة: نسبة على المسودة تُترجم مبلغاً ويُقيّد صافياً بلا حساب مستقل ولا يمس كلفة المخزون (س7)؛ وحالتا paid/partially_paid مشتقتان آلياً من (الإجمالي − المطابقات − المردودات) — لا ضبط يدوي (س5)؛ والمجاميع مخزنة على المستند بالصافي بعملتيه (`total_doc_minor`/`total_base_minor`) والسطر بمكافئه التوثيقي `line_total_doc_minor` بجانب الأساسي (F-122/D-082 معروضة) |
-| `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor | للصنف التجميعي: عند الترحيل تُولَّد حركات مخزون لمكوناته من `bundle_component` |
+| `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor؛ + أعمدة تنفيذية: `line_total_doc_minor` بجانب الأساسي (F-122/D-082) و`delivered` و`supplier_party_id` (دفعة 12/D-131/D-132 — ترحيلة v13) | للصنف التجميعي: عند الترحيل تُولَّد حركات مخزون لمكوناته من `bundle_component`؛ وعلم التسليم والمورد المسؤول **علم عمل لا محاسبة**: يُحدَّث على المرحّلة بلا فك إقفال (الحرس يجمّد المال حصراً) ولا يمس القيود والمخزون والذمم |
 
 ### 4.2 السندات والصناديق
 

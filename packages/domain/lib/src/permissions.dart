@@ -14,6 +14,9 @@ library;
 /// المضاف بقرار معروض (D-098): ليس بنداً في جدول النطاق لكنه بوابة
 /// مستندات القبض والدفع والتحويل والتسوية (D-105) وكان مدخله السابق زراً مدفوناً
 /// بشاشة الصناديق فلم يلمحه المالك (س37) — فصار بنداً رئيسياً.
+/// ومعها «متابعة التسليم» (س-139/D-133 — دفعة 12): شاشة متابعة أسطر
+/// البيع غير المستلمة، بصلاحية مستقلة افتراضها بيد المدير حصراً
+/// وقابلة للتفويض بنمط D-049.
 const List<String> moduleKeys = <String>[
   'parties', // الأطراف
   'items', // الأصناف
@@ -23,6 +26,7 @@ const List<String> moduleKeys = <String>[
   'vouchers', // السندات (D-098 معروض)
   'orders', // طلبات الشراء والبيع
   'receivables', // الذمم
+  'delivery', // متابعة التسليم (س-139/D-133 دفعة 12)
   'boxes', // الصناديق
   'ledger', // الدفتر المحاسبي
   'currencies', // العملات
@@ -42,6 +46,7 @@ const Map<String, String> moduleLabels = <String, String>{
   'vouchers': 'السندات',
   'orders': 'طلبات الشراء والبيع',
   'receivables': 'الذمم',
+  'delivery': 'متابعة التسليم',
   'boxes': 'الصناديق',
   'ledger': 'الدفتر المحاسبي',
   'currencies': 'العملات',
@@ -115,6 +120,9 @@ class RolePermissions {
 ///   ولا الإعدادات ولا الصلاحيات.
 const Map<String, String> defaultRolesPermissions = <String, String>{
   'مدير': allModulesToken,
+  // س-139/D-133 (دفعة 12): «متابعة التسليم» افتراضها للمدير حصراً
+  // (النجمة تشملها) — ومحاسبُ الدور الافتراضي لا يجري التسليم فهو
+  // بلاها، والتفويض بعدها بيد المالك من شاشة الصلاحيات (نمط D-049).
   'محاسب': 'parties,items,invoices,vouchers,boxes,reports,ledger,settings',
   'أمين مستودع': 'items,reports',
   'بائع': 'parties,invoices,vouchers',

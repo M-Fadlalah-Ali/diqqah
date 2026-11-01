@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:diqqah_storage/diqqah_storage.dart';
 
@@ -23,6 +24,13 @@ Future<void> main() async {
 }
 
 /// إطار دِقَّة — واجهة واحدة تعمل على أندرويد وWindows (F-001).
+///
+/// س-135 (D-129 — دفعة 11): لغة التطبيق عربية فيثبت اتجاه الواجهة
+/// من اليمين في كل الشاشات — القوائم والأسهم الراجعة وترتيب العناصر
+/// تنعكس كالتقارير العربية تماماً بلفظ المالك «أولاً موافق» على
+/// اقتراح المستشار. الوفدون من حزمة SDK الرسمية flutter_localizations
+/// حصراً بلا حزمة خارجية (شرط البوابة)، واللغة المثبتة العربية
+/// الوحيدة فيسمد الاتجاه على كل جهاز بلا خيارات ولا قوائم.
 class DiqqahApp extends StatelessWidget {
   final DiqqahDatabase? db;
 
@@ -43,6 +51,15 @@ class DiqqahApp extends StatelessWidget {
       valueListenable: appFontChoice,
       builder: (context, fontKey, _) => MaterialApp(
         title: 'دِقَّة',
+        // س-135/D-129: الاتجاه العربي الموحد — القوائم والأسهم والشاشات
+        // كلها من اليمين، وتتغير نصوص عناصر الواجهة الجاهزة لعربياً.
+        locale: const Locale('ar'),
+        supportedLocales: const [Locale('ar')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
         theme: ThemeData(
           useMaterial3: true,
           fontFamily: appFontFamily(fontKey),

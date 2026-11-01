@@ -12,6 +12,7 @@ import 'print_image_prefs.dart';
 import 'print_service.dart';
 import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
+import 'drilldown.dart' show showItemSheet;
 
 /// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
 /// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
@@ -23,6 +24,92 @@ Future<Uint8List?> loadItemImageBytes(String? relativePath) async {
   } catch (_) {
     return null; // فاسد لا يكسر الطباعة أبداً — النائب مكانه
   }
+}
+
+/// بناء قسيمة الفاتورة — نقطة واحدة لكل مسارات إخراج الفاتورة (س-133/
+/// D-127، دفعة 11): زر التفاصيل النصي وزر القائمة السريع والمشاركة كلها
+/// تستدعيها فلا يختلف مطبوع عن مطبوع. البيانات تُجلب هنا حصراً من
+/// القاعدة، والصور بمفتاحها المفعّل (D-123)، وعمود «مستلم» بقسيمة
+/// البيع حصراً (س-140/D-134 دفعة 12) بسطر خلاصته «مستلم X من Y» —
+/// عِلماً توضيحياً للزبون لا يمس أرقام الفاتورة بحال. لسان العمود
+/// كلمات لا رموز: خط الطباعة المدمج لا يحمل رسمة الصحّ ✓ فما كان
+/// ليعرضها — و«سُلِّم» أوضح للزبون من رمز أصلاً.
+Future<Uint8List> buildInvoicePrintoutBytes(
+  DiqqahDatabase db,
+  int invoiceId,
+) async {
+  final invoice = await db.invoiceById(invoiceId);
+  if (invoice == null) {
+    throw StateError('لا فاتورة بهذا المعرف');
+  }
+  final lines = await db.invoiceLines(invoiceId);
+  final items = await db.select(db.items).get();
+  final itemById = {for (final item in items) item.id: item};
+  final kind = InvoiceKind.fromStorage(invoice.kind);
+  final isSale = kind == InvoiceKind.sale;
+
+  // الصور بمفتاحها المستقل (س-127/D-123) — الافتراضي معطل فلا قراءة ملفات.
+  List<Uint8List?>? rowImages;
+  List<String>? rowLetters;
+  if (printImagesForKind(kind)) {
+    rowImages = [
+      for (final line in lines)
+        await loadItemImageBytes(itemById[line.itemId]?.imageFile),
+    ];
+    rowLetters = [
+      for (final line in lines)
+        itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
+    ];
+  }
+
+  // س-140/D-134: عمود «مستلم» بقسيمة البيع حصراً — «سُلِّم» للمحدد
+  // و«بانتظار التسليم» لغيره، وسطر الخلاصة تحت الجدول.
+  final columns = <String>[
+    'الصنف',
+    'الكمية',
+    'سعر الوحدة',
+    'صافي السطر',
+    if (isSale) 'مستلم',
+  ];
+  final rows = [
+    for (final line in lines)
+      [
+        itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
+        '${line.qtyBase}',
+        formatMinorAmount(line.unitPriceMinor),
+        formatMinorAmount(line.lineTotalDocMinor),
+        if (isSale) line.delivered ? 'سُلِّم' : 'بانتظار التسليم',
+      ],
+  ];
+  String? summary;
+  if (isSale && lines.isNotEmpty) {
+    final delivered = lines.where((l) => l.delivered).length;
+    summary = 'مستلم $delivered من ${lines.length}';
+  }
+
+  return buildDocumentPdf(
+    title: invoiceDisplayLabel(invoice),
+    headerPairs: [
+      ('التاريخ', invoice.invoiceDate),
+      ('الحالة', InvoiceState.fromStorage(invoice.state).label),
+      if (invoice.narration != null && invoice.narration!.isNotEmpty)
+        ('البيان', invoice.narration!),
+    ],
+    columns: columns,
+    rows: rows,
+    rowLeadingImages: rowImages,
+    rowPlaceholderLetters: rowLetters,
+    summaryText: summary,
+    footerPairs: [
+      (
+        'الإجمالي',
+        '${formatMinorAmount(invoice.totalDocMinor)} '
+            '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
+      ),
+      ('المكافئ الأساسي', formatMinorAmount(invoice.totalBaseMinor)),
+    ],
+    format: resolvePageFormat(docKind: 'invoice'),
+  );
 }
 
 /// شاشة الفواتير — دفعة (6-ج) واجهات الإدخال (س-86..س-88، D-094 معروض):
@@ -94,6 +181,23 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
         builder: (_) => InvoiceDetailScreen(db: widget.db, invoiceId: invoiceId),
       ),
     );
+  }
+
+  /// س-133 (D-127، دفعة 11): الطباعة السريعة من القائمة مباشرة —
+  /// كانت الطباعة أيقونتين مدفونتين بأعلى التفاصيل فلم يجدها المالك
+  /// بلفظه «طباعة الفاتورة غير متاحة» — فالقسيمة الواحدة الآن بضغطة
+  /// من كل صف، والفشل رسالة لا صمت.
+  Future<void> _quickPrint(BuildContext context, int invoiceId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await buildInvoicePrintoutBytes(widget.db, invoiceId);
+      if (!context.mounted) return;
+      await printPdfBytes(context, bytes);
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
   }
 
   @override
@@ -194,9 +298,21 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             '${row.invoiceDate}'
                             ' · ${row.counterpartLabel}'
                             ' · ${row.stateLabel}'),
-                        trailing: Text(
-                            '${formatMinorAmount(row.totalDocMinor)}'
-                            ' ${row.currencyCode}'),
+                        // س-133/D-127: زر الطباعة السريع بجانب المبلغ —
+                        // يطبع القسيمة الواحدة بلا فتح التفاصيل.
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'طباعة',
+                              icon: const Icon(Icons.print_outlined),
+                              onPressed: () => _quickPrint(context, row.id),
+                            ),
+                            Text(
+                                '${formatMinorAmount(row.totalDocMinor)}'
+                                ' ${row.currencyCode}'),
+                          ],
+                        ),
                         onTap: () => _openDetail(row.id),
                       ),
                   ],
@@ -1107,11 +1223,27 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   }
 }
 
-/// تفاصيل فاتورة — قراءة حصراً (س-88): التسمية المعروضة بحساب المجال
-/// (invoiceDisplayLabel) والحالة والسطور بأسعارها والمجاميع كما خُزنت.
-/// ودفعة الإغلاق (س37): زرا الطباعة والمشاركة (D-016) — قسيمة A5
-/// طولية (D-101 معروض) تُبنى من المستند وسطوره وخريطة أسماء الأصناف.
-class InvoiceDetailScreen extends StatelessWidget {
+/// تفاصيل فاتورة — دفعة (11) ودفعة (12) معاً:
+///
+/// س-133 (D-127، دفعة 11): زرا «طباعة / PDF» و«مشاركة PDF» ظاهران بنصهما
+/// أعلى التفاصيل — كانت أيقونتين صغيرتين بلا نص فلم يجدهما المالك بلفظه
+/// «طباعة الفاتورة غير متاحة»، والقسيمة واحدة للجميع من نقطة واحدة
+/// (buildInvoicePrintoutBytes).
+///
+/// س-137 (D-131، دفعة 12): عمود «مستلم» بسطور فاتورة البيع حصراً —
+/// مربع واحد بلفظ المالك «أفضل عمود بعنوان "مستلم" تحته في كل سطر مربع
+/// يحدد عند التسليم، وما ليس محدد يكون غير مستلم، أظن هذا يكفي» —
+/// التحديد يحفظ بقاعدة البيانات فوراً ويتحدث على المرحّلة بلا فك إقفال
+/// (علم عمل لا محاسبة)، ولا يظهر في الشراء ومردوداته.
+///
+/// س-138 (D-132، دفعة 12): المورد المسؤول بكل سطر — اختيار يدوي من
+/// الموردين مع اقتراح من آخر فاتورة شراء مرحّلة للصنف، والاختيار يُخزَّن
+/// على السطر لا يُخمَّن لحظة العرض.
+///
+/// زر «تسليم الكل» (قرار المالك «يوجد زر تسليم الكل — لا بأس»، س43):
+/// تعليم كل سطور الفاتورة مستلمة بضغطة — تسهيل البيع الذي يُسلَّم
+/// دفعة واحدة. وبأمره ذاته بقت خانة «ملاحظة التسليم» خارج الدفعة.
+class InvoiceDetailScreen extends StatefulWidget {
   final DiqqahDatabase db;
   final int invoiceId;
 
@@ -1121,76 +1253,161 @@ class InvoiceDetailScreen extends StatelessWidget {
     required this.invoiceId,
   });
 
-  /// صور بنود الفاتورة إن كان مفتاح نوعها مفعّلاً (س-127/D-123) —
-  /// والافتراضي معطل فلا قراءة ملفات أبداً بلا مفتاح، والغائب/الفاسد
-  /// null فيعرض النائب البصري بالمطبوع (س-125).
-  Future<(List<Uint8List?>?, List<String>?)> _printoutImages(
-    InvoiceDocument invoice,
-    List<InvoiceLineDocument> lines,
-    Map<int, Item> itemById,
-  ) async {
-    if (!printImagesForKind(InvoiceKind.fromStorage(invoice.kind))) {
-      return (null, null);
-    }
-    final images = <Uint8List?>[];
-    final letters = <String>[];
-    for (final line in lines) {
-      images.add(await loadItemImageBytes(itemById[line.itemId]?.imageFile));
-      letters.add(itemById[line.itemId]?.name ?? 'صنف');
-    }
-    return (images, letters);
+  @override
+  State<InvoiceDetailScreen> createState() => _InvoiceDetailScreenState();
+}
+
+class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
+  InvoiceDocument? _invoice;
+  List<InvoiceLineDocument> _lines = [];
+  Map<int, Item> _itemById = {};
+
+  /// الموردون النشطون لخانة «المورد المسؤول» (س-138/D-132).
+  List<Party> _suppliers = [];
+
+  /// اقتراح المورد لكل صنف — من آخر شراء مرحّل (قراءة عند التحميل
+  /// حصراً؛ من يختار يُخزَّن فلا يعاد الاقتراح فوق اختيار).
+  Map<int, int> _supplierSuggestion = {};
+
+  bool _loaded = false;
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  /// توليد قسيمة الفاتورة ومشاركتها بنافذة النظام — البيانات تُجلب
-  /// هنا حصراً (لا تعتمد على حالة الشاشة)، والفشل رسالة لا صمت.
-  Future<void> _sharePrintout(BuildContext context) async {
+  /// التحميل الأول — كل بيانات الشاشة دفعة واحدة (درس السرد الكسول:
+  /// لا Future يُنشأ داخل build).
+  Future<void> _load() async {
+    try {
+      final invoice = await widget.db.invoiceById(widget.invoiceId);
+      final lines = invoice == null
+          ? const <InvoiceLineDocument>[]
+          : await widget.db.invoiceLines(widget.invoiceId);
+      final items = await widget.db.select(widget.db.items).get();
+      final parties = await widget.db.select(widget.db.parties).get();
+      final suggestions = <int, int>{};
+      for (final line in lines) {
+        final s = await widget.db
+            .latestSupplierPartyIdForItem(line.itemId);
+        if (s != null) suggestions[line.itemId] = s;
+      }
+      if (!mounted) return;
+      setState(() {
+        _invoice = invoice;
+        _lines = lines;
+        _itemById = {for (final it in items) it.id: it};
+        _suppliers = parties
+            .where((p) => p.kind == 'supplier' && p.isActive)
+            .toList();
+        _supplierSuggestion = suggestions;
+        _loaded = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loaded = true;
+      });
+    }
+  }
+
+  /// إعادة قراءة السطور بعد تحديث علم التسليم أو المورد — الشاشة تعرض
+  /// ما خُزّن حصراً.
+  Future<void> _reloadLines() async {
+    final lines = await widget.db.invoiceLines(widget.invoiceId);
+    if (!mounted) return;
+    setState(() => _lines = lines);
+  }
+
+  bool get _isSale =>
+      _invoice != null &&
+      InvoiceKind.fromStorage(_invoice!.kind) == InvoiceKind.sale;
+
+  bool get _hasUndelivered => _lines.any((l) => !l.delivered);
+
+  /// س-137/D-131: تحديد المربع يحفظ فوراً — لا علم مؤقت يضيع بإغلاق
+  /// الشاشة، والرسالة عند الفشل لا صمت.
+  Future<void> _toggleDelivered(InvoiceLineDocument line, bool value) async {
+    setState(() => _busy = true);
+    try {
+      await widget.db.setInvoiceLineDelivered(line.id, delivered: value);
+      await _reloadLines();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تحديث علم التسليم — $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// زر «تسليم الكل» (س43 «لا بأس»): تعليم كل السطور غير المستلمة
+  /// بضغطة واحدة.
+  Future<void> _deliverAll() async {
+    setState(() => _busy = true);
+    try {
+      for (final line in _lines.where((l) => !l.delivered)) {
+        await widget.db.setInvoiceLineDelivered(line.id, delivered: true);
+      }
+      await _reloadLines();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تحديث علم التسليم — $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// س-138/D-132: اختيار المورد يُخزَّن على السطر فوراً.
+  Future<void> _setSupplier(InvoiceLineDocument line, int? partyId) async {
+    setState(() => _busy = true);
+    try {
+      await widget.db.setInvoiceLineSupplier(line.id, supplierPartyId: partyId);
+      await _reloadLines();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر حفظ المورد المسؤول — $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _print() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final invoice = await db.invoiceById(invoiceId);
-      final lines = await db.invoiceLines(invoiceId);
+      final bytes =
+          await buildInvoicePrintoutBytes(widget.db, widget.invoiceId);
+      if (!mounted) return;
+      await printPdfBytes(context, bytes);
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
+  }
+
+  Future<void> _share() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final invoice = await widget.db.invoiceById(widget.invoiceId);
       if (invoice == null) {
         messenger.showSnackBar(
           const SnackBar(content: Text('لا فاتورة بهذا المعرف')),
         );
         return;
       }
-      final items = await db.select(db.items).get();
-      final itemById = {for (final item in items) item.id: item};
-      final (rowImages, rowLetters) =
-          await _printoutImages(invoice, lines, itemById);
-      final bytes = await buildDocumentPdf(
-        title: invoiceDisplayLabel(invoice),
-        headerPairs: [
-          ('التاريخ', invoice.invoiceDate),
-          ('الحالة', InvoiceState.fromStorage(invoice.state).label),
-          if (invoice.narration != null && invoice.narration!.isNotEmpty)
-            ('البيان', invoice.narration!),
-        ],
-        columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'صافي السطر'],
-        rows: [
-          for (final line in lines)
-            [
-              itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
-              '${line.qtyBase}',
-              formatMinorAmount(line.unitPriceMinor),
-              formatMinorAmount(line.lineTotalDocMinor),
-            ],
-        ],
-        rowLeadingImages: rowImages,
-        rowPlaceholderLetters: rowLetters,
-        footerPairs: [
-          (
-            'الإجمالي',
-            '${formatMinorAmount(invoice.totalDocMinor)} '
-                '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
-          ),
-          ('المكافئ الأساسي', formatMinorAmount(invoice.totalBaseMinor)),
-        ],
-        format: resolvePageFormat(docKind: 'invoice'),
-      );
-      if (!context.mounted) return;
-      await sharePdfBytes(
-          bytes, '${invoiceDisplayLabel(invoice)}.pdf');
+      final bytes =
+          await buildInvoicePrintoutBytes(widget.db, widget.invoiceId);
+      await sharePdfBytes(bytes, '${invoiceDisplayLabel(invoice)}.pdf');
     } catch (e) {
       messenger.showSnackBar(
         SnackBar(content: Text('تعذر توليد الطباعة — $e')),
@@ -1200,118 +1417,171 @@ class InvoiceDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        body: Center(child: Text(_error!)),
+      );
+    }
+    final invoice = _invoice;
+    if (invoice == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        body: const Center(child: Text('لا فاتورة بهذا المعرف')),
+      );
+    }
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('تفاصيل الفاتورة'),
-        actions: [
-          IconButton(
-            tooltip: 'مشاركة PDF',
-            icon: const Icon(Icons.ios_share),
-            onPressed: () => _sharePrintout(context),
+      appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+      body: ListView(
+        padding: const EdgeInsets.all(12),
+        children: [
+          // س-133/D-127: زرا الإخراج ظاهران بنصهما أعلى التفاصيل —
+          // هذا ظهور الطباعة الذي طلبته كلمة المالك.
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : _print,
+                  icon: const Icon(Icons.print_outlined),
+                  label: const Text('طباعة / PDF'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _share,
+                  icon: const Icon(Icons.ios_share),
+                  label: const Text('مشاركة PDF'),
+                ),
+              ),
+            ],
           ),
-          IconButton(
-            tooltip: 'طباعة مباشرة',
-            icon: const Icon(Icons.print_outlined),
-            onPressed: () async {
-              // نفس توليد المشاركة ثم حوار الطباعة — والمنصة غير
-              // الداعمة تُغلف برسالتها (D-101 معروض).
-              final invoice = await db.invoiceById(invoiceId);
-              final lines = await db.invoiceLines(invoiceId);
-              if (invoice == null || !context.mounted) return;
-              final items = await db.select(db.items).get();
-              final itemById = {for (final item in items) item.id: item};
-              final (rowImages, rowLetters) =
-                  await _printoutImages(invoice, lines, itemById);
-              final bytes = await buildDocumentPdf(
-                title: invoiceDisplayLabel(invoice),
-                headerPairs: [
-                  ('التاريخ', invoice.invoiceDate),
-                  ('الحالة', InvoiceState.fromStorage(invoice.state).label),
-                  if (invoice.narration != null &&
-                      invoice.narration!.isNotEmpty)
-                    ('البيان', invoice.narration!),
-                ],
-                columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'صافي السطر'],
-                rows: [
-                  for (final line in lines)
-                    [
-                      itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
-                      '${line.qtyBase}',
-                      formatMinorAmount(line.unitPriceMinor),
-                      formatMinorAmount(line.lineTotalDocMinor),
-                    ],
-                ],
-                rowLeadingImages: rowImages,
-                rowPlaceholderLetters: rowLetters,
-                footerPairs: [
-                  (
-                    'الإجمالي',
-                    '${formatMinorAmount(invoice.totalDocMinor)} '
-                        '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
-                  ),
-                  (
-                    'المكافئ الأساسي',
-                    formatMinorAmount(invoice.totalBaseMinor),
-                  ),
-                ],
-                format: resolvePageFormat(docKind: 'invoice'),
-              );
-              if (!context.mounted) return;
-              await printPdfBytes(context, bytes);
-            },
+          ListTile(
+            title: Text(invoiceDisplayLabel(invoice)),
+            subtitle: Text(
+                'التاريخ ${invoice.invoiceDate}'
+                ' · الحالة ${InvoiceState.fromStorage(invoice.state).label}'),
           ),
+          ListTile(
+            title: Text('الإجمالي ${formatMinorAmount(invoice.totalDocMinor)}'
+                ' (${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})'),
+            subtitle: Text(
+                'المكافئ الأساسي ${formatMinorAmount(invoice.totalBaseMinor)}'),
+          ),
+          if (_isSale && _lines.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: FilledButton.tonalIcon(
+                  // زر «تسليم الكل» (س43 «لا بأس») — يظهر ما دام سطر
+                  // غير مستلم فلا زر ميت حين يكتمل التسليم.
+                  onPressed:
+                      _busy || !_hasUndelivered ? null : _deliverAll,
+                  icon: const Icon(Icons.done_all_outlined),
+                  label: const Text('تسليم الكل'),
+                ),
+              ),
+            ),
+          const Divider(),
+          for (final line in _lines)
+            _lineTile(line, sale: _isSale),
+          if (_lines.isEmpty) const ListTile(title: Text('لا بنود')),
         ],
       ),
-      body: FutureBuilder<InvoiceDocument?>(
-        future: db.invoiceById(invoiceId),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('${snapshot.error}'));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final invoice = snapshot.data;
-          if (invoice == null) {
-            return const Center(child: Text('لا فاتورة بهذا المعرف'));
-          }
-          return FutureBuilder<List<InvoiceLineDocument>>(
-            future: db.invoiceLines(invoiceId),
-            builder: (context, linesSnapshot) {
-              if (!linesSnapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final lines = linesSnapshot.data!;
-              return ListView(
-                padding: const EdgeInsets.all(12),
-                children: [
-                  ListTile(
-                    title: Text(invoiceDisplayLabel(invoice)),
-                    subtitle: Text(
-                        'التاريخ ${invoice.invoiceDate}'
-                        ' · الحالة ${InvoiceState.fromStorage(invoice.state).label}'),
-                  ),
-                  ListTile(
-                    title: Text('الإجمالي ${formatMinorAmount(invoice.totalDocMinor)}'
-                        ' (${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})'),
-                    subtitle: Text(
-                        'المكافئ الأساسي ${formatMinorAmount(invoice.totalBaseMinor)}'),
-                  ),
-                  const Divider(),
-                  for (final line in lines)
-                    ListTile(
-                      title: Text(
-                          'صنف #${line.itemId} — ${line.qtyBase} × ${formatMinorAmount(line.unitPriceMinor)}'),
-                      subtitle: Text(
-                          'صافي السطر ${formatMinorAmount(line.lineTotalDocMinor)}'),
+    );
+  }
+
+  /// سطر الفاتورة — بعمود «مستلم» وخانة المورد في البيع (س-137/س-138)
+  /// وباسم الصنف لا رقمه (المبدأ المؤسسي س-143: كل اسم مدخلاً —
+  /// والنقر يفتح ورقة الصنف بدفعة 13).
+  Widget _lineTile(InvoiceLineDocument line, {required bool sale}) {
+    final item = _itemById[line.itemId];
+    final itemName = item?.name ?? 'صنف #${line.itemId}';
+    final title =
+        '$itemName — ${line.qtyBase} × ${formatMinorAmount(line.unitPriceMinor)}';
+    if (!sale) {
+      return ListTile(
+        title: Text(title),
+        subtitle:
+            Text('صافي السطر ${formatMinorAmount(line.lineTotalDocMinor)}'),
+        // س-144/D-136: سطر الفاتورة من مواضع ورقة الصنف الخمسة.
+        onTap: () => showItemSheet(context, widget.db, line.itemId, itemName),
+      );
+    }
+    final suggestion = _supplierSuggestion[line.itemId];
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          children: [
+            ListTile(
+              title: Text(title),
+              subtitle: Text(
+                  'صافي السطر ${formatMinorAmount(line.lineTotalDocMinor)}'),
+              // س-137/D-131: مربع «مستلم» الواحد — غير محدد افتراضاً
+              // لكل سطر، والتحديد يحفظ فوراً.
+              trailing: Checkbox(
+                value: line.delivered,
+                onChanged: _busy
+                    ? null
+                    : (value) => _toggleDelivered(line, value ?? false),
+              ),
+              // س-144/D-136: سطر الفاتورة من مواضع ورقة الصنف الخمسة.
+              onTap: () =>
+                  showItemSheet(context, widget.db, line.itemId, itemName),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  line.delivered ? 'مستلم' : 'بانتظار التسليم',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ),
+            DropdownButtonFormField<int>(
+              initialValue: line.supplierPartyId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'المورد المسؤول',
+                border: InputBorder.none,
+              ),
+              items: [
+                const DropdownMenuItem<int>(
+                    value: null, child: Text('بلا مورد')),
+                for (final p in _suppliers)
+                  DropdownMenuItem<int>(value: p.id, child: Text(p.name)),
+              ],
+              onChanged:
+                  _busy ? null : (value) => _setSupplier(line, value),
+            ),
+            // س-138/D-132: الاقتراح من آخر شراء مرحّل — عرضاً لا كتابة،
+            // ومن اختار فاختياره هو المخزّن.
+            if (line.supplierPartyId == null && suggestion != null) ...[
+              for (final p in _suppliers)
+                if (p.id == suggestion)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Text(
+                        'مقترح (آخر شراء): ${p.name}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     ),
-                  if (lines.isEmpty)
-                    const ListTile(title: Text('لا بنود')),
-                ],
-              );
-            },
-          );
-        },
+                  ),
+            ],
+          ],
+        ),
       ),
     );
   }

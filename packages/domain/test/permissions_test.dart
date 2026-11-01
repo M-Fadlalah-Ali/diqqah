@@ -111,14 +111,29 @@ void main() {
     });
   });
 
-  test('مفاتيح الوحدات خمسة عشر بلا تكرار وكلها بتسمية عربية', () {
-    expect(moduleKeys, hasLength(15));
+  test('مفاتيح الوحدات ستة عشر بلا تكرار وكلها بتسمية عربية', () {
+    expect(moduleKeys, hasLength(16));
     expect(moduleKeys.toSet(), hasLength(moduleKeys.length));
     for (final key in moduleKeys) {
       expect(moduleLabels[key], isNotNull, reason: 'تسمية $key غائبة');
     }
-    // مدخل السندات من ضمنها (D-098)
+    // مدخل السندات من ضمنها (D-098) ومتابعة التسليم (س-139/D-133 دفعة 12)
     expect(moduleKeys, contains('vouchers'));
     expect(moduleLabels['vouchers'], 'السندات');
+    expect(moduleKeys, contains('delivery'));
+    expect(moduleLabels['delivery'], 'متابعة التسليم');
+  });
+
+  test('صلاحية «متابعة التسليم» افتراضها بيد المدير حصراً (D-133) — '
+      'والتفويض بعدها بيد المالك', () {
+    // المدير النجمة يشملها
+    expect(const RolePermissions.all().allows('delivery'), isTrue);
+    // والأدوار الافتراضية الأخرى لا — التسليم بيد المدير حصراً
+    for (final entry in defaultRolesPermissions.entries) {
+      if (entry.key == 'مدير') continue;
+      expect(
+          RolePermissions(entry.value).allows('delivery'), isFalse,
+          reason: 'دور ${entry.key} لا يجري التسليم افتراضاً');
+    }
   });
 }

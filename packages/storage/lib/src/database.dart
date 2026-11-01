@@ -591,6 +591,16 @@ class AppMeta extends Table {
 /// بـADD COLUMN بحرس pragma (درس v3/v10 المجرّب) — وجدول الباركود
 /// الجاهز من اليوم الأول (F-035) لا يُمسّ بل يُفتح مساره: لا جداول
 /// جديدة ولا أعمدة عليه.
+/// v13 (دفعة 12 — متابعة التسليم س-137..س-142/D-131..D-134 بأمر
+/// المالك «ابدأ» وتصديقه على زر «تسليم الكل» بـ«لا بأس»، س43):
+/// عمودان على invoice_lines بـADD COLUMN بحرس pragma (نمط v12):
+/// `delivered` (0/1 — افتراضه 0 بلفظ المالك «ما ليس محدد يكون غير
+/// مستلم») و`supplier_party_id` (nullable — المورد المسؤول بلا
+/// مفروض) — علم عمل لا محاسبة: لا قيد ولا حركة مخزون ولا ذمة.
+/// ومعها حرس تجميد أسطر المرحّل يُعاد بصيغته المحدّثة (درس v11 في
+/// طرحه وإعادته): يجمّد الحقول المالية والبنيوية حصراً فيسمح تحديث
+/// علم التسليم والمورد على السطر المرحّل بلا فك إقفال (D-131:
+/// تحديث جزئي موثق لعلم عمل).
 @DriftDatabase(tables: [
   Items,
   Roles,
@@ -640,7 +650,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -875,6 +885,36 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                 await customStatement(
                     'ALTER TABLE items ADD COLUMN image_thumb TEXT NULL');
               }
+            }
+            // 12→13 (ومن إصدار أدنى مباشرة): دفعة (12) متابعة التسليم
+            // (س-137..س-142/D-131..D-134) — عمودا علم التسليم والمورد
+            // المسؤول على invoice_lines بـADD COLUMN بحرس pragma (نمط
+            // v12 المجرّب): `delivered` افتراضه 0 بلفظ المالك «ما ليس
+            // محدد يكون غير مستلم» فكل السطور القائمة تولد غير مستلمة
+            // بلا تهجير قيم، و`supplier_party_id` nullable فلا إعادة
+            // بناء ولا إعادة ترقيم. وعلم العمل يُحدَّث على المرحّلة
+            // فيُعاد حرس تجميد الأسطر بصيغته المحدّثة (درس v11:
+            // طرح المُشغِّل وإعادته — وكل مُشغِّلاتها IF NOT EXISTS
+            // فآمنة التكرار).
+            if (version == 13) {
+              final lineCols = (await customSelect(
+                      "SELECT name FROM pragma_table_info('invoice_lines')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!lineCols.contains('delivered')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    'delivered INTEGER NOT NULL DEFAULT 0');
+              }
+              if (!lineCols.contains('supplier_party_id')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    'supplier_party_id INTEGER NULL');
+              }
+              await customStatement(
+                  'DROP TRIGGER IF EXISTS trg_invoice_lines_frozen_update');
+              await _createInvoiceTriggers();
             }
           }
         },
@@ -2176,6 +2216,10 @@ Future<void> _createInvoiceTables() async {
         '"tax_rate" INTEGER NOT NULL DEFAULT 0, '
         '"line_total_doc_minor" INTEGER NOT NULL DEFAULT 0, '
         '"line_total_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        // v13 (دفعة 12/D-131/D-132): علم التسليم والمورد المسؤول —
+        // علم عمل لا محاسبة، والافتراضي غير مستلم بلفظ المالك.
+        '"delivered" INTEGER NOT NULL DEFAULT 0, '
+        '"supplier_party_id" INTEGER NULL, '
         '"uuid" TEXT NOT NULL, '
         '"created_at" INTEGER NOT NULL DEFAULT 0, '
         '"updated_at" INTEGER NOT NULL DEFAULT 0, '
@@ -2294,10 +2338,26 @@ Future<void> _createInvoiceTriggers() async {
         "WHEN (SELECT state FROM invoices WHERE id = NEW.invoice_id) "
         "<> 'draft' "
         "BEGIN SELECT RAISE(ABORT, 'أسطر الفاتورة المرحّلة لا تضاف'); END",
+    // v13 (D-131): الصيغة المحدّثة لحرس تجميد أسطر المرحّل — تجميد
+    // الحقول المالية والبنيوية حصراً فيسمح تحديث علم التسليم
+    // (delivered) والمورد المسؤول (supplier_party_id) على السطر
+    // المرحّل — تحديث جزئي موثق لعلم عمل لا محاسبة بلا فك إقفال،
+    // وأي مساس بمال السطر يرفض كما كان.
     "CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_frozen_update "
         "BEFORE UPDATE ON invoice_lines FOR EACH ROW "
         "WHEN (SELECT state FROM invoices WHERE id = OLD.invoice_id) "
-        "<> 'draft' "
+        "<> 'draft' AND ("
+        "OLD.invoice_id IS NOT NEW.invoice_id OR "
+        "OLD.item_id IS NOT NEW.item_id OR "
+        "OLD.unit_id IS NOT NEW.unit_id OR "
+        "OLD.factor_at_entry IS NOT NEW.factor_at_entry OR "
+        "OLD.qty IS NOT NEW.qty OR "
+        "OLD.qty_base IS NOT NEW.qty_base OR "
+        "OLD.unit_price_minor IS NOT NEW.unit_price_minor OR "
+        "OLD.discount_minor IS NOT NEW.discount_minor OR "
+        "OLD.tax_rate IS NOT NEW.tax_rate OR "
+        "OLD.line_total_doc_minor IS NOT NEW.line_total_doc_minor OR "
+        "OLD.line_total_base_minor IS NOT NEW.line_total_base_minor) "
         "BEGIN SELECT RAISE(ABORT, 'أسطر الفاتورة المرحّلة لا تعدل'); END",
     "CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_frozen_delete "
         "BEFORE DELETE ON invoice_lines FOR EACH ROW "
@@ -2556,7 +2616,8 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
   final rows = await customSelect(
     'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, qty, '
     'qty_base, unit_price_minor, discount_minor, tax_rate, '
-    'line_total_doc_minor, line_total_base_minor, uuid '
+    'line_total_doc_minor, line_total_base_minor, uuid, delivered, '
+    'supplier_party_id '
     'FROM invoice_lines WHERE invoice_id = ? ORDER BY id',
     variables: [Variable.withInt(invoiceId)],
   ).get();
@@ -2576,6 +2637,8 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
         lineTotalDocMinor: r.data['line_total_doc_minor'] as int,
         lineTotalBaseMinor: r.data['line_total_base_minor'] as int,
         uuid: r.data['uuid'] as String,
+        delivered: (r.data['delivered'] as int? ?? 0) == 1,
+        supplierPartyId: r.data['supplier_party_id'] as int?,
       ),
   ];
 }
@@ -3370,6 +3433,141 @@ Future<InvoiceDocument?> invoiceById(int id) => _invoiceRowTx(id);
 
 Future<List<InvoiceLineDocument>> invoiceLines(int invoiceId) =>
     _invoiceLinesTx(invoiceId);
+
+// ─── دفعة (12) متابعة التسليم (س-137..س-142/D-131..D-134) ───
+// علم عمل لا محاسبة: تحديثان جزئيان موثقان على السطر المرحّلة (الحرس
+// المحدَّث يسمح بهذين العمودين حصراً بلا فك إقفال)، وقارئة واحدة
+// لسطور البيع غير المستلمة — لا جداول جديدة ولا قيود ولا مخزون.
+
+/// س-137/D-131: تحديد/إزالة تحديد مربع «مستلم» على سطر — يحفظ فوراً
+/// بقاعدة البيانات على المرحّلة كما على المسودة، والسطر الغائب
+/// برسالته (لا صمت على معرف فاسد).
+Future<void> setInvoiceLineDelivered(
+  int lineId, {
+  required bool delivered,
+}) async {
+  final existing = await customSelect(
+    'SELECT id FROM invoice_lines WHERE id = ?',
+    variables: [Variable.withInt(lineId)],
+  ).get();
+  if (existing.isEmpty) {
+    throw StateError('لا سطر فاتورة بالمعرف $lineId');
+  }
+  await customStatement(
+    'UPDATE invoice_lines SET delivered = ?, updated_at = ? WHERE id = ?',
+    [delivered ? 1 : 0, DateTime.now().millisecondsSinceEpoch, lineId],
+  );
+}
+
+/// س-138/D-132: تعيين المورد المسؤول على السطر — اختيار المالك يُخزَّن
+/// كما هو (ولا تخمين لحظة العرض)، والسطر الغائب برسالته.
+Future<void> setInvoiceLineSupplier(
+  int lineId, {
+  required int? supplierPartyId,
+}) async {
+  final existing = await customSelect(
+    'SELECT id FROM invoice_lines WHERE id = ?',
+    variables: [Variable.withInt(lineId)],
+  ).get();
+  if (existing.isEmpty) {
+    throw StateError('لا سطر فاتورة بالمعرف $lineId');
+  }
+  await customStatement(
+    'UPDATE invoice_lines SET supplier_party_id = ?, updated_at = ? '
+    'WHERE id = ?',
+    [supplierPartyId, DateTime.now().millisecondsSinceEpoch, lineId],
+  );
+}
+
+/// س-138/D-132: اقتراح المورد — آخر فاتورة شراء مرحّلة فيها الصنف
+/// فطرفها هو المقترح، وبلا شراء سابق null (فيُدخل يدوياً بلفظ
+/// اختيار المالك «٢. أ»).
+Future<int?> latestSupplierPartyIdForItem(int itemId) async {
+  final rows = await customSelect(
+    'SELECT inv.party_id AS party_id '
+    'FROM invoice_lines il '
+    'JOIN invoices inv ON inv.id = il.invoice_id '
+    "WHERE il.item_id = ?1 AND inv.kind = 'purchase' "
+    "AND inv.state <> 'draft' AND inv.is_deleted = 0 "
+    'AND il.is_deleted = 0 AND inv.party_id IS NOT NULL '
+    'ORDER BY inv.invoice_date DESC, inv.id DESC LIMIT 1',
+    variables: [Variable.withInt(itemId)],
+  ).get();
+  if (rows.isEmpty) return null;
+  return rows.first.data['party_id'] as int?;
+}
+
+/// صف شاشة «متابعة التسليم» (س-139/D-133) — كل سطر بيع غير مستلم
+/// بفاتورته وتاريخه وطرفه ومورده، الأقدم أولاً.
+class UndeliveredLineRow {
+  final int lineId;
+  final int invoiceId;
+  final String invoiceKind;
+  final String invoiceNumber;
+  final String invoiceDate;
+  final int itemId;
+  final String itemSku;
+  final String itemName;
+  final int qtyBase;
+  final String? partyName;
+  final int? supplierPartyId;
+  final String? supplierName;
+
+  const UndeliveredLineRow({
+    required this.lineId,
+    required this.invoiceId,
+    required this.invoiceKind,
+    required this.invoiceNumber,
+    required this.invoiceDate,
+    required this.itemId,
+    required this.itemSku,
+    required this.itemName,
+    required this.qtyBase,
+    required this.partyName,
+    required this.supplierPartyId,
+    required this.supplierName,
+  });
+}
+
+/// س-139/D-133: قارئة سطور البيع غير المستلمة — من المرحّل حصراً
+/// (المسودة ليست بيعاً واقعياً بعد)، والمردودات ليست تسليم زبون فلا
+/// تدخل، والأقدم أولاً بلفظ البوابة، والقراءة خالصة بلا جداول جديدة
+/// (D-089 روحاً).
+Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
+  final rows = await customSelect(
+    'SELECT il.id AS line_id, inv.id AS invoice_id, inv.kind AS kind, '
+    'inv.number AS number, inv.invoice_date AS invoice_date, '
+    'il.item_id AS item_id, i.sku AS sku, i.name AS item_name, '
+    'il.qty_base AS qty_base, p.name AS party_name, '
+    'il.supplier_party_id AS supplier_party_id, sp.name AS supplier_name '
+    'FROM invoice_lines il '
+    'JOIN invoices inv ON inv.id = il.invoice_id '
+    'JOIN items i ON i.id = il.item_id '
+    'LEFT JOIN parties p ON p.id = inv.party_id '
+    'LEFT JOIN parties sp ON sp.id = il.supplier_party_id '
+    "WHERE inv.kind = 'sale' AND inv.state <> 'draft' "
+    'AND inv.is_deleted = 0 AND il.is_deleted = 0 '
+    'AND il.delivered = 0 '
+    'ORDER BY inv.invoice_date ASC, il.id ASC',
+  ).get();
+  return [
+    for (final r in rows)
+      UndeliveredLineRow(
+        lineId: r.data['line_id'] as int,
+        invoiceId: r.data['invoice_id'] as int,
+        invoiceKind: r.data['kind'] as String,
+        invoiceNumber: r.data['number'] as String,
+        invoiceDate: r.data['invoice_date'] as String,
+        itemId: r.data['item_id'] as int,
+        itemSku: r.data['sku'] as String,
+        itemName: r.data['item_name'] as String,
+        qtyBase: r.data['qty_base'] as int,
+        partyName: r.data['party_name'] as String?,
+        supplierPartyId: r.data['supplier_party_id'] as int?,
+        supplierName: r.data['supplier_name'] as String?,
+      ),
+  ];
+}
 
 /// رصيد صنف في مستودعه (كمية، قيمة إجمالية — D-067) للقراءة والفحص.
 Future<(int, int)> stockBalanceOf({
@@ -5014,6 +5212,310 @@ Future<TrialBalanceReport> trialBalanceReport() async {
   return buildTrialBalance(lines, await allLedgerAccounts());
 }
 
+// ═══ دفعة (13) الروابط التفرعية (س-143..س-147/D-135..D-137) ═══
+// قراءات خالصة من جداول القيود القائمة بلا جداول جديدة (D-089 روحاً) —
+// وكشف الحساب أول قراءة جديدة من نوعها منذ دفعة التقارير، وضابطه
+// التوازن: مجموع الكشف ورصيده النهائي يطابقان صف الحساب في ميزان
+// المراجعة حصراً (روح F-068).
+
+/// سطر في كشف الحساب (س-146/D-137) — قيدٌ بتاريخه ورقمه وبيانه
+/// ومدينه ودائنه والرصيد التراكمي بعده.
+class AccountStatementEntry {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String? narration;
+  final int debitMinor;
+  final int creditMinor;
+
+  /// الرصيد التراكمي بعد القيد باتجاه الحساب الطبيعي (نمط الميزان:
+  /// موجب على جانبه الطبيعي وسالب على المعاكس — لا يُقلب خفية).
+  final int runningBalanceMinor;
+
+  const AccountStatementEntry({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.narration,
+    required this.debitMinor,
+    required this.creditMinor,
+    required this.runningBalanceMinor,
+  });
+}
+
+/// كشف الحساب كاملاً (س-146/D-137) — «دفتر الأستاذ» المعروف: كل قيود
+/// الحساب بترتيب الزمن، والمجاميع والرصيد النهائي يطابقان صف الحساب
+/// في ميزان المراجعة حصراً.
+class AccountStatementReport {
+  final AccountInfo account;
+  final List<AccountStatementEntry> entries;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+  final int closingBalanceMinor;
+
+  const AccountStatementReport({
+    required this.account,
+    required this.entries,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+    required this.closingBalanceMinor,
+  });
+}
+
+/// س-146/D-137: قارئة كشف الحساب من سطور القيود المرحّلة — بترتيب
+/// الزمن (تاريخ القيد ثم معرفه)، والرصيد التراكمي باتجاه الحساب
+/// الطبيعي بدالة صيغة الميزان ذاتها كي يطابق صف الميزان حرفاً،
+/// والحساب الغائب برسالته.
+Future<AccountStatementReport> accountStatementReport(int accountId) async {
+  final accountRows = await (select(accounts)
+        ..where((t) => t.id.equals(accountId)))
+      .get();
+  if (accountRows.isEmpty) {
+    throw StateError('لا حساب بالمعرف $accountId');
+  }
+  final r0 = accountRows.single;
+  final account = AccountInfo(
+    id: r0.id,
+    code: r0.code,
+    name: r0.name,
+    type: AccountType.values.byName(r0.type),
+    normalSide: NormalSide.values.byName(r0.normalSide),
+    parentId: r0.parentId,
+    isLeaf: r0.isLeaf,
+    isActive: r0.isActive,
+  );
+  final rows = await customSelect(
+    'SELECT m.id AS move_id, m.date_text AS move_date, '
+    'm.number AS move_number, m.narration AS narration, '
+    'l.debit_minor AS debit_minor, l.credit_minor AS credit_minor '
+    'FROM move_lines l JOIN moves m ON m.id = l.move_id '
+    "WHERE m.state = 'posted' AND l.account_id = ?1 "
+    'ORDER BY m.date_text ASC, m.id ASC',
+    variables: [Variable.withInt(accountId)],
+  ).get();
+  final entries = <AccountStatementEntry>[];
+  var debitTotal = 0;
+  var creditTotal = 0;
+  for (final r in rows) {
+    final debit = r.data['debit_minor'] as int;
+    final credit = r.data['credit_minor'] as int;
+    debitTotal += debit;
+    creditTotal += credit;
+    final balance = account.normalSide == NormalSide.debit
+        ? debitTotal - creditTotal
+        : creditTotal - debitTotal;
+    entries.add(AccountStatementEntry(
+      moveId: r.data['move_id'] as int,
+      moveDate: r.data['move_date'] as String,
+      moveNumber: r.data['move_number'] as String,
+      narration: r.data['narration'] as String?,
+      debitMinor: debit,
+      creditMinor: credit,
+      runningBalanceMinor: balance,
+    ));
+  }
+  final closing = account.normalSide == NormalSide.debit
+      ? debitTotal - creditTotal
+      : creditTotal - debitTotal;
+  return AccountStatementReport(
+    account: account,
+    entries: entries,
+    totalDebitMinor: debitTotal,
+    totalCreditMinor: creditTotal,
+    closingBalanceMinor: closing,
+  );
+}
+
+/// سطر في كشف حساب الطرف (س-147) — قيدٌ على طرف بذمّته.
+class PartyStatementEntry {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String? narration;
+  final String accountCode;
+  final int debitMinor;
+  final int creditMinor;
+
+  /// الصافي التراكمي بعد القيد: موجب «هم يدينون لنا» وسالب «نحن
+  /// مدينون لهم» — بصيغة الذمم ذاتها (مدين − دائن).
+  final int runningNetDebitMinor;
+
+  const PartyStatementEntry({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.narration,
+    required this.accountCode,
+    required this.debitMinor,
+    required this.creditMinor,
+    required this.runningNetDebitMinor,
+  });
+}
+
+/// كشف حساب الطرف كاملاً (س-147) — ضابطه: صافيه النهائي يطابق صف
+/// الطرف في تقرير الذمم حصراً (مدين − دائن على أرجل طرفه).
+class PartyStatementReport {
+  final int partyId;
+  final String partyName;
+  final List<PartyStatementEntry> entries;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+  final int closingNetDebitMinor;
+
+  const PartyStatementReport({
+    required this.partyId,
+    required this.partyName,
+    required this.entries,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+    required this.closingNetDebitMinor,
+  });
+}
+
+/// س-147: قارئة كشف حساب الطرف من أرجل طرفه على كل الحسابات (الذمم
+/// 112/211 وغيرهما إن ظهر طرف على حساب) — بترتيب الزمن، والحساب
+/// الغائب برسالته.
+Future<PartyStatementReport> partyStatementReport(int partyId) async {
+  final partyRows = await (select(parties)
+        ..where((t) => t.id.equals(partyId)))
+      .get();
+  if (partyRows.isEmpty) {
+    throw StateError('لا طرف بالمعرف $partyId');
+  }
+  final partyName = partyRows.single.name;
+  final rows = await customSelect(
+    'SELECT m.id AS move_id, m.date_text AS move_date, '
+    'm.number AS move_number, m.narration AS narration, '
+    'a.code AS account_code, '
+    'l.debit_minor AS debit_minor, l.credit_minor AS credit_minor '
+    'FROM move_lines l '
+    'JOIN moves m ON m.id = l.move_id '
+    'JOIN accounts a ON a.id = l.account_id '
+    "WHERE m.state = 'posted' AND l.party_id = ?1 "
+    'ORDER BY m.date_text ASC, m.id ASC',
+    variables: [Variable.withInt(partyId)],
+  ).get();
+  final entries = <PartyStatementEntry>[];
+  var debitTotal = 0;
+  var creditTotal = 0;
+  for (final r in rows) {
+    final debit = r.data['debit_minor'] as int;
+    final credit = r.data['credit_minor'] as int;
+    debitTotal += debit;
+    creditTotal += credit;
+    entries.add(PartyStatementEntry(
+      moveId: r.data['move_id'] as int,
+      moveDate: r.data['move_date'] as String,
+      moveNumber: r.data['move_number'] as String,
+      narration: r.data['narration'] as String?,
+      accountCode: r.data['account_code'] as String,
+      debitMinor: debit,
+      creditMinor: credit,
+      runningNetDebitMinor: debitTotal - creditTotal,
+    ));
+  }
+  return PartyStatementReport(
+    partyId: partyId,
+    partyName: partyName,
+    entries: entries,
+    totalDebitMinor: debitTotal,
+    totalCreditMinor: creditTotal,
+    closingNetDebitMinor: debitTotal - creditTotal,
+  );
+}
+
+/// حركة الصنف الواحد (س-145/D-136) — لقطات مخزونه من سجل الحركات
+/// حصراً بفاتورتها وتاريخها، بترتيب الورود (لقطات لا تعدل — F-140).
+class ItemStockMoveRow {
+  final int moveId;
+  final bool isIn;
+  final int qtyBase;
+  final String? warehouseName;
+  final int valueBaseMinor;
+  final String dateText;
+  final String? docLabel;
+
+  const ItemStockMoveRow({
+    required this.moveId,
+    required this.isIn,
+    required this.qtyBase,
+    required this.warehouseName,
+    required this.valueBaseMinor,
+    required this.dateText,
+    required this.docLabel,
+  });
+}
+
+/// س-145/D-136: قارئة حركة الصنف الواحد — من stock_moves مع فاتورتها
+/// (مرجعها) ومستودعها، بترتيب الورود، والصنف الغائب برسالته.
+Future<List<ItemStockMoveRow>> itemStockMovesReport(int itemId) async {
+  final itemRows = await (select(items)
+        ..where((t) => t.id.equals(itemId)))
+      .get();
+  if (itemRows.isEmpty) {
+    throw StateError('لا صنف بالمعرف $itemId');
+  }
+  final rows = await customSelect(
+    'SELECT sm.id AS move_id, sm.qty_base AS qty_base, '
+    'sm.from_warehouse_id AS from_warehouse_id, '
+    'sm.to_warehouse_id AS to_warehouse_id, '
+    'sm.value_base_minor AS value_base_minor, '
+    'sm.ref_doc_type AS ref_doc_type, sm.ref_doc_id AS ref_doc_id, '
+    'sm.created_at AS created_at, '
+    'wf.name AS from_warehouse, wt.name AS to_warehouse, '
+    'inv.number AS invoice_number, inv.kind AS invoice_kind, '
+    'inv.invoice_date AS invoice_date '
+    'FROM stock_moves sm '
+    'LEFT JOIN warehouses wf ON wf.id = sm.from_warehouse_id '
+    'LEFT JOIN warehouses wt ON wt.id = sm.to_warehouse_id '
+    "LEFT JOIN invoices inv ON sm.ref_doc_type = 'invoice' "
+    'AND inv.id = sm.ref_doc_id '
+    'WHERE sm.item_id = ?1 '
+    'ORDER BY sm.id ASC',
+    variables: [Variable.withInt(itemId)],
+  ).get();
+  return [
+    for (final r in rows)
+      ItemStockMoveRow(
+        moveId: r.data['move_id'] as int,
+        isIn: (r.data['qty_base'] as int) > 0,
+        qtyBase: (r.data['qty_base'] as int).abs(),
+        warehouseName:
+            (r.data['to_warehouse'] ?? r.data['from_warehouse']) as String?,
+        valueBaseMinor: r.data['value_base_minor'] as int,
+        dateText: (r.data['invoice_date'] as String?) ??
+            DateTime.fromMillisecondsSinceEpoch(
+              r.data['created_at'] as int,
+            )
+                .toIso8601String()
+                .substring(0, 10),
+        docLabel: r.data['invoice_number'] == null
+            ? null
+            : invoiceDisplayLabel(InvoiceDocument(
+                id: r.data['ref_doc_id'] as int,
+                kind: r.data['invoice_kind'] as String,
+                number: r.data['invoice_number'] as String,
+                partyId: null,
+                cashBoxId: null,
+                warehouseId: null,
+                invoiceDate: r.data['invoice_date'] as String,
+                dueDate: null,
+                currencyId: 1,
+                fxRate: 1,
+                discountRate: 0,
+                subtotalDocMinor: 0,
+                discountDocMinor: 0,
+                totalDocMinor: 0,
+                totalBaseMinor: 0,
+                state: 'posted',
+                moveId: null,
+                originalInvoiceId: null,
+                narration: null,
+              )),
+      ),
+  ];
+}
+
 /// تقرير الصناديق (س-72) — الرصيد بمعادلة الصندوق ذاتها (الافتتاحي +
 /// الداخل − الخارج، والتحويل دخلاً للمستلم وخروجاً للمرسل) ونشاط
 /// الصندوق نشاط حسابه الورقي (تعطيل الحساب تعطيل للصندوق — 03 §6-3).
@@ -5217,6 +5719,10 @@ Future<List<InvoiceListRow>> invoicesListReport({
   String? fromText,
   String? toText,
   String? kindStorageValue,
+
+  /// س-147 (دفعة 13): فلتر الطرف الاختياري — روابط الطرف من الذمم
+  /// تفتح «فواتيره» بهذا الفلتر، وعرضٌ فوق القراءة لا حساب جديد.
+  int? partyId,
 }) async {
   final from = fromText?.trim() ?? '';
   final to = toText?.trim() ?? '';
@@ -5241,11 +5747,13 @@ Future<List<InvoiceListRow>> invoicesListReport({
     "AND (?1 = '' OR inv.kind = ?1) "
     "AND (?2 = '' OR inv.invoice_date >= ?2) "
     "AND (?3 = '' OR inv.invoice_date <= ?3) "
+    'AND (?4 IS NULL OR inv.party_id = ?4) '
     'ORDER BY inv.invoice_date DESC, inv.id DESC',
     variables: [
       Variable.withString(kind),
       Variable.withString(from),
       Variable.withString(to),
+      Variable(partyId),
     ],
   ).get();
   return [
@@ -5267,9 +5775,13 @@ Future<List<InvoiceListRow>> invoicesListReport({
 
 /// صف قائمة سندات القبض والدفع للعرض (05 §4.2/D-105) — الطرفي وغير الطرفي
 /// معاً والمميزان بحقليهما (طرف أو حساب مباشر).
+///
+/// س-147 (D-135 روحاً، دفعة 13): فلتر الطرف الاختياري — روابط الطرف
+/// من الذمم تفتح «سنداته» بهذا الفلتر، وعرضٌ فوق القراءة لا حساب جديد.
 Future<List<VoucherListRow>> vouchersListReport({
   String? fromText,
   String? toText,
+  int? partyId,
 }) async {
   final from = fromText?.trim() ?? '';
   final to = toText?.trim() ?? '';
@@ -5294,10 +5806,12 @@ Future<List<VoucherListRow>> vouchersListReport({
     "WHERE v.is_deleted = 0 "
     "AND (?1 = '' OR v.voucher_date >= ?1) "
     "AND (?2 = '' OR v.voucher_date <= ?2) "
+    'AND (?3 IS NULL OR v.party_id = ?3) '
     'ORDER BY v.voucher_date DESC, v.id DESC',
     variables: [
       Variable.withString(from),
       Variable.withString(to),
+      Variable(partyId),
     ],
   ).get();
   return [
@@ -5579,6 +6093,8 @@ class InvoiceDocument {
 
 /// صورة سطر فاتورة قائمة (05 §4.1) — مع مكافئه التوثيقي بعملة المستند
 /// (F-122/D-082: `line_total_doc_minor` بجانب `line_total_base_minor`).
+/// v13 (دفعة 12/D-131/D-132): مع علم التسليم والمورد المسؤول —
+/// علم عمل لا محاسبة يُحدّث على المرحّلة (الحرس يسمح بهذين حصراً).
 class InvoiceLineDocument {
   final int id;
   final int invoiceId;
@@ -5594,6 +6110,14 @@ class InvoiceLineDocument {
   final int lineTotalBaseMinor;
   final String uuid;
 
+  /// س-137/D-131: مربع «مستلم» — غير محدد افتراضاً لكل سطر جديد،
+  /// والتحديد يُحفظ فوراً بقاعدة البيانات.
+  final bool delivered;
+
+  /// س-138/D-132: المورد المسؤول — اختيار يدوي مع اقتراح من آخر
+  /// شراء مرحّل، ويُخزّن على السطر فيظهر بشاشة المتابعة وحده.
+  final int? supplierPartyId;
+
   const InvoiceLineDocument({
     required this.id,
     required this.invoiceId,
@@ -5608,6 +6132,8 @@ class InvoiceLineDocument {
     required this.lineTotalDocMinor,
     required this.lineTotalBaseMinor,
     required this.uuid,
+    this.delivered = false,
+    this.supplierPartyId,
   });
 }
 

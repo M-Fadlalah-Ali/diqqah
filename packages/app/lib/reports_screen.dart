@@ -10,6 +10,8 @@ import 'item_images.dart';
 import 'print_image_prefs.dart';
 import 'periods_screen.dart';
 import 'print_service.dart';
+import 'drilldown.dart'
+    show AccountStatementScreen, showItemSheet, showPartySheet;
 
 /// تنسيق عرض المبلغ بوحداته الصغرى كما تُخزن — فواصل آلاف للقراءة فقط
 /// (عرضاً حصراً: أرقام السيناريوهات المعروفة تُرى كما هي لا محوَّلة —
@@ -76,16 +78,14 @@ class ReportsScreen extends StatelessWidget {
             leading: const Icon(Icons.trending_up),
             title: const Text('مبيعات وحركة الأصناف'),
             subtitle: const Text('بيع ومردود بيع بمدى تاريخ — والصافي مشتق لا مخزن'),
-            onTap: () => _open(
-                context, _MovementView(db: db, sales: true)),
+            onTap: () => _open(context, _MovementView(db: db, sales: true)),
           ),
           ListTile(
             leading: const Icon(Icons.shopping_cart_outlined),
             title: const Text('تقرير المشتريات'),
             subtitle: const Text(
                 'المستقل — شراء ومردود شراء بمدى تاريخ (وعد D-089، س-84)'),
-            onTap: () => _open(
-                context, _MovementView(db: db, sales: false)),
+            onTap: () => _open(context, _MovementView(db: db, sales: false)),
           ),
           ListTile(
             leading: const Icon(Icons.lock_clock_outlined),
@@ -183,6 +183,10 @@ class _ReportActionsBar extends StatelessWidget {
 
 /// ميزان المراجعة (س-71/س-80): المجمعان يُعرضان كما هما فلا يُطمَر خلل
 /// ولو كان مستحيلاً — والرصيد باتجاهه الطبيعي والعكسي يظهر كما هو.
+///
+/// س-146 (D-137، دفعة 13): النقر على الحساب يفتح كشف حسابه — «دفتر
+/// الأستاذ» بقيوده بترتيب الزمن ورصيده التراكمي، ومجموعه يطابق صف
+/// الميزان حصراً — بمبدأ س-143 «كل اسم يصير مدخلاً».
 class _TrialBalanceView extends StatelessWidget {
   final DiqqahDatabase db;
 
@@ -273,6 +277,11 @@ class _TrialBalanceView extends StatelessWidget {
                                   ' · دائن ${formatMinorAmount(row.creditSumMinor)}'),
                               trailing: Text(
                                   'الرصيد ${formatMinorAmount(row.balanceMinor)}'),
+                              // س-146/D-137: الحساب اسم يُقرأ فيصير مدخلاً
+                              // — النقر يفتح كشف حسابه.
+                              onTap: () => _open(context,
+                                  AccountStatementScreen(
+                                      db: db, accountId: row.account.id)),
                             ),
                         ],
                       ),
@@ -351,56 +360,139 @@ class _CashBoxesView extends StatelessWidget {
 
 /// تقرير الذمم (س-73/س-81): الاتجاهان كما يفهمهما صاحب المحل — والصفر
 /// لا ذمة فلا صف.
-class _ReceivablesPayablesView extends StatelessWidget {
+///
+/// س-136 (D-130، دفعة 11): خيار «حسب النوع» أعلى التقرير بلفظ المالك
+/// «في التقارير التي فيها أكثر من نوع يجب أن يوجد خيار: حسب النوع،
+/// مثال على ذلك تقرير الذمم المدينة والدائنة، فأنا أريد المدينة ثم
+/// الدائنة» — الكل بترتيب المدينة ثم الدائنة، والفلتر عرضٌ فوق القراءة
+/// القائمة ذاتها فلا تغيير في القراءة ولا أرقامها. والقاعدة العامة
+/// الموثقة: **كل تقرير فيه أكثر من نوع له خيار «حسب النوع»**.
+class _ReceivablesPayablesView extends StatefulWidget {
   final DiqqahDatabase db;
 
   const _ReceivablesPayablesView({required this.db});
+
+  @override
+  State<_ReceivablesPayablesView> createState() =>
+      _ReceivablesPayablesViewState();
+}
+
+class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
+  /// المستقبل مرة واحدة لعمر الحالة — درس السرد الكسول الموثق.
+  late final Future<List<ReceivablesPayablesRow>> _data =
+      widget.db.receivablesPayablesReport();
+
+  /// قيمة الفلتر: null = الكل، true = مدينة (هم يدينون لنا)،
+  /// false = دائنة (نحن مدينون لهم).
+  bool? _kind;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('الذمم المدينة والدائنة')),
       body: FutureBuilder<List<ReceivablesPayablesRow>>(
-        future: db.receivablesPayablesReport(),
+        future: _data,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('${snapshot.error}'));
+          }
           if (!snapshot.hasData) return _reportWait();
-          final rows = snapshot.data!;
-          if (rows.isEmpty) {
+          final all = snapshot.data!;
+          if (all.isEmpty) {
             return _reportEmpty('لا ذمم — كل الحسابات مصفاة');
           }
+          // الترتيب الافتراضي بلفظ المالك: المدينة ثم الدائنة — وكل
+          // مجموعة بأسمائها.
+          List<ReceivablesPayablesRow> rows;
+          if (_kind == null) {
+            rows = [
+              ...all.where((r) =>
+                  r.direction == PartyBalanceDirection.theyOweUs),
+              ...all.where((r) =>
+                  r.direction != PartyBalanceDirection.theyOweUs),
+            ];
+          } else {
+            rows = [
+              for (final r in all)
+                if ((r.direction == PartyBalanceDirection.theyOweUs) ==
+                    _kind)
+                  r,
+            ];
+          }
+          final kindLabel = _kind == null
+              ? 'الذمم المدينة والدائنة'
+              : (_kind! ? 'الذمم المدينة (هم يدينون لنا)' : 'الذمم الدائنة (نحن مدينون لهم)');
           return Column(
             children: [
-              _ReportActionsBar(
-                onPrint: () => _printReportDoc(
-                  context,
-                  title: 'الذمم المدينة والدائنة',
-                  columns: const ['الطرف', 'الاتجاه', 'المبلغ'],
-                  rows: [
-                    for (final row in rows)
-                      [
-                        row.partyName,
-                        row.direction == PartyBalanceDirection.theyOweUs
-                            ? 'هم يدينون لنا'
-                            : 'نحن مدينون لهم',
-                        formatMinorAmount(row.amountMinor),
-                      ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<bool>(
+                        initialValue: _kind,
+                        decoration:
+                            const InputDecoration(labelText: 'حسب النوع'),
+                        items: const [
+                          DropdownMenuItem<bool>(
+                              value: null, child: Text('الكل')),
+                          DropdownMenuItem<bool>(
+                              value: true,
+                              child: Text('المدينة — هم يدينون لنا')),
+                          DropdownMenuItem<bool>(
+                              value: false,
+                              child: Text('الدائنة — نحن مدينون لهم')),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _kind = value),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _ReportActionsBar(
+                      onPrint: () => _printReportDoc(
+                        context,
+                        title: kindLabel,
+                        columns: const ['الطرف', 'الاتجاه', 'المبلغ'],
+                        rows: [
+                          for (final row in rows)
+                            [
+                              row.partyName,
+                              row.direction ==
+                                      PartyBalanceDirection.theyOweUs
+                                  ? 'هم يدينون لنا'
+                                  : 'نحن مدينون لهم',
+                              formatMinorAmount(row.amountMinor),
+                            ],
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
               Expanded(
-                child: ListView(
-                  children: [
-                    for (final row in rows)
-                      ListTile(
-                        title: Text(row.partyName),
-                        subtitle: Text(row.direction ==
-                                PartyBalanceDirection.theyOweUs
-                            ? 'هم يدينون لنا'
-                            : 'نحن مدينون لهم'),
-                        trailing: Text(formatMinorAmount(row.amountMinor)),
+                child: rows.isEmpty
+                    ? _reportEmpty('لا ذمم في هذا النوع')
+                    : ListView(
+                        children: [
+                          for (final row in rows)
+                            ListTile(
+                              title: Text(row.partyName),
+                              subtitle: Text(row.direction ==
+                                      PartyBalanceDirection.theyOweUs
+                                  ? 'هم يدينون لنا'
+                                  : 'نحن مدينون لهم'),
+                              trailing:
+                                  Text(formatMinorAmount(row.amountMinor)),
+                              // س-147: الطرف اسم يُقرأ فيصير مدخلاً —
+                              // النقر يفتح ورقته (بطاقة وفواتير وسندات وكشف).
+                              onTap: () => showPartySheet(
+                                  context,
+                                  widget.db,
+                                  row.partyId,
+                                  row.partyName),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
               ),
             ],
           );
@@ -416,20 +508,32 @@ class _ReceivablesPayablesView extends StatelessWidget {
 /// س-128 (دفعة 10/D-118): عمود صورة في الشاشة والمطبوع — بمفتاحه
 /// المستقل من الإعدادات (D-123، افتراضه معطل) والنائب البصري لمن بلا
 /// صورة (س-125/D-122).
+/// س-144/س-145 (دفعة 13/D-136): اسم الصنف في أي صف مدخلاً — النقر
+/// يفتح ورقة الصنف — والعزل على الصنف الواحد (رصيده) عرضٌ مفلتر لا
+/// حساب جديد.
 /// درس السرد الموثق (علّة CI 2026-10-29 س23) بوجهه المستقبلي: المستقبل
 /// يُنشأ مرة واحدة لعمر الحالة لا في build — إنشاؤه في build يعيد
 /// FutureBuilder الانتظار عند كل إطار فيحلّق الجلب والتحديث بلا نهاية
 /// ويحرق pumpAndSettle بمهلته الكاملة.
-class _InventoryView extends StatefulWidget {
+class InventoryView extends StatefulWidget {
   final DiqqahDatabase db;
 
-  const _InventoryView({required this.db});
+  /// س-145/D-136: العزل على الصنف الواحد — null يعني التقرير كاملاً.
+  final int? isolatedItemId;
+  final String? isolatedItemName;
+
+  const InventoryView({
+    super.key,
+    required this.db,
+    this.isolatedItemId,
+    this.isolatedItemName,
+  });
 
   @override
-  State<_InventoryView> createState() => _InventoryViewState();
+  State<InventoryView> createState() => _InventoryViewState();
 }
 
-class _InventoryViewState extends State<_InventoryView> {
+class _InventoryViewState extends State<InventoryView> {
   /// المستقبل مرة واحدة — صفوف التقرير مع الأصناف لمسارات صورها.
   late final Future<List<dynamic>> _data = Future.wait([
     widget.db.inventoryReport(),
@@ -438,8 +542,12 @@ class _InventoryViewState extends State<_InventoryView> {
 
   @override
   Widget build(BuildContext context) {
+    final isolated = widget.isolatedItemId;
     return Scaffold(
-      appBar: AppBar(title: const Text('تقرير المخزون')),
+      appBar: AppBar(
+          title: Text(isolated == null
+              ? 'تقرير المخزون'
+              : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون')),
       body: FutureBuilder<List<dynamic>>(
         future: _data,
         builder: (context, snapshot) {
@@ -448,7 +556,14 @@ class _InventoryViewState extends State<_InventoryView> {
           final items = snapshot.data![1] as List<Item>;
           final itemById = {for (final it in items) it.id: it};
           final withImages = printImageInventory.value;
-          if (rows.isEmpty) {
+          // س-145/D-136: العزل عرضٌ مفلتر فوق القراءة ذاتها — لا حساب جديد.
+          final visibleRows = isolated == null
+              ? rows
+              : [
+                  for (final row in rows)
+                    if (row.itemId == isolated) row,
+                ];
+          if (visibleRows.isEmpty) {
             return _reportEmpty('لا مخزون بعد');
           }
           return Column(
@@ -461,22 +576,26 @@ class _InventoryViewState extends State<_InventoryView> {
                   List<String>? rowLetters;
                   if (withImages) {
                     rowImages = [
-                      for (final row in rows)
+                      for (final row in visibleRows)
                         await loadReportImageBytes(
                             itemById[row.itemId]?.imageFile),
                     ];
                     rowLetters = [
-                      for (final row in rows)
+                      for (final row in visibleRows)
                         itemById[row.itemId]?.name ?? 'صنف',
                     ];
                   }
                   if (!context.mounted) return;
                   await _printReportDoc(
                     context,
-                    title: 'تقرير المخزون',
-                    columns: const ['الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'],
+                    title: isolated == null
+                        ? 'تقرير المخزون'
+                        : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون',
+                    columns: const [
+                      'الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'
+                    ],
                     rows: [
-                      for (final row in rows)
+                      for (final row in visibleRows)
                         [
                           '${row.sku} ${row.name}',
                           row.warehouseName ?? 'غير محدد',
@@ -495,7 +614,7 @@ class _InventoryViewState extends State<_InventoryView> {
               Expanded(
                 child: ListView(
                   children: [
-                    for (final row in rows)
+                    for (final row in visibleRows)
                       ListTile(
                         leading: withImages
                             ? ItemImageBox(
@@ -510,6 +629,9 @@ class _InventoryViewState extends State<_InventoryView> {
                             ' · المتوسط: ${row.avgCostBaseMinor == null ? '—' : formatMinorAmount(row.avgCostBaseMinor!)}'),
                         trailing: Text(
                             '${row.qtyBase} × ${formatMinorAmount(row.totalValueMinor)}'),
+                        // س-144/D-136: اسم الصنف مدخلاً — النقر يفتح ورقته.
+                        onTap: () => showItemSheet(context, widget.db,
+                            row.itemId, '${row.sku} ${row.name}'),
                       ),
                   ],
                 ),
@@ -543,19 +665,33 @@ class _MovementDisplay {
 
 /// شاشة الحركة بمدى تاريخ (س-75/س-83 للمبيعات وس-84 للمشتريات): المدى
 /// يُدقق قبل لمس القاعدة أصلاً، والمدى الغائب يعطي رسالة لا صمت.
-class _MovementView extends StatefulWidget {
+///
+/// س-144/س-145 (دفعة 13/D-136): اسم الصنف في أي صف مدخلاً — النقر
+/// يفتح ورقة الصنف — والعزل على الصنف الواحد (مبيعاته/مشترياته)
+/// بمدى D-113 الافتراضي القابل للتعديل — عرضٌ مفلتر لا حساب جديد.
+class MovementView extends StatefulWidget {
   final DiqqahDatabase db;
 
   /// صحيح: مبيعات وحركة الأصناف — كاذب: تقرير المشتريات المستقل.
   final bool sales;
 
-  const _MovementView({required this.db, required this.sales});
+  /// س-145/D-136: العزل على الصنف الواحد — null يعني التقرير كاملاً.
+  final int? isolatedItemId;
+  final String? isolatedItemName;
+
+  const MovementView({
+    super.key,
+    required this.db,
+    required this.sales,
+    this.isolatedItemId,
+    this.isolatedItemName,
+  });
 
   @override
-  State<_MovementView> createState() => _MovementViewState();
+  State<MovementView> createState() => _MovementViewState();
 }
 
-class _MovementViewState extends State<_MovementView> {
+class _MovementViewState extends State<MovementView> {
   final TextEditingController _from = TextEditingController();
   final TextEditingController _to = TextEditingController();
   String? _error;
@@ -642,7 +778,16 @@ class _MovementViewState extends State<_MovementView> {
         ];
       }
       if (!mounted) return;
-      setState(() => _rows = out);
+      // س-145/D-136: العزل على الصنف الواحد — عرضٌ مفلتر فوق القراءة
+      // ذاتها فلا تتغير أرقام القراءة بحال.
+      final isolated = widget.isolatedItemId;
+      final visible = isolated == null
+          ? out
+          : [
+              for (final row in out)
+                if (row.itemId == isolated) row,
+            ];
+      setState(() => _rows = visible);
     } on ReportValidationException catch (e) {
       if (!mounted) return;
       setState(() =>
@@ -652,7 +797,11 @@ class _MovementViewState extends State<_MovementView> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.sales ? 'مبيعات وحركة الأصناف' : 'تقرير المشتريات';
+    final title = widget.isolatedItemId == null
+        ? (widget.sales ? 'مبيعات وحركة الأصناف' : 'تقرير المشتريات')
+        : (widget.sales
+            ? 'مبيعات ${widget.isolatedItemName ?? ''}'
+            : 'مشتريات ${widget.isolatedItemName ?? ''}');
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: Column(
@@ -746,6 +895,10 @@ class _MovementViewState extends State<_MovementView> {
                               title: Text(row.title),
                               subtitle: Text(row.subtitle),
                               trailing: Text(row.trailing),
+                              // س-144/D-136: اسم الصنف مدخلاً — النقر
+                              // يفتح ورقة الصنف من مواضعها الخمسة.
+                              onTap: () => showItemSheet(
+                                  context, widget.db, row.itemId, row.name),
                             ),
                         ],
                       ),

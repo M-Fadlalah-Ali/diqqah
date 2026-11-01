@@ -11,6 +11,7 @@ import 'invoices_screen.dart';
 import 'vouchers_screen.dart';
 import 'boxes_screen.dart';
 import 'roles_screen.dart';
+import 'delivery_screen.dart';
 
 /// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل. الوحدات ومراحل
 /// توفرها من جدول النطاق (01 §5) حرفاً، والإعدادات متاحة فوراً بعد
@@ -58,6 +59,9 @@ class _HomeScreenState extends State<HomeScreen> {
     ('warehouses', 'المستودعات', 'الإصدار 1 (واحد) → 2 (متعدد + جرد)', false),
     ('invoices', 'الفواتير', 'متاحة الآن — قائمة ونموذج الأنواع الأربعة (F-196..F-198)', true),
     ('vouchers', 'السندات', 'متاحة الآن — قبض وصرف وتحويل وتسوية (D-098)', true),
+    // س-139/D-133 (دفعة 12): شاشة متابعة أسطر البيع غير المستلمة —
+    // بصلاحية مستقلة افتراضها للمدير حصراً وقابلة للتفويض.
+    ('delivery', 'متابعة التسليم', 'متاحة الآن — أسطر البيع غير المستلمة والمورد المسؤول (D-133)', true),
     ('orders', 'طلبات الشراء والبيع', 'لاحقاً — تُقيَّم بعد MVP (D-026)', false),
     ('receivables', 'الذمم', 'الإصدار 1', false),
     ('boxes', 'الصناديق', 'متاحة الآن — القائمة وإنشاء الحساب الآلي (F-199)', true),
@@ -68,6 +72,19 @@ class _HomeScreenState extends State<HomeScreen> {
     ('sync', 'المزامنة', 'الإصدار 4', false),
     ('settings', 'الإعدادات', 'متاحة الآن — النسخ الاحتياطي والاستعادة وفحص الثوابت (F-012/F-013)', true),
   ];
+
+  /// أيقونات الوحدات المفتوحة — خريطة ثابتة بدل سلسلة الشروط الطويلة،
+  /// والغائب يأخذ أيقونة الإعدادات الاعتيادية.
+  static const Map<String, IconData> _moduleIcons = {
+    'parties': Icons.people_outline,
+    'items': Icons.inventory_2_outlined,
+    'invoices': Icons.receipt_long_outlined,
+    'vouchers': Icons.request_quote_outlined,
+    'delivery': Icons.local_shipping_outlined, // متابعة التسليم (D-133)
+    'boxes': Icons.account_balance_wallet_outlined,
+    'roles': Icons.shield_outlined,
+    'reports': Icons.query_stats,
+  };
 
   /// صلاحيات صاحب الجلسة — فراغها «قيد التحميل» فيعرض مؤقت الانتظار
   /// لا قائمة فارغة (الفشل المغلق: لا وحدة تُظهر قبل جواب الدور).
@@ -172,34 +189,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         // فرض الصلاحيات (F-080/D-100): وحدات الدور المفتوحة
                         // حصراً — ومعطلات الهيكلية للجميع (إظهار الواقع).
+                        // أيقونات الوحدات بخريطة ثابتة — ومتابعة التسليم
+                        // (س-139/D-133 دفعة 12) شاحنة التسليم.
                         for (final (key, title, stage, enabled) in _modules)
                           if (!enabled || permissions.allows(key))
                             ListTile(
-                              leading: Icon(
-                                !enabled
-                                    ? Icons.lock_outline
-                                    : title == 'الأطراف'
-                                        ? Icons.people_outline
-                                        : title == 'الأصناف'
-                                            ? Icons.inventory_2_outlined
-                                            : title == 'التقارير اليومية'
-                                                ? Icons.query_stats
-                                                : title == 'الفواتير'
-                                                    ? Icons
-                                                        .receipt_long_outlined
-                                                    : title == 'السندات'
-                                                        ? Icons
-                                                            .request_quote_outlined
-                                                        : title == 'الصناديق'
-                                                            ? Icons
-                                                                .account_balance_wallet_outlined
-                                                            : title ==
-                                                                    'الصلاحيات'
-                                                                ? Icons
-                                                                    .shield_outlined
-                                                                : Icons
-                                                                    .settings_outlined,
-                              ),
+                              leading: Icon(!enabled
+                                  ? Icons.lock_outline
+                                  : _moduleIcons[key] ??
+                                      Icons.settings_outlined),
                               title: Text(title),
                               subtitle: Text(
                                   enabled ? stage : 'معطلة — متاح في $stage'),
@@ -210,7 +208,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                       // (دفعة م1 (2)) والتقارير اليومية
                                       // (دفعتا م1 (6) و(6-ب)) والفواتير
                                       // والصناديق والصلاحيات (دفعة (6-ج))
-                                      // والسندات (دفعة الإغلاق D-098) —
+                                      // والسندات (دفعة الإغلاق D-098)
+                                      // ومتابعة التسليم (دفعة 12 D-133) —
                                       // والبقية الإعدادات وحدها حتى دفعاتها.
                                       final Widget target = title == 'الأطراف'
                                           ? PartiesScreen(db: widget.db)
@@ -226,34 +225,39 @@ class _HomeScreenState extends State<HomeScreen> {
                                                           ? VouchersScreen(
                                                               db: widget.db)
                                                           : title ==
-                                                                  'الصناديق'
-                                                              ? BoxesScreen(
-                                                                  db:
-                                                                      widget.db)
+                                                                  'متابعة التسليم'
+                                                              ? DeliveryScreen(
+                                                                  db: widget
+                                                                      .db)
                                                               : title ==
-                                                                      'الصلاحيات'
-                                                                  ? RolesScreen(
+                                                                      'الصناديق'
+                                                                  ? BoxesScreen(
                                                                       db: widget
                                                                           .db)
-                                                                  : SettingsScreen(
-                                                                      db: widget
-                                                                          .db,
-                                                                      dbPath:
-                                                                          widget
-                                                                              .dbPath,
-                                                                      onRestored:
-                                                                          widget
-                                                                              .onRestored,
-                                                                      onSessionChanged:
-                                                                          () {
-                                                                        // تبديل الجلسة (D-100): يُغلق
-                                                                        // الإعدادات وتُعاد قراءة الدور
-                                                                        // فتتغير الوحدات الظاهرة فوراً.
-                                                                        Navigator.of(context)
-                                                                            .pop();
-                                                                        _loadSession();
-                                                                      },
-                                                                    );
+                                                                  : title ==
+                                                                          'الصلاحيات'
+                                                                      ? RolesScreen(
+                                                                          db: widget
+                                                                              .db)
+                                                                      : SettingsScreen(
+                                                                          db: widget
+                                                                              .db,
+                                                                          dbPath:
+                                                                              widget
+                                                                                  .dbPath,
+                                                                          onRestored:
+                                                                              widget
+                                                                                  .onRestored,
+                                                                          onSessionChanged:
+                                                                              () {
+                                                                            // تبديل الجلسة (D-100): يُغلق
+                                                                            // الإعدادات وتُعاد قراءة الدور
+                                                                            // فتتغير الوحدات الظاهرة فوراً.
+                                                                            Navigator.of(context)
+                                                                                .pop();
+                                                                            _loadSession();
+                                                                          },
+                                                                        );
                                       Navigator.of(context).push(
                                         MaterialPageRoute<void>(
                                             builder: (_) => target),

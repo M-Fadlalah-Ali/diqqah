@@ -155,6 +155,22 @@ class _PdfMetrics {
   }
 }
 
+/// قلب ترتيب أعمدة الجدول إلى العربية (س-134، D-128 — دفعة 11) —
+/// الدالة النقية الوحيدة التي يمرر بها البنّاءان كل جدول: علة المالك
+/// «التقارير تصدر بدون مراعاة الاتجاه العربي في الأعمدة» جذرها أن
+/// بنّاء الجداول بمكتبة pdf يبني الأعمدة يساراً←يميناً رغم كون النص
+/// عربياً والاتجاه rtl حوله — فالعلاج بنقطة واحدة هنا: قلب القائمة
+/// قبل البناء فيصير العمود الأول (الحساب/الصنف/الطرف) أقصى اليمين
+/// ثم المدين ثم الدائن ثم الرصيد بلفظه الحرفي — ويخرج منه كل مطبوعات
+/// البرنامج (الفواتير والسندات والتقارير الست) بلا مساس بأي نداء.
+List<String> rtlColumnOrder(List<String> columns) =>
+    columns.reversed.toList(growable: false);
+
+/// قلب خلايا كل صف بنفس الدالة العلوية — تركيب الأعمدة المقلوبة.
+List<List<String>> rtlRowOrder(List<List<String>> rows) => [
+      for (final row in rows) row.reversed.toList(growable: false),
+    ];
+
 /// صف ترويسة أو خلاصة — سطر «تسمية: قيمة» بمساحة تسمية نسبية.
 List<pw.Widget> _pairLines(
   List<(String, String)> pairs,
@@ -205,6 +221,11 @@ Future<Uint8List> buildDocumentPdf({
 
   /// أول حرف اسم الصنف لكل صف — حرف النائب البصري بالحالات بلا صورة.
   List<String>? rowPlaceholderLetters,
+
+  /// س-140 (D-134 — دفعة 12): سطر خلاصة تحت الجدول مباشرة — عمود
+  /// «مستلم» بقسيمة البيع يلخصه «مستلم X من Y» توضيحاً للزبون لا
+  /// يغيّر أرقاماً. null في المطبوعات الأخرى فلا شيء يظهر.
+  String? summaryText,
 }) async {
   final key = fontKey ?? activeFontKey;
   final (regular, bold) = await _fontsFor(key);
@@ -268,8 +289,10 @@ Future<Uint8List> buildDocumentPdf({
               )
             else
               pw.TableHelper.fromTextArray(
-                headers: columns,
-                data: rows,
+                // س-134/D-128: القلب هنا نقطة الإصلاح الوحيدة — أعمدة
+                // الجدول النصي تمرر مقلوبة فيصير الأول أقصى اليمين.
+                headers: rtlColumnOrder(columns),
+                data: rtlRowOrder(rows),
                 border: pw.TableBorder.all(color: PdfColors.grey400),
                 headerStyle: pw.TextStyle(
                     font: bold, fontSize: m.tableHeaderSize),
@@ -281,6 +304,18 @@ Future<Uint8List> buildDocumentPdf({
                 oddRowDecoration:
                     const pw.BoxDecoration(color: PdfColors.grey50),
               ),
+            // س-140/D-134: سطر خلاصة «مستلم X من Y» تحت الجدول مباشرة
+            // — عرضٌ توضيحي للزبون لا رقم محاسبي.
+            if (summaryText != null && summaryText.isNotEmpty) ...[
+              pw.Padding(
+                padding: pw.EdgeInsets.only(top: m.smallGap),
+                child: pw.Text(summaryText,
+                    textAlign: pw.TextAlign.center,
+                    style: pw.TextStyle(
+                        font: bold, fontSize: m.tableCellSize)),
+              ),
+              pw.SizedBox(height: m.boxGap),
+            ],
             pw.SizedBox(height: m.boxGap),
             if (footerPairs.isNotEmpty)
               pw.Container(
@@ -312,10 +347,13 @@ Future<Uint8List> buildDocumentPdf({
   return doc.save();
 }
 
-/// جدول الطباعة بعمود الصورة (س-127/س-128، دفعة 10) — العمود الأول
-/// مربع بعرض نسبي من قياس الصفحة (D-103)، والصورة فيه بالاحتواء لا
+/// جدول الطباعة بعمود الصورة (س-127/س-128، دفعة 10) — العمود مربع
+/// بعرض نسبي من قياس الصفحة (D-103)، والصورة فيه بالاحتواء لا
 /// القص (D-121)، وبلا صورة دائرة النائب بأول حرف (س-125/D-122).
 /// ارتفاع الصف ثابت بعرض العمود فلا يتفاضل الجدول (س-127).
+/// س-134/D-128 (دفعة 11): عمود الصورة أقصى **اليمين** بقلب التركيب
+/// ذاته — الأعمدة النصية تمرر مقلوبة الدالة النقية وخلية الصورة
+/// تُلحق آخراً فيركب الصف من اليمين: [الأعمدة المقلوبة…، الصورة].
 pw.Widget _imageTable({
   required List<String> columns,
   required List<List<String>> rows,
@@ -386,25 +424,30 @@ pw.Widget _imageTable({
         ),
       );
 
+  // س-134/D-128: الأعمدة النصية مقلوبة والصورة آخر خلية (أقصى اليمين)
+  // — وعرض العمود الثابت يُفهرس بموضعه الجديد آخر الجدول.
+  final orderedColumns = rtlColumnOrder(columns);
+  final orderedRows = rtlRowOrder(rows);
+  final imageColIndex = orderedColumns.length; // آخر عمود = أقصى اليمين
   return pw.Table(
     border: pw.TableBorder.all(color: PdfColors.grey400),
-    columnWidths: {0: pw.FixedColumnWidth(imageColWidth)},
+    columnWidths: {imageColIndex: pw.FixedColumnWidth(imageColWidth)},
     children: [
       pw.TableRow(
         decoration: const pw.BoxDecoration(color: PdfColors.grey200),
         children: [
+          for (final c in orderedColumns) textCell(c, header: true),
           textCell('الصورة', header: true),
-          for (final c in columns) textCell(c, header: true),
         ],
       ),
-      for (var i = 0; i < rows.length; i++)
+      for (var i = 0; i < orderedRows.length; i++)
         pw.TableRow(
           decoration: i.isOdd
               ? const pw.BoxDecoration(color: PdfColors.grey50)
               : null,
           children: [
+            for (final cell in orderedRows[i]) textCell(cell, header: false),
             imageCell(i),
-            for (final cell in rows[i]) textCell(cell, header: false),
           ],
         ),
     ],
