@@ -3468,28 +3468,6 @@ Future<void> deleteInvoiceDraft(int invoiceId) async {
 
 Future<InvoiceDocument?> invoiceById(int id) => _invoiceRowTx(id);
 
-/// المغطى بفواتير السندات المرحّلة لوثيقة واحدة — بوحدات المستند
-/// (س50/4 بلفظ المالك: «في الخاتمة تكتب الدفعة والباقي»، س-156/D-154):
-/// النقدي المرحّل مسدّد بمجرد ترحيله من صندوقه (س-03/س-06 «مدفوعة
-/// فوراً») ولا مطابقة سند عليه فالمغطى محصلته إجماليه والباقي صفر —
-/// بلسان التصنيف نفسه — والمسودة النقدية لم تتحرك بعد فبالمطابقات
-/// (صفر عادة)، والآجل بالمطابقات حصراً. غياب الوثيقة يعود صفراً لا
-/// استثناء فلا تُكسر قسيمة عرضية.
-Future<int> invoiceCoveredDocMinor(int invoiceId) async {
-  final rows = await customSelect(
-    'SELECT cash_box_id, total_doc_minor, state FROM invoices '
-    'WHERE id = ?1 AND is_deleted = 0',
-    variables: [Variable.withInt(invoiceId)],
-  ).get();
-  if (rows.isEmpty) return 0;
-  final d = rows.first.data;
-  final isCash = (d['cash_box_id'] as int?) != null;
-  final isDraft = d['state'] == 'draft';
-  if (isCash && !isDraft) {
-    return d['total_doc_minor'] as int;
-  }
-  return _coveredDocSingleTx(invoiceId);
-}
 
 Future<List<InvoiceLineDocument>> invoiceLines(int invoiceId) =>
     _invoiceLinesTx(invoiceId);
@@ -4884,10 +4862,28 @@ Future<List<CurrencyRow>> currenciesOf() async {
     ];
   }
 
-  /// مجموع مطابقات فاتورة من السندات المرحّلة بعملة الفاتورة — بذرة
-  /// الاشتقاق والقراءة (F-063/D-084 معروضان).
-  Future<int> invoiceCoveredDocMinor(int invoiceId) =>
-      _coveredDocSingleTx(invoiceId);
+  /// المغطى لفاتورة واحدة بوحدات المستند — بذرة الاشتقاق والقراءة
+  /// (F-063/D-084 معروضان) ممتدة بلفظ المالك (س50/4 «في الخاتمة
+  /// تكتب الدفعة والباقي» — س-156/D-154): النقدي المرحّل مسدّد بمجرد
+  /// ترحيله (س-03/س-06 «مدفوعة فوراً») ولا مطابقة سند عليه فالمغطى
+  /// محصلته إجماليه والباقي صفر بلسان التصنيف نفسه، والمسودة النقدية
+  /// لم تتحرك بعد فبالمطابقات، والآجل بالمطابقات حصراً، والغائب صفر
+  /// بلا استثناء فلا تُكسر قسيمة عرضية.
+  Future<int> invoiceCoveredDocMinor(int invoiceId) async {
+    final rows = await customSelect(
+      'SELECT cash_box_id, total_doc_minor, state FROM invoices '
+      'WHERE id = ?1 AND is_deleted = 0',
+      variables: [Variable.withInt(invoiceId)],
+    ).get();
+    if (rows.isEmpty) return 0;
+    final d = rows.first.data;
+    final isCash = (d['cash_box_id'] as int?) != null;
+    final isDraft = d['state'] == 'draft';
+    if (isCash && !isDraft) {
+      return d['total_doc_minor'] as int;
+    }
+    return _coveredDocSingleTx(invoiceId);
+  }
 
 /// جداول دفعة السندات (05 §4.2 + س-16/س-17): السند وصفوف مطابقته
 /// (تشغيلية جزء لا يتجزأ من السند — م-21/D-042) ومستندا التحويل
