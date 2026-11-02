@@ -6,6 +6,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'print_service.dart';
 import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
+import 'currency_display.dart';
 
 /// طباعة سند أو تحويل أو تسوية (D-016، دفعة إغلاق النواة س37) — قسيمة
 /// A5 طولية (D-101 معروض) ببيانات الصف المعروضة حصراً، ومشاركتها
@@ -913,7 +914,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                       // بنفس سطر الفاتورة النقدية (س-105/D-106) — بلفظ
                       // المالك «رصيد الصندوق في السندات غير موجود»،
                       // ويتجدد مع تبديل الصندوق (القائمة محملة بأرصدتها).
-                      'الرصيد الآن: ${formatMinorAmount(_box!.balanceBaseMinor)} (بالأساسية)',
+                      'الرصيد الآن: ${formatMinorAmount(_box!.balanceBaseMinor)} $kBaseCurrencySymbol',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -1198,7 +1199,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                     child: Text(
                       // س-122 (D-117): رصيد الصندوقين قبل التحويل —
                       // إضافة المستشار المعتمدة ببوابة دفعة (9).
-                      'الرصيد الآن: ${formatMinorAmount(_fromBox!.balanceBaseMinor)} (بالأساسية)',
+                      'الرصيد الآن: ${formatMinorAmount(_fromBox!.balanceBaseMinor)} $kBaseCurrencySymbol',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -1220,7 +1221,7 @@ class _TransferEditScreenState extends State<TransferEditScreen> {
                     child: Text(
                       // س-122 (D-117): رصيد المستلم قبل التحويل —
                       // موازن سطر المرسل أعلاه.
-                      'الرصيد الآن: ${formatMinorAmount(_toBox!.balanceBaseMinor)} (بالأساسية)',
+                      'الرصيد الآن: ${formatMinorAmount(_toBox!.balanceBaseMinor)} $kBaseCurrencySymbol',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),

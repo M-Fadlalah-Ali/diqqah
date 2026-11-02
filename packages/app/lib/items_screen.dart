@@ -482,8 +482,12 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       int? savedItemId;
       if (_isEdit) {
         savedItemId = widget.existing!.id;
+        // س-155/D-153 (دفعة 17): الكود يعدل بلفظ المالك (س50/1 «تمام»)
+        // — والفواتير كلها بمعرفه الخفي، والتفرد الحرفي دُقق أعلاه
+        // بالمدقق المستثنياً النفس (س-39).
         await widget.db.updateItemDetails(
           widget.existing!,
+          sku: draft.sku.trim(),
           name: draft.name.trim(),
           category: draft.category.trim(),
           kind: _kind.storageValue,
@@ -633,12 +637,12 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         children: [
           TextFormField(
             controller: _sku,
-            enabled: !_isEdit,
+            // س-155/D-153 (دفعة 17): الخانة مفتوحة في التعديل أيضاً بلفظ
+            // المالك (س50/1 «تمام») — والمدقق أعلاه يرفض المكرر حرفياً.
             decoration: InputDecoration(
               labelText: 'كود الصنف (الأساس)',
               helperText: _isEdit
-                  ? 'الكود لا يُعدَّل بعد الحفظ — الفواتير ترتبط بمعرّفه '
-                      'الثابت (D-073)'
+                  ? 'الكود قابل للتعديل — والفواتير مربوطة بمعرفه الخفي لا بالكود'
                   : 'إلزامي — اكتب كودك كما تعرف صنفك (D-073)',
             ),
           ),

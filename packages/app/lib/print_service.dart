@@ -46,6 +46,30 @@ import 'ui_fonts.dart';
 /// تُقرأ الأصول كل طباعة.
 final Map<String, (pw.Font, pw.Font)> _fontCache = {};
 
+/// بايتات أصول العلامة (شعار الترويسة والخاتمة) — تحميل مرة واحدة
+/// والغائب null مخزّناً فلا محاولة كل طباعة.
+final Map<String, Uint8List?> _brandCache = {};
+
+/// شعار العلامة صورة لا نص (س50/3 بلفظ المالك «ألا يوجد علاج؟» —
+/// س-157/D-155): علة التشوه أن خط ساحل المدمج بتمثيل مكتبة pdf
+/// يرسم الحركات (الكسرة والشدّة في «دِقّة») في غير موضعها، والشاشة
+/// بمحرك تشكيل كامل فسليمة — فالعلاج الجذري: الاسم يُرسم مرة واحدة
+/// بمحرك تشكيل كامل ويدخل الورقة صورة عالية الوضوح فحروفه وحركاته
+/// ثابتة لا تفسّر ولا تُرسم عند كل طباعة، بساحل التطبيق نفسه. الغائب
+/// (أصل فاسد مثلاً) يعود للسطر النصي بلا حركات كي لا تُكسر الطباعة.
+Future<Uint8List?> brandAsset(String key) async {
+  if (_brandCache.containsKey(key)) return _brandCache[key];
+  Uint8List? bytes;
+  try {
+    final data = await rootBundle.load('assets/brand/$key.png');
+    bytes = data.buffer.asUint8List();
+  } catch (_) {
+    bytes = null; // فاسد لا يكسر الطباعة أبداً — النص البديل مكانه
+  }
+  _brandCache[key] = bytes;
+  return bytes;
+}
+
 /// تحميل زوج الخط (عادي، عريض) لمفتاح الخيار — مدمج حصراً من الأصول،
 /// وأي مفتاح غريب يعيد ساحل (نمط القراءة الافتراضية الموثق).
 Future<(pw.Font, pw.Font)> _fontsFor(String fontKey) async {
@@ -226,10 +250,16 @@ Future<Uint8List> buildDocumentPdf({
   /// «مستلم» بقسيمة البيع يلخصه «مستلم X من Y» توضيحاً للزبون لا
   /// يغيّر أرقاماً. null في المطبوعات الأخرى فلا شيء يظهر.
   String? summaryText,
+  /// س50/8 (س-160/D-158): سطر التفقيط المستقل بلا تسمية — عرف الشيكات
+  /// وفواتير البرمجيات العربية: «فقط ... لا غير» يقف وحده لا يسبقه
+  /// لفظ «بالكلمات» يضاعف الكلام. null في المطبوعات الأخرى فلا شيء.
+  String? standoutLine,
 }) async {
   final key = fontKey ?? activeFontKey;
   final (regular, bold) = await _fontsFor(key);
   final m = _PdfMetrics.fromPage(format);
+  final headerBrand = await brandAsset('wordmark-header');
+  final footerBrand = await brandAsset('wordmark-footer');
 
   final doc = pw.Document(
     theme: pw.ThemeData.withFont(base: regular, bold: bold),
@@ -248,9 +278,15 @@ Future<Uint8List> buildDocumentPdf({
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(font: bold, fontSize: m.titleSize)),
             pw.SizedBox(height: m.smallGap),
-            pw.Text('دِقَّة — نظام المحاسبة لمحلك',
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(font: regular, fontSize: m.brandSize)),
+            if (headerBrand != null)
+              pw.Center(
+                child: pw.Image(pw.MemoryImage(headerBrand),
+                    height: m.brandSize * 2.6),
+              )
+            else
+              pw.Text('دقة — نظام المحاسبة لمحلك',
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(font: regular, fontSize: m.brandSize)),
             pw.SizedBox(height: m.boxGap),
             if (headerPairs.isNotEmpty) ...[
               pw.Container(
@@ -331,13 +367,28 @@ Future<Uint8List> buildDocumentPdf({
                       footerPairs, regular, bold, m.headerTextSize, m.labelWidth),
                 ),
               ),
+            if (standoutLine != null && standoutLine.isNotEmpty) ...[
+              pw.SizedBox(height: m.smallGap),
+              pw.Text(standoutLine,
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(
+                      font: bold, fontSize: m.headerTextSize)),
+            ],
             pw.Spacer(),
-            pw.Text('طُبع من دِقَّة',
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(
-                    font: regular,
-                    fontSize: m.footerStampSize,
-                    color: PdfColors.grey600)),
+            if (footerBrand != null)
+              pw.Center(
+                // الأصل نفسه مرسوم بدرج الرمادي عند توليده — فلا
+                // فلتر ألوان على الصورة ولا اعتماد على مزايا المكتبة.
+                child: pw.Image(pw.MemoryImage(footerBrand),
+                    height: m.footerStampSize * 2.6),
+              )
+            else
+              pw.Text('طُبع من دقة',
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(
+                      font: regular,
+                      fontSize: m.footerStampSize,
+                      color: PdfColors.grey600)),
           ],
         ),
       ),

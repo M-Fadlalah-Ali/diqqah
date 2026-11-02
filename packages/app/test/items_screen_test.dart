@@ -285,10 +285,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // الهوية الثابتة (D-073): لا حقل تعديل للكود أصلاً في التعديل
+    // س-155/D-153 (دفعة 17): الخانة مفتوحة في التعديل بلفظ المالك —
+    // والفواتير كلها بمعرفه الخفي
     final skuField =
         tester.widget<TextFormField>(find.byType(TextFormField).first);
-    expect(skuField.enabled, isFalse);
+    expect(skuField.enabled, isTrue);
     expect(skuField.controller!.text, '100');
 
     // زر الحذف غير موجود أصلاً في البطاقة كلها (س-40) — والفحص حارس

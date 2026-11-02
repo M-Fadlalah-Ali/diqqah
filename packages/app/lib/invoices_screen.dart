@@ -15,6 +15,7 @@ import 'reports_screen.dart' show formatMinorAmount;
 import 'drilldown.dart' show showItemSheet;
 import 'tafqit.dart';
 import 'delivery_summary.dart';
+import 'currency_display.dart';
 
 /// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
 /// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
@@ -81,7 +82,9 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     'الصنف',
     'الكمية',
     'سعر الوحدة',
-    'صافي السطر',
+    // س50/5 (س-161/D-159 دفعة 17): «المبلغ» — عرف البرمجيات
+    // الشهيرة لعمود مبلغ السطر، و«الإجمالي» باق للتذييل كله.
+    'المبلغ',
     if (isSale) 'مستلم',
     if (hasDeliveryNotes) 'ملاحظة',
   ];
@@ -119,6 +122,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   // س-149/D-139: عملة المستند من جدولها — التفقيط باسمها وصيغها.
   final currencies = await db.currenciesOf();
   Map<String, dynamic>? currencyFields;
+  String baseCode = 'SYP';
   for (final c in currencies) {
     if (c.id == invoice.currencyId) {
       currencyFields = {
@@ -127,13 +131,30 @@ Future<Uint8List> buildInvoicePrintoutBytes(
         'minorUnits': c.minorUnits,
       };
     }
+    if (c.id == 1) baseCode = c.code;
   }
+  // س-158/D-156 (دفعة 17): الرمز مكان اللفظ (س50/6 بلفظ المالك:
+  // «بالأساسية تُستبدل برمز العملة — ل.س تُكتب مباشرة أو $») — الرمز
+  // من جدول العملات لا لفظ ثابت، والغريب الكود يبقى كوده حرفاً.
+  final docSymbol = currencySymbol(currencyFields?['code'] as String?);
+  final docSuffix = docSymbol.isEmpty ? 'بعملة المستند' : docSymbol;
+  final baseSymbol = currencySymbol(baseCode);
+  // س-156/D-154 (دفعة 17): المدفوع من محرك المطابقة ذاته — فواتير
+  // السندات المرحّلة بوحدات المستند (س50/4 بلفظ المالك:
+  // «في الخاتمة تكتب الدفعة والباقي»).
+  final covered = await db.invoiceCoveredDocMinor(invoiceId);
 
   return buildDocumentPdf(
     title: invoiceDisplayLabel(invoice),
     headerPairs: [
       ('التاريخ', invoice.invoiceDate),
-      ('الحالة', InvoiceState.fromStorage(invoice.state).label),
+      // س-156/D-154: لسان المالك — «نحن صنفنا الفواتير نقدية وذمة
+      // فلتكتب كذلك» (س50/4): السداد بالتصنيف المعتمد عند الإدخال
+      // (النقدي بصندوقه والآجل بطرفه — لا صندوق ولا طرف مرفوضان
+      // بالمحرك)، والمسودة تُنادى بمسودتها كي لا تُباع ورقة غير
+      // مرحّلة بلا إنذار.
+      ('السداد', invoice.cashBoxId != null ? 'نقدية' : 'ذمة'),
+      if (invoice.state == 'draft') ('الحالة', 'مسودة'),
       if (invoice.narration != null && invoice.narration!.isNotEmpty)
         ('البيان', invoice.narration!),
     ],
@@ -145,17 +166,33 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     footerPairs: [
       (
         'الإجمالي',
-        '${formatMinorAmount(invoice.totalDocMinor)} '
-            '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
+        '${formatMinorAmount(invoice.totalDocMinor)} $docSuffix',
       ),
-      ('المكافئ الأساسي', formatMinorAmount(invoice.totalBaseMinor)),
-      // س-149/D-139: «التفقيط للمبلغ لا للكميات» — بعرف المحاسبة
-      // «فقط ... لا غير»، وبعملة المستند لا بلفظ ثابت. وسقوط العملة
-      // من الجدول يسقط السطر سكوتاً لا بلفظ مفبرك.
-      if (currencyFields != null)
+      // س-159/D-157 (دفعة 17): المكافئ بغير عملة الأساس حصراً — بعملة
+      // الأساس كان يكرر سطر الإجمالي بلا فائدة (س50/7 «لا بأس»)،
+      // وتسميته برمز الأساس لا بلفظ «المكافئ الأساسي».
+      if (invoice.currencyId != 1)
         (
-          'بالكلمات',
-          tafqitAmountWords(
+          'المكافئ ب$baseSymbol',
+          formatMinorAmount(invoice.totalBaseMinor),
+        ),
+      // س-156/D-154: المدفوع والباقي بقراءة المحرك — وبرمز العملة.
+      (
+        'المدفوع',
+        '${formatMinorAmount(covered)} $docSuffix',
+      ),
+      (
+        'الباقي',
+        '${formatMinorAmount(invoice.totalDocMinor - covered)} $docSuffix',
+      ),
+    ],
+    // س-160/D-158 (دفعة 17): التفقيط سطراً مستقلاً بلا تسمية — عرف
+    // الشيكات وفواتير البرمجيات العربية (س50/8 «تمام»): «فقط ...
+    // لا غير» يقف وحده لا يسبقه لفظ يضاعف الكلام. وسقوط العملة من
+    // الجدول يسقط السطر سكوتاً لا بلفظ مفبرك (عهد س-149 باقٍ).
+    standoutLine: currencyFields == null
+        ? null
+        : tafqitAmountWords(
             totalMinor: invoice.totalDocMinor,
             currency: tafqitCurrencyFor(
               code: currencyFields['code'] as String,
@@ -163,8 +200,6 @@ Future<Uint8List> buildInvoicePrintoutBytes(
               minorUnits: currencyFields['minorUnits'] as int,
             ),
           ),
-        ),
-    ],
     format: resolvePageFormat(docKind: 'invoice'),
   );
 }
@@ -912,7 +947,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       child: Text(
                         'الرصيد الآن: '
                         '${formatMinorAmount(_boxOf(_boxId)!.balanceBaseMinor)}'
-                        ' (بالأساسية)',
+                        ' $kBaseCurrencySymbol',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -1329,6 +1364,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   /// الموردون النشطون لخانة «المورد المسؤول» (س-138/D-132).
   List<Party> _suppliers = [];
 
+  /// س-156/D-154 (دفعة 17): المدفوع من محرك المطابقة، ورمزا العملتين
+  /// (المستند والأساس) من جدولهما — لسان نقدية/ذمة والمدفوع والباقي.
+  int _covered = 0;
+  String _docSuffix = '';
+  String _baseSymbol = kBaseCurrencySymbol;
+
   /// اقتراح المورد لكل صنف — من آخر شراء مرحّل (قراءة عند التحميل
   /// حصراً؛ من يختار يُخزَّن فلا يعاد الاقتراح فوق اختيار).
   Map<int, int> _supplierSuggestion = {};
@@ -1353,6 +1394,18 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           : await widget.db.invoiceLines(widget.invoiceId);
       final items = await widget.db.select(widget.db.items).get();
       final parties = await widget.db.select(widget.db.parties).get();
+      // س-156/D-154: المغطى بالمحرك ورمز العملتين من جدولهما.
+      final covered = invoice == null
+          ? 0
+          : await widget.db.invoiceCoveredDocMinor(widget.invoiceId);
+      final currencies = await widget.db.currenciesOf();
+      String baseCode = 'SYP';
+      String docCode = '';
+      for (final c in currencies) {
+        if (c.id == 1) baseCode = c.code;
+        if (invoice != null && c.id == invoice.currencyId) docCode = c.code;
+      }
+      final docSymbol = currencySymbol(docCode);
       // س-148/D-138: أسماء الوحدات لتجميع عدّاد التسليم «بالواحدة».
       final units = await widget.db.select(widget.db.units).get();
       final suggestions = <int, int>{};
@@ -1371,6 +1424,9 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             .toList();
         _supplierSuggestion = suggestions;
         _unitNames = {for (final u in units) u.id: u.name};
+        _covered = covered;
+        _docSuffix = docSymbol.isEmpty ? 'بعملة المستند' : docSymbol;
+        _baseSymbol = currencySymbol(baseCode);
         _loaded = true;
       });
     } catch (e) {
@@ -1533,13 +1589,18 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             title: Text(invoiceDisplayLabel(invoice)),
             subtitle: Text(
                 'التاريخ ${invoice.invoiceDate}'
-                ' · الحالة ${InvoiceState.fromStorage(invoice.state).label}'),
+                // س-156/D-154 (دفعة 17): لسان المالك — نقدية/ذمة (س50/4)،
+                // والمسودة تُنادى بمسودتها.
+                ' · السداد ${invoice.cashBoxId != null ? 'نقدية' : 'ذمة'}'
+                "${invoice.state == 'draft' ? ' · مسودة' : ''}"),
           ),
           ListTile(
             title: Text('الإجمالي ${formatMinorAmount(invoice.totalDocMinor)}'
-                ' (${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})'),
+                ' $_docSuffix'),
             subtitle: Text(
-                'المكافئ الأساسي ${formatMinorAmount(invoice.totalBaseMinor)}'),
+                '${invoice.currencyId != 1 ? 'المكافئ ب$_baseSymbol ${formatMinorAmount(invoice.totalBaseMinor)} · ' : ''}'
+                'المدفوع ${formatMinorAmount(_covered)}'
+                ' · الباقي ${formatMinorAmount(invoice.totalDocMinor - _covered)}'),
           ),
           // س-148/D-138 (دفعة 14): عدّاد التسليم «مستلم X من Y»
           // بأساسه الافتراضي (الكميات بالواحدة) وقائمة التبديل
@@ -1614,7 +1675,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       return ListTile(
         title: Text(title),
         subtitle:
-            Text('صافي السطر ${formatMinorAmount(line.lineTotalDocMinor)}'),
+            Text('المبلغ ${formatMinorAmount(line.lineTotalDocMinor)}'),
         // س-144/D-136: سطر الفاتورة من مواضع ورقة الصنف الخمسة.
         onTap: () => showItemSheet(context, widget.db, line.itemId, itemName),
       );
@@ -1629,7 +1690,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             ListTile(
               title: Text(title),
               subtitle: Text(
-                  'صافي السطر ${formatMinorAmount(line.lineTotalDocMinor)}'),
+                  'المبلغ ${formatMinorAmount(line.lineTotalDocMinor)}'),
               // س-137/D-131: مربع «مستلم» الواحد — غير محدد افتراضاً
               // لكل سطر، والتحديد يحفظ فوراً.
               trailing: Checkbox(

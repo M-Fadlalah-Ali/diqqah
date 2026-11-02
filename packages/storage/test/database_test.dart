@@ -197,14 +197,15 @@ void main() {
       );
     });
 
-    test('س-32: تعديل الاسم بالمرجع — المعرّف ثابت والرقم لا مسار تحديث له',
-        () async {
+    test('س-32: تعديل الاسم بالمرجع — والمعرّف ثابت والرقم قابل للتعديل '
+        'الآن (س-155/D-153 بلفظ المالك س50/1)', () async {
       final id = await seed();
       final before = await (db.select(db.parties)
             ..where((t) => t.id.equals(id)))
           .getSingle();
       await db.updatePartyDetails(
         before,
+        number: '0077',
         name: 'محمد المعدل',
         kind: 'both',
         defaultCurrencyId: 1,
@@ -214,7 +215,8 @@ void main() {
             ..where((t) => t.id.equals(id)))
           .getSingle();
       expect(after.id, id);
-      expect(after.number, '0053');
+      expect(after.number, '0077',
+          reason: 'الرقم الظاهر يعدل والمعاملات بمعرفه الخفي');
       expect(after.name, 'محمد المعدل');
       expect(after.kind, 'both', reason: 'س-30: الطرف المزدوج صف واحد');
       expect(after.creditLimitBaseMinor, 5000, reason: 'س-34 يخزن بوحدات صغرى');
@@ -358,6 +360,7 @@ void main() {
           .getSingle();
       await db.updateItemDetails(
         before,
+        sku: 'Z-999',
         name: 'زيت محلي فاخر',
         category: 'مواد غذائية',
         kind: 'service',
@@ -370,7 +373,8 @@ void main() {
             ..where((t) => t.id.equals(id)))
           .getSingle();
       expect(after.id, id);
-      expect(after.sku, '100', reason: 'الكود لا يعدل بعد الحفظ');
+      expect(after.sku, 'Z-999',
+          reason: 'الكود الظاهر يعدل (س-155/D-153) والفواتير بمعرفه الخفي');
       expect(after.name, 'زيت محلي فاخر');
       expect(after.category, 'مواد غذائية');
       expect(after.kind, 'service');

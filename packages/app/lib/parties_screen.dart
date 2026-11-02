@@ -263,8 +263,12 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
         return;
       }
       if (_isEdit) {
+        // س-155/D-153 (دفعة 17): الرقم يعدل بلفظ المالك (س50/1 «تمام»)
+        // — والتفرد دُقق أعلاه بالمدقق المستثنياً النفس، والمعاملات
+        // كلها بمعرفه الخفي فلا ينكسر بها شيء.
         await widget.db.updatePartyDetails(
           widget.existing!,
+          number: draft.number.trim(),
           name: draft.name.trim(),
           kind: _kind.storageValue,
           phone: draft.phone,
@@ -316,11 +320,12 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
         children: [
           TextFormField(
             controller: _number,
-            enabled: !_isEdit,
+            // س-155/D-153 (دفعة 17): الخانة مفتوحة في التعديل أيضاً بلفظ
+            // المالك (س50/1 «تمام») — والمدقق أعلاه يرفض المكرر والمفرغ.
             decoration: InputDecoration(
               labelText: 'رقم الطرف (الأساس)',
               helperText: _isEdit
-                  ? 'الرقم لا يُعدَّل بعد الحفظ — به ترتبط المعاملات (D-062/D-063)'
+                  ? 'الرقم قابل للتعديل — والمعاملات مربوطة بمعرفه الخفي لا بالرقم'
                   : 'مقترح آلياً — عدّله قبل الحفظ إن شئت (D-063)',
             ),
           ),

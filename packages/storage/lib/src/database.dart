@@ -1166,11 +1166,16 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     );
   }
 
-  /// تحديث بيانات طرف — الرقم خارج التوقيع أصلاً فلا يعدل بعد الحفظ
-  /// (D-063)، والاسم يعدل بحرية مع بقاء قاعدة المنع الحرفي (س-32/D-065).
-  /// تخزينه null لحد الائتمان يعني إزالة السقف عمداً (س-34).
+  /// تحديث بيانات طرف — الرقم قابل للتعديل الآن بلفظ المالك (س50/1:
+  /// «تمام» على عرض س50، س-155/D-153): المعاملات ترتبط بالمعرف الخفي
+  /// `id` لا بالرقم الظاهر فتعديله آمن على التاريخ والذمم والتقارير،
+  /// والتفرد محروس بالمدقق قبل الكتابة (نمط س-29 بالاستثناء النفس)
+  /// وقيد UNIQUE حرس ثانوي من القاعدة. والاسم يعدل بحرية مع بقاء
+  /// قاعدة المنع الحرفي (س-32/D-065). تخزينه null لحد الائتمان
+  /// يعني إزالة السقف عمداً (س-34).
   Future<void> updatePartyDetails(
     Party party, {
+    required String number,
     required String name,
     required String kind,
     String? phone,
@@ -1181,6 +1186,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     assert(defaultCurrencyId > 0, 'D-066: عملة الطرف لا تصل فارغة أبداً');
     await (update(parties)..where((t) => t.id.equals(party.id))).write(
       PartiesCompanion(
+        number: Value(number),
         name: Value(name),
         kind: Value(kind),
         phone: Value(_nullIfBlank(phone)),
@@ -1272,10 +1278,13 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     );
   }
 
-  /// تحديث بيانات صنف — الكود خارج التوقيع أصلاً فلا يعدل بعد الحفظ
-  /// (D-073)، والبقية تعدل بحرية مع بقاء قواعد التفرد الحرفي (س-39).
+  /// تحديث بيانات صنف — الكود قابل للتعديل الآن بلفظ المالك (س50/1:
+  /// «تمام» على عرض س50، س-155/D-153): الفواتير ترتبط بمعرّفه الخفي
+  /// `id` فتعديل الكود الظاهر آمن، والتفرد الحرفي بعد تقليم الفراغات
+  /// محروس بالمدقق (س-39) وقيد UNIQUE حرس ثانوي. والبقية تعدل بحرية.
   Future<void> updateItemDetails(
     Item item, {
+    required String sku,
     required String name,
     String? category,
     required String kind,
@@ -1290,6 +1299,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         'س6: لا سعر سالب — والصفر مشروع');
     await (update(items)..where((t) => t.id.equals(item.id))).write(
       ItemsCompanion(
+        sku: Value(sku.trim()),
         name: Value(name.trim()),
         category: Value(_nullIfBlank(category)),
         kind: Value(kind),
@@ -3457,6 +3467,29 @@ Future<void> deleteInvoiceDraft(int invoiceId) async {
 // ─── قراءات الفواتير العامة — التخزين يقرأ ولا يحسب (نمط القلب) ───
 
 Future<InvoiceDocument?> invoiceById(int id) => _invoiceRowTx(id);
+
+/// المغطى بفواتير السندات المرحّلة لوثيقة واحدة — بوحدات المستند
+/// (س50/4 بلفظ المالك: «في الخاتمة تكتب الدفعة والباقي»، س-156/D-154):
+/// النقدي المرحّل مسدّد بمجرد ترحيله من صندوقه (س-03/س-06 «مدفوعة
+/// فوراً») ولا مطابقة سند عليه فالمغطى محصلته إجماليه والباقي صفر —
+/// بلسان التصنيف نفسه — والمسودة النقدية لم تتحرك بعد فبالمطابقات
+/// (صفر عادة)، والآجل بالمطابقات حصراً. غياب الوثيقة يعود صفراً لا
+/// استثناء فلا تُكسر قسيمة عرضية.
+Future<int> invoiceCoveredDocMinor(int invoiceId) async {
+  final rows = await customSelect(
+    'SELECT cash_box_id, total_doc_minor, state FROM invoices '
+    'WHERE id = ?1 AND is_deleted = 0',
+    variables: [Variable.withInt(invoiceId)],
+  ).get();
+  if (rows.isEmpty) return 0;
+  final d = rows.first.data;
+  final isCash = (d['cash_box_id'] as int?) != null;
+  final isDraft = d['state'] == 'draft';
+  if (isCash && !isDraft) {
+    return d['total_doc_minor'] as int;
+  }
+  return _coveredDocSingleTx(invoiceId);
+}
 
 Future<List<InvoiceLineDocument>> invoiceLines(int invoiceId) =>
     _invoiceLinesTx(invoiceId);

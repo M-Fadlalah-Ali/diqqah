@@ -207,8 +207,8 @@ void main() {
     expect(find.text('معطّل'), findsNothing);
   });
 
-  testWidgets('س-32: تعديل طرف — الرقم مقفل بلا حقل تعديل، والاسم يعدل '
-      'بالمرجع فيبقى الرقم كما هو', (tester) async {
+  testWidgets('س-32/س-155 (دفعة 17): تعديل طرف — الرقم قابل للتعديل الآن '
+      'بلفظ المالك (س50/1) والمعرف الخفي هو الثابت، والاسم يعدل', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await db.insertParty(
@@ -226,21 +226,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // الهوية الثابتة (D-063): لا حقل تعديل للرقم أصلاً في التعديل
+    // س-155/D-153 (دفعة 17): الخانة مفتوحة في التعديل — والمعاملات
+    // مربوطة بالمعرف الخفي لا بالرقم
     final numberField =
         tester.widget<TextFormField>(find.byType(TextFormField).first);
-    expect(numberField.enabled, isFalse);
+    expect(numberField.enabled, isTrue);
     expect(numberField.controller!.text, '0053');
 
+    await tester.enterText(find.byType(TextFormField).first, '0077');
     await tester.enterText(find.byType(TextFormField).at(1), 'محمد المعدل');
     await tester.tap(find.text('حفظ'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('محمد المعدل (0053)'), findsOneWidget);
+    expect(find.text('محمد المعدل (0077)'), findsOneWidget);
     final row = await (db.select(db.parties)
-          ..where((t) => t.number.equals('0053')))
+          ..where((t) => t.number.equals('0077')))
         .getSingle();
     expect(row.name, 'محمد المعدل');
     expect(row.id, isNotNull);

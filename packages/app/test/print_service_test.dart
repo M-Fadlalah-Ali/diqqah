@@ -54,21 +54,64 @@ void main() {
         ('الحالة', 'مرحّلة'),
         ('البيان', 'بيع بضاعة للعميل'),
       ],
-      columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'صافي السطر'],
+      columns: const ['الصنف', 'الكمية', 'سعر الوحدة', 'المبلغ'],
       rows: const [
         ['زيت محلي', '10', '15,000', '150,000'],
         ['خدمة', '1', '20,000', '20,000'],
       ],
       footerPairs: const [
-        ('الإجمالي', '170,000 (بالأساسية)'),
-        ('المكافئ الأساسي', '170,000'),
+        ('الإجمالي', '170,000 ل.س'),
+        ('المدفوع', '170,000 ل.س'),
+        ('الباقي', '0 ل.س'),
       ],
+      standoutLine: 'فقط مئة وسبعون ألف ليرة سورية لا غير',
       format: resolvePageFormat(docKind: 'invoice'),
     );
     expect(bytes, isA<Uint8List>());
     expect(bytes.lengthInBytes, greaterThan(1000),
         reason: 'الخط المضمّن والمحتوى يجعلان الملف حقيقياً');
     expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+  });
+
+  /// س50/3 (س-157/D-155 — دفعة 17): شعار العلامة صورة من الأصول —
+  /// حروف «دِقّة» وحركاتها مرسومة مسبقاً لا تفسّر عند كل طباعة.
+  test('شعار العلامة من الأصول بايتات PNG صحيحة — ترويسة وخاتمة', () async {
+    final header = await brandAsset('wordmark-header');
+    final footer = await brandAsset('wordmark-footer');
+    expect(header, isNotNull, reason: 'أصل الترويسة مزروع بالأصول');
+    expect(footer, isNotNull, reason: 'أصل الخاتمة مزروع بالأصول');
+    // توقيع PNG: 89 50 4E 47
+    expect(header!.take(4).toList(), [0x89, 0x50, 0x4E, 0x47]);
+    expect(footer!.take(4).toList(), [0x89, 0x50, 0x4E, 0x47]);
+  });
+
+  /// س50/8 (س-160/D-158 — دفعة 17): سطر التفقيط المستقل — يُبنى الورقة
+  /// به بلا تسمية، وغيابه لا يضر (المطبوعات الأخرى لا سطر لها).
+  test('سطر التفقيط المستقل بلا تسمية يُبنى PDF صحيحاً — وغيابه مسكوت', () async {
+    final withLine = await buildDocumentPdf(
+      title: 'فاتورة بيع 2026/000001',
+      headerPairs: const [('السداد', 'نقدية')],
+      columns: const ['الصنف', 'المبلغ'],
+      rows: const [['زيت', '30,000']],
+      footerPairs: const [
+        ('الإجمالي', '30,000 ل.س'),
+        ('المدفوع', '30,000 ل.س'),
+        ('الباقي', '0 ل.س'),
+      ],
+      standoutLine: 'فقط ثلاثون ألف ليرة سورية لا غير',
+      format: resolvePageFormat(docKind: 'invoice'),
+    );
+    final withoutLine = await buildDocumentPdf(
+      title: 'تقرير عام',
+      headerPairs: const [],
+      columns: const ['الحساب'],
+      rows: const [['الصندوق']],
+      footerPairs: const [],
+      format: resolvePageFormat(docKind: 'report'),
+    );
+    expect(String.fromCharCodes(withLine.take(5)), '%PDF-');
+    expect(String.fromCharCodes(withoutLine.take(5)), '%PDF-');
+    expect(withLine, isNot(withoutLine));
   });
 
   test('توليد قسيمة سند بلا جدول: ترويسة وخلاصة فقط — PDF صحيح', () async {
