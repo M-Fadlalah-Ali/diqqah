@@ -5548,9 +5548,10 @@ Future<AgingReport> agingReport({
   final today = DateTime(now.year, now.month, now.day);
   int dayOf(String dateText) {
     final d = DateTime.parse(dateText);
-    return DateTime(d.year, d.month, d.day)
-        .difference(today)
-        .inDays;
+    // أيام التجاوز = اليوم − موعد الاستحقاق: الماضي موجب (متأخر)
+    // والمستقبل سالب (غير مستحق) — علة جولة CI 149 كانت الإشارة
+    // معكوسة (فرق الاستحقاق عن اليوم) فولت الفوهج بلا أعمار.
+    return today.difference(DateTime(d.year, d.month, d.day)).inDays;
   }
 
   // الفوهة صفراً لغير المستحق، و1..n للفوهج بالترتيب، وn+1 لما فاق

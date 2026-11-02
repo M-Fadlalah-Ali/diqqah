@@ -625,7 +625,9 @@ void main() {
     addTearDown(() => tempDir.deleteSync(recursive: true));
     final dbPath = p.join(tempDir.path, 'migrate14.db');
     // قاعدة كاملة المخطط v13 (بترحيلاتها كلها) ثم تخفيض user_version
-    // إلى 13 كي تُجري إعادة الفتح ترحيلة 13→14 أمامنا.
+    // إلى 13 كي تُجري إعادة الفتح ترحيلة 13→14 أمامنا. السطر يُدرج
+    // على مسودة ثم تُرحَّل بالتحديث — فلا سطر يُدرج على مرحّل
+    // (حرس الإدراج) والترحيلة تُختبر على مرحّل فعلاً.
     final seeded = DiqqahDatabase(filePath: dbPath);
     await seeded.customStatement(
       "INSERT INTO invoices (kind, number, invoice_date, currency_id, "
@@ -633,7 +635,7 @@ void main() {
       "total_doc_minor, total_base_minor, state, uuid, created_at, "
       "updated_at, is_deleted) "
       "VALUES ('sale', '2026/000001', '2026-03-15', 1, 1000000, 0, "
-      "30000, 0, 30000, 30000, 'posted', 'uuid-v14-1', 0, 0, 0)",
+      "30000, 0, 30000, 30000, 'draft', 'uuid-v14-1', 0, 0, 0)",
     );
     await seeded.customStatement(
       "INSERT INTO invoice_lines (invoice_id, item_id, unit_id, "
@@ -642,6 +644,9 @@ void main() {
       "uuid, created_at, updated_at, is_deleted) "
       "SELECT id, 1, 1, 1, 1, 1, 30000, 0, 0, 30000, 30000, 0, "
       "'uuid-v14-l1', 0, 0, 0 FROM invoices LIMIT 1",
+    );
+    await seeded.customStatement(
+      "UPDATE invoices SET state = 'posted'",
     );
     await seeded.close();
     final raw = sqlite3.open(dbPath);

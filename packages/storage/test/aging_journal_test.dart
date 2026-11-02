@@ -305,9 +305,10 @@ void main() {
     final full = await db.journalBookReport(fromText: date, toText: date);
     expect(full.entries, hasLength(5));
 
-    // مدى بعد الدورة — لا شيء برسالته لا صمتاً.
-    final after =
-        await db.journalBookReport(fromText: isoFromToday(30));
+    // مدى بعد الدورة — لا شيء برسالته لا صمتاً (المدى بجانبيه
+    // معاً بعرف المدقق: أي مدى معلن يُدقق طرفاه — D-077).
+    final after = await db.journalBookReport(
+        fromText: isoFromToday(30), toText: isoFromToday(60));
     expect(after.entries, isEmpty);
     expect(after.totalDebitMinor, 0);
     expect(after.isBalanced, isTrue);
