@@ -112,6 +112,14 @@ def main() -> None:
     assert "سند دفع" in merged, "مصطلح سند دفع (D-105)"
     assert "سند صرف" not in merged, "بقايا مصطلح سند صرف بالجيل — لا يجوز"
     assert "11 محجوز لأسئلة المالك" in merged, "حجز الرقم 11 (D-107)"
+    assert "1-ف. كمية التسليم والتفقيط" in merged, "قسم دفعة (14) في 06 (س45)"
+    for sc in (148, 149):
+        assert f"س-{sc}" in merged, f"سيناريو دفعة (14) س-{sc} غائب (س45)"
+    for d in (138, 139):
+        assert f"D-{d}" in merged, f"قرار دفعة (14) D-{d} غائب (س45)"
+    assert "مجموع الكميات بالواحدة" in merged, "أساس العد بلفظ المالك (D-138)"
+    assert "التفقيط للمبلغ لا للكميات" in merged, "حد التفقيط بلفظ المالك (D-139)"
+    assert "لا غير" in merged, "عرف التفقيط بالقسيمة (D-139)"
 
     OUT.write_text(merged, encoding="utf-8", newline="\n")
     size = OUT.stat().st_size

@@ -13,6 +13,8 @@ import 'print_service.dart';
 import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 import 'drilldown.dart' show showItemSheet;
+import 'tafqit.dart';
+import 'delivery_summary.dart';
 
 /// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
 /// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
@@ -45,6 +47,9 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   final lines = await db.invoiceLines(invoiceId);
   final items = await db.select(db.items).get();
   final itemById = {for (final item in items) item.id: item};
+  // س-148/D-138 (دفعة 14): أسماء الوحدات — الخلاصة «بالواحدة».
+  final units = await db.select(db.units).get();
+  final unitNameById = {for (final u in units) u.id: u.name};
   final kind = InvoiceKind.fromStorage(invoice.kind);
   final isSale = kind == InvoiceKind.sale;
 
@@ -83,8 +88,35 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   ];
   String? summary;
   if (isSale && lines.isNotEmpty) {
-    final delivered = lines.where((l) => l.delivered).length;
-    summary = 'مستلم $delivered من ${lines.length}';
+    // س-148/D-138: الافتراضي «مجموع الكميات بالواحدة» بقاعدة الوحدة
+    // الموثقة — والقسيمة المطبوعة على الافتراضي دائماً (القائمة
+    // المنسدلة عرضُ شاشة لا سياسة مطبوع).
+    final totalQty = quantitiesByUnit(
+        [for (final l in lines) (l.qtyBase, unitNameById[l.unitId] ?? '')]);
+    final deliveredQty = quantitiesByUnit([
+      for (final l in lines)
+        if (l.delivered) (l.qtyBase, unitNameById[l.unitId] ?? ''),
+    ]);
+    summary = invoiceDeliverySummary(
+      deliveredLines: lines.where((l) => l.delivered).length,
+      totalLines: lines.length,
+      deliveredQtyByUnit: deliveredQty,
+      totalQtyByUnit: totalQty,
+      basis: DeliveryBasis.quantities,
+    );
+  }
+
+  // س-149/D-139: عملة المستند من جدولها — التفقيط باسمها وصيغها.
+  final currencies = await db.currenciesOf();
+  Map<String, dynamic>? currencyFields;
+  for (final c in currencies) {
+    if (c.id == invoice.currencyId) {
+      currencyFields = {
+        'code': c.code,
+        'name': c.name,
+        'minorUnits': c.minorUnits,
+      };
+    }
   }
 
   return buildDocumentPdf(
@@ -107,6 +139,21 @@ Future<Uint8List> buildInvoicePrintoutBytes(
             '(${invoice.currencyId == 1 ? 'بالأساسية' : 'بعملة المستند'})',
       ),
       ('المكافئ الأساسي', formatMinorAmount(invoice.totalBaseMinor)),
+      // س-149/D-139: «التفقيط للمبلغ لا للكميات» — بعرف المحاسبة
+      // «فقط ... لا غير»، وبعملة المستند لا بلفظ ثابت. وسقوط العملة
+      // من الجدول يسقط السطر سكوتاً لا بلفظ مفبرك.
+      if (currencyFields != null)
+        (
+          'بالكلمات',
+          tafqitAmountWords(
+            totalMinor: invoice.totalDocMinor,
+            currency: tafqitCurrencyFor(
+              code: currencyFields['code'] as String,
+              name: currencyFields['name'] as String,
+              minorUnits: currencyFields['minorUnits'] as int,
+            ),
+          ),
+        ),
     ],
     format: resolvePageFormat(docKind: 'invoice'),
   );
@@ -405,6 +452,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   /// خانة بحث بنود الفواتير السريعة (س-132): تطابق الاسم والكود
   /// والباركود، والرمز الكامل يجلب الصنف مباشرة.
   final TextEditingController _quickSearch = TextEditingController();
+
 
   /// المتاح لكل صنف من المستودع المختار (D-106 قراءة خالصة — س-108).
   Map<int, int> _stockAvail = {};
@@ -1262,6 +1310,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   List<InvoiceLineDocument> _lines = [];
   Map<int, Item> _itemById = {};
 
+  /// س-148/D-138 (دفعة 14): أساس عدّاد التسليم — الافتراضي الكميات
+  /// بالواحدة بقائمة منسدلة في نفس السطر بقرار المالك، وأسماء الوحدات
+  /// لتجميعها.
+  DeliveryBasis _deliveryBasis = DeliveryBasis.quantities;
+  Map<int, String> _unitNames = {};
+
   /// الموردون النشطون لخانة «المورد المسؤول» (س-138/D-132).
   List<Party> _suppliers = [];
 
@@ -1289,6 +1343,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           : await widget.db.invoiceLines(widget.invoiceId);
       final items = await widget.db.select(widget.db.items).get();
       final parties = await widget.db.select(widget.db.parties).get();
+      // س-148/D-138: أسماء الوحدات لتجميع عدّاد التسليم «بالواحدة».
+      final units = await widget.db.select(widget.db.units).get();
       final suggestions = <int, int>{};
       for (final line in lines) {
         final s = await widget.db
@@ -1304,6 +1360,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             .where((p) => p.kind == 'supplier' && p.isActive)
             .toList();
         _supplierSuggestion = suggestions;
+        _unitNames = {for (final u in units) u.id: u.name};
         _loaded = true;
       });
     } catch (e) {
@@ -1474,6 +1531,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             subtitle: Text(
                 'المكافئ الأساسي ${formatMinorAmount(invoice.totalBaseMinor)}'),
           ),
+          // س-148/D-138 (دفعة 14): عدّاد التسليم «مستلم X من Y»
+          // بأساسه الافتراضي (الكميات بالواحدة) وقائمة التبديل
+          // بخيارَيها في نفس السطر — بقرار المالك الحرفي.
+          if (_isSale && _lines.isNotEmpty) _deliveryCounterRow(),
           // زر «تسليم الكل» (س43 «لا بأس») — يظهر ما دام سطر غير مستلم
           // ويُسحب كلياً من الشاشة عند اكتمال التسليم (لا زر ميت معطل).
           if (_isSale && _lines.isNotEmpty && _hasUndelivered)
@@ -1494,6 +1555,40 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           if (_lines.isEmpty) const ListTile(title: Text('لا بنود')),
         ],
       ),
+    );
+  }
+
+  /// س-148/D-138: عدّاد التسليم وقائمة التبديل في نفس السطر —
+  /// النص بأساس العد المختار والقائمة بخيارَيها (الكميات/الأسطر).
+  Widget _deliveryCounterRow() {
+    final deliveredQty = quantitiesByUnit([
+      for (final l in _lines)
+        if (l.delivered) (l.qtyBase, _unitNames[l.unitId] ?? ''),
+    ]);
+    final totalQty = quantitiesByUnit(
+        [for (final l in _lines) (l.qtyBase, _unitNames[l.unitId] ?? '')]);
+    final text = invoiceDeliverySummary(
+      deliveredLines: _lines.where((l) => l.delivered).length,
+      totalLines: _lines.length,
+      deliveredQtyByUnit: deliveredQty,
+      totalQtyByUnit: totalQty,
+      basis: _deliveryBasis,
+    );
+    return Row(
+      children: [
+        Expanded(child: Text(text)),
+        DropdownButton<DeliveryBasis>(
+          value: _deliveryBasis,
+          items: [
+            for (final b in deliveryBasisChoices)
+              DropdownMenuItem(
+                  value: b, child: Text('حسب ${deliveryBasisLabel(b)}')),
+          ],
+          onChanged: (b) {
+            if (b != null) setState(() => _deliveryBasis = b);
+          },
+        ),
+      ],
     );
   }
 

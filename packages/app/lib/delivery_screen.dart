@@ -4,6 +4,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'invoices_screen.dart' show InvoiceDetailScreen;
 import 'print_service.dart';
+import 'delivery_summary.dart';
 
 /// شاشة «متابعة التسليم» — س-139/D-133 (دفعة 12) بلفظ المالك «٣. في
 /// الهيكلية» وحسمه لسؤال النافذة: شاشة قائمة دائمة لا حوار عابر.
@@ -34,6 +35,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   /// بحث بالصنف والطرف — نص حر يطابق الاسمين والكود.
   final TextEditingController _search = TextEditingController();
+
+  /// س-148/D-138 (دفعة 14): أساس العدّاد — الافتراضي «مجموع الكميات
+  /// بالواحدة» بقائمة منسدلة بخيارَيها في نفس السطر بقرار المالك.
+  DeliveryBasis _basis = DeliveryBasis.quantities;
 
   @override
   void initState() {
@@ -100,7 +105,16 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             ],
         ],
         footerPairs: [
-          ('عدد الأسطر غير المستلمة', '${rows.length}'),
+          // س-148/D-138: المطبوع بأساس العد المعروض — الكميات
+          // بوحداتها أو الأسطر بعددها.
+          if (_basis == DeliveryBasis.quantities)
+            (
+              'إجمالي الكميات غير المستلمة',
+              groupedQuantitiesText(quantitiesByUnit(
+                  [for (final r in rows) (r.qtyBase, r.unitName)])),
+            )
+          else
+            ('عدد الأسطر غير المستلمة', '${rows.length}'),
         ],
         format: resolvePageFormat(docKind: 'report'),
       );
@@ -189,8 +203,29 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                        'غير مستلم: ${rows.length} من ${all.length}'),
+                    // س-148/D-138: العدّاد بقائمة التبديل بخيارَيها
+                    // في نفس السطر — الكميات بالواحدة افتراضاً.
+                    child: Row(
+                      children: [
+                        Text(
+                          'غير مستلم: ${deliveryHeaderCount(basis: _basis, filteredLines: rows.length, allLines: all.length, filteredQtyByUnit: quantitiesByUnit([for (final r in rows) (r.qtyBase, r.unitName)]))}',
+                        ),
+                        DropdownButton<DeliveryBasis>(
+                          value: _basis,
+                          underline: const SizedBox.shrink(),
+                          items: [
+                            for (final b in deliveryBasisChoices)
+                              DropdownMenuItem(
+                                  value: b,
+                                  child:
+                                      Text('حسب ${deliveryBasisLabel(b)}')),
+                          ],
+                          onChanged: (b) {
+                            if (b != null) setState(() => _basis = b);
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                   Row(
                     children: [
@@ -218,7 +253,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                           for (final row in rows)
                             ListTile(
                               title: Text(
-                                  '${row.itemSku} ${row.itemName} × ${row.qtyBase}'),
+                                  '${row.itemSku} ${row.itemName} × ${row.qtyBase} ${row.unitName}'),
                               subtitle: Text(
                                   '${row.invoiceNumber} · ${row.invoiceDate}'
                                   ' · ${row.partyName ?? 'بلا طرف'}'

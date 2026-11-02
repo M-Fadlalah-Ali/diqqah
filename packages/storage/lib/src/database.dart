@@ -3507,10 +3507,13 @@ Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
     'inv.number AS number, inv.invoice_date AS invoice_date, '
     'il.item_id AS item_id, i.sku AS sku, i.name AS item_name, '
     'il.qty_base AS qty_base, p.name AS party_name, '
-    'il.supplier_party_id AS supplier_party_id, sp.name AS supplier_name '
+    'il.supplier_party_id AS supplier_party_id, sp.name AS supplier_name, '
+    // س-148/D-138: اسم وحدة السطر لتجميع الكميات «بالواحدة».
+    'u.name AS unit_name '
     'FROM invoice_lines il '
     'JOIN invoices inv ON inv.id = il.invoice_id '
     'JOIN items i ON i.id = il.item_id '
+    'JOIN units u ON u.id = il.unit_id '
     'LEFT JOIN parties p ON p.id = inv.party_id '
     'LEFT JOIN parties sp ON sp.id = il.supplier_party_id '
     "WHERE inv.kind = 'sale' AND inv.state <> 'draft' "
@@ -3533,6 +3536,7 @@ Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
         partyName: r.data['party_name'] as String?,
         supplierPartyId: r.data['supplier_party_id'] as int?,
         supplierName: r.data['supplier_name'] as String?,
+        unitName: r.data['unit_name'] as String,
       ),
   ];
 }
@@ -5848,6 +5852,10 @@ class UndeliveredLineRow {
   final int? supplierPartyId;
   final String? supplierName;
 
+  /// س-148/D-138 (دفعة 14): اسم وحدة السطر — «مجموع الكميات بالواحدة»
+  /// بقرار المالك يجمع بالوحدة لا رقماً عرياً، والقائمة تعرضها.
+  final String unitName;
+
   const UndeliveredLineRow({
     required this.lineId,
     required this.invoiceId,
@@ -5861,6 +5869,7 @@ class UndeliveredLineRow {
     required this.partyName,
     required this.supplierPartyId,
     required this.supplierName,
+    required this.unitName,
   });
 }
 

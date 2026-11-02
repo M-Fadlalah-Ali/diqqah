@@ -99,7 +99,8 @@ void main() {
 
     expect(find.textContaining('زيت محلي × 6'), findsOneWidget);
     expect(find.textContaining('عميل الأمل'), findsOneWidget);
-    expect(find.text('غير مستلم: 1 من 1'), findsOneWidget);
+    // س-148/D-138 (دفعة 14): الافتراضي مجموع الكميات بالواحدة.
+    expect(find.text('غير مستلم: 6 قطعة'), findsOneWidget);
     expect(find.text('سُلِّم'), findsOneWidget);
 
     await tester.tap(find.text('سُلِّم'));
