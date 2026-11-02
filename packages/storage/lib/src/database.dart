@@ -650,7 +650,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -915,6 +915,26 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               await customStatement(
                   'DROP TRIGGER IF EXISTS trg_invoice_lines_frozen_update');
               await _createInvoiceTriggers();
+            }
+            // 13→14 (ومن إصدار أدنى مباشرة): دفعة (15) «ما قبل إغلاق
+            // م1» (س-153/D-151) — خانة «ملاحظة التسليم» القصيرة على
+            // السطر غير المستلم: عمود `delivery_note` نصي nullable
+            // بـADD COLUMN بحرس pragma (نمط v12/v13 المجرّب) — فلا
+            // إعادة بناء ولا قيم تُهجّر (كل القائمة بلا ملاحظة null
+            // طبيعياً). وعلم عمل لا محاسبة نمط D-131: الحرس يجمّد
+            // المال والبنية حصراً فملاحظة السطر تُحدّث على المرحّلة
+            // بلا فك إقفال — ولا مساس بالقيود والمخزون والذمم.
+            if (version == 14) {
+              final lineCols14 = (await customSelect(
+                      "SELECT name FROM pragma_table_info('invoice_lines')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!lineCols14.contains('delivery_note')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    'delivery_note TEXT NULL');
+              }
             }
           }
         },
@@ -2220,6 +2240,9 @@ Future<void> _createInvoiceTables() async {
         // علم عمل لا محاسبة، والافتراضي غير مستلم بلفظ المالك.
         '"delivered" INTEGER NOT NULL DEFAULT 0, '
         '"supplier_party_id" INTEGER NULL, '
+        // v14 (دفعة 15/D-151): خانة «ملاحظة التسليم» القصيرة على السطر
+        // غير المستلم — علم عمل لا محاسبة، والافتراضي بلا ملاحظة.
+        '"delivery_note" TEXT NULL, '
         '"uuid" TEXT NOT NULL, '
         '"created_at" INTEGER NOT NULL DEFAULT 0, '
         '"updated_at" INTEGER NOT NULL DEFAULT 0, '
@@ -2617,7 +2640,7 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
     'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, qty, '
     'qty_base, unit_price_minor, discount_minor, tax_rate, '
     'line_total_doc_minor, line_total_base_minor, uuid, delivered, '
-    'supplier_party_id '
+    'supplier_party_id, delivery_note '
     'FROM invoice_lines WHERE invoice_id = ? ORDER BY id',
     variables: [Variable.withInt(invoiceId)],
   ).get();
@@ -2639,6 +2662,8 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
         uuid: r.data['uuid'] as String,
         delivered: (r.data['delivered'] as int? ?? 0) == 1,
         supplierPartyId: r.data['supplier_party_id'] as int?,
+        // س-153/D-151 (دفعة 15): خانة «ملاحظة التسليم» مع السطر.
+        deliveryNote: r.data['delivery_note'] as String?,
       ),
   ];
 }
@@ -2674,6 +2699,8 @@ Future<String> _invoiceSnapshotTx(int invoiceId) async {
           'discount_minor': l.discountMinor,
           'line_total_doc_minor': l.lineTotalDocMinor,
           'line_total_base_minor': l.lineTotalBaseMinor,
+          // س-153/D-151: الملاحظة بلقطة السطر الكاملة (07 §2.3).
+          'delivery_note': l.deliveryNote,
           'uuid': l.uuid,
         }
     ],
@@ -3479,6 +3506,34 @@ Future<void> setInvoiceLineSupplier(
   );
 }
 
+/// س-153/D-151 (دفعة 15): خانة «ملاحظة التسليم» القصيرة على السطر —
+/// تُحرَّر من شاشة «متابعة التسليم» على السطر غير المستلم (س-139)
+/// وتظهر في شاشة المتابعة والمطبوع بلفظ بوابة دفعة (12) §3. علم عمل
+/// لا محاسبة نمط D-131: الحرس يجمّد المال والبنية حصراً فالملاحظة
+/// تُحدّث على المرحّلة بلا فك إقفال — والسطر الغائب برسالته،
+/// والفراغ (نص فارغ أو null) يمحو الملاحظة ولا يخزّن فارغاً.
+Future<void> setInvoiceLineDeliveryNote(
+  int lineId, {
+  required String? note,
+}) async {
+  final existing = await customSelect(
+    'SELECT id FROM invoice_lines WHERE id = ?',
+    variables: [Variable.withInt(lineId)],
+  ).get();
+  if (existing.isEmpty) {
+    throw StateError('لا سطر فاتورة بالمعرف $lineId');
+  }
+  final trimmed = note?.trim();
+  await customStatement(
+    'UPDATE invoice_lines SET delivery_note = ?, updated_at = ? WHERE id = ?',
+    [
+      (trimmed == null || trimmed.isEmpty) ? null : trimmed,
+      DateTime.now().millisecondsSinceEpoch,
+      lineId,
+    ],
+  );
+}
+
 /// س-138/D-132: اقتراح المورد — آخر فاتورة شراء مرحّلة فيها الصنف
 /// فطرفها هو المقترح، وبلا شراء سابق null (فيُدخل يدوياً بلفظ
 /// اختيار المالك «٢. أ»).
@@ -3509,7 +3564,8 @@ Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
     'il.qty_base AS qty_base, p.name AS party_name, '
     'il.supplier_party_id AS supplier_party_id, sp.name AS supplier_name, '
     // س-148/D-138: اسم وحدة السطر لتجميع الكميات «بالواحدة».
-    'u.name AS unit_name '
+    // س-153/D-151: خانة «ملاحظة التسليم» مع صف المتابعة.
+    'u.name AS unit_name, il.delivery_note AS delivery_note '
     'FROM invoice_lines il '
     'JOIN invoices inv ON inv.id = il.invoice_id '
     'JOIN items i ON i.id = il.item_id '
@@ -3537,6 +3593,7 @@ Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
         supplierPartyId: r.data['supplier_party_id'] as int?,
         supplierName: r.data['supplier_name'] as String?,
         unitName: r.data['unit_name'] as String,
+        deliveryNote: r.data['delivery_note'] as String?,
       ),
   ];
 }
@@ -5426,6 +5483,258 @@ Future<List<ReceivablesPayablesRow>> receivablesPayablesReport() async {
   ]);
 }
 
+// ═══ دفعة (15) «ما قبل إغلاق م1» (س-151..س-153/D-149..D-151) ═══
+// أمر المالك الحرفي (س47): «كل شيء يمكن تنفيذه قبل إغلاق م1 قم بتنفيذه»
+// — فأُقدّم من خريطة دراسة محضر الخبراء (س46) ما تنفيذه قراءة فوق
+// أعمدة القائمة بلا ترحيلة: أعمار الذمم بفوهجها القابلة للتهيئة
+// (D-140 روحاً — أقرب ربح في المحضر كله لما منجز سلفاً من مصالحة
+// وذمم واستحقاق) ودفتر اليومية المرشّح، ومعهما خانة «ملاحظة
+// التسليم» المعروضة منذ بوابة دفعة (12) §3 والمحجوبة بلا كلمة حتى
+// جاء هذا الأمر الشامل — بترحيلة v14 لعمودها النصي حصراً.
+
+/// س-151/D-149: تقرير أعمار الذمم — قراءة خالصة بلا ترحيلة ولا
+/// جداول تجميع (D-089 روحاً): الفواتير المفتوحة (المرحّلة غير
+/// المغطاة كلياً بمطابقات السندات المرحّلة — محرك المصالحة ذاته:
+/// حالتا posted/partially_paid والمفتوح = الإجمالي − المغطى doc-side
+/// كما في التوزيع الآلي س-63) تُعمَّر بتاريخ الاستحقاق وإلا تاريخ
+/// الفاتورة، والمفتوح بوحدات المستند يُرفع إلى الأساسية بتحويل
+/// المحرك ذاته (convertToBaseMinor — F-122/D-082) فتُقرأ الأعمار
+/// بالأساسية نمط تقرير الذمم. الفوهج قابلة للتهيئة افتراضها
+/// 30/60/90/120 بقرار الدراسة، والفوهة الأولى «غير مستحق» لمن
+/// استحقاقه اليوم أو بعده، والترتيب مدينة ثم دائنة بلفظ D-130،
+/// وكل طرف بفواتيره المفتوحة فتصير الأسماء مداخِل (D-135).
+/// فواتير البيع آجلة بلا طرف لا توجد أصلاً (س-04: بلا طرف مرفوضة)
+// فصف بلا طرف يُسقط آمناً.
+Future<AgingReport> agingReport({
+  required List<int> thresholds,
+  String? kindStorageValue,
+}) async {
+  final clean = [
+    for (final t in thresholds)
+      if (t > 0) t,
+  ]..sort();
+  if (clean.isEmpty) {
+    throw ArgumentError('فوهج الأعمار قائمة أيام موجبة لا تكون فارغة');
+  }
+  final kind = kindStorageValue?.trim() ?? '';
+  assert(
+    kind == '' || kind == 'sale' || kind == 'purchase',
+    'فلتر النوع: بيع أو شراء أو الكل',
+  );
+  final rows = await customSelect(
+    'SELECT inv.id AS id, inv.kind AS kind, inv.number AS number, '
+    'inv.invoice_date AS invoice_date, inv.due_date AS due_date, '
+    'inv.total_doc_minor AS total_doc, inv.fx_rate AS fx_rate, '
+    'c.code AS currency_code, p.id AS party_id, p.name AS party_name, '
+    'COALESCE(cov.covered, 0) AS covered_doc '
+    'FROM invoices inv '
+    'LEFT JOIN parties p ON p.id = inv.party_id '
+    'JOIN currencies c ON c.id = inv.currency_id '
+    'LEFT JOIN (SELECT va.invoice_id AS iid, '
+    'SUM(va.applied_doc_minor) AS covered '
+    'FROM voucher_allocations va '
+    'JOIN vouchers v ON v.id = va.voucher_id '
+    "WHERE v.state = 'posted' AND v.is_deleted = 0 "
+    'AND va.is_deleted = 0 GROUP BY va.invoice_id) cov '
+    'ON cov.iid = inv.id '
+    'WHERE inv.is_deleted = 0 '
+    "AND inv.state IN ('posted', 'partially_paid') "
+    "AND inv.kind IN ('sale', 'purchase') "
+    "AND (?1 = '' OR inv.kind = ?1) "
+    'ORDER BY inv.invoice_date ASC, inv.id ASC',
+    variables: [Variable.withString(kind)],
+  ).get();
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  int dayOf(String dateText) {
+    final d = DateTime.parse(dateText);
+    return DateTime(d.year, d.month, d.day)
+        .difference(today)
+        .inDays;
+  }
+
+  // الفوهة صفراً لغير المستحق، و1..n للفوهج بالترتيب، وn+1 لما فاق
+  // آخر فوهة — بطول n+2 دائماً.
+  final n = clean.length;
+  int bucketIndex(int daysOver) {
+    if (daysOver < 0) return 0;
+    for (var i = 0; i < n; i++) {
+      if (daysOver <= clean[i]) return i + 1;
+    }
+    return n + 1;
+  }
+
+  final labels = <String>['غير مستحق'];
+  for (var i = 0; i < n; i++) {
+    labels.add(i == 0
+        ? 'حتى ${clean[i]} يوماً'
+        : '${clean[i - 1] + 1} حتى ${clean[i]} يوماً');
+  }
+  labels.add('أكثر من ${clean[n - 1]} يوماً');
+
+  // تجميع على الطرف — مفتاحه معرفه واتجاهه من نوع الفاتورة (البيع
+  // ذمة له علينا يطالبنا، والشراء ذمة لنا عليه).
+  final partyOrder = <int>[];
+  final partyByKey = <int, _AgingPartyBuilder>{};
+  for (final r in rows) {
+    final partyId = r.data['party_id'] as int?;
+    if (partyId == null) continue;
+    final remainingDoc =
+        (r.data['total_doc'] as int) - (r.data['covered_doc'] as int);
+    if (remainingDoc <= 0) continue;
+    final builder = partyByKey.putIfAbsent(partyId, () {
+      partyOrder.add(partyId);
+      return _AgingPartyBuilder(
+        partyId: partyId,
+        partyName: (r.data['party_name'] as String?) ?? 'بلا طرف',
+        theyOweUs: (r.data['kind'] as String) == 'sale',
+      );
+    });
+    final invoiceDate = r.data['invoice_date'] as String;
+    final dueDate = r.data['due_date'] as String?;
+    final anchor = dueDate ?? invoiceDate;
+    final daysOver = dayOf(anchor);
+    final idx = bucketIndex(daysOver);
+    final remainingBase = convertToBaseMinor(
+      remainingDoc,
+      r.data['fx_rate'] as int,
+    );
+    builder.add(
+      idx,
+      remainingBase,
+      AgingInvoiceRow(
+        invoiceId: r.data['id'] as int,
+        number: r.data['number'] as String,
+        invoiceDate: invoiceDate,
+        dueDate: dueDate,
+        remainingDocMinor: remainingDoc,
+        remainingBaseMinor: remainingBase,
+        daysOver: daysOver,
+        currencyCode: r.data['currency_code'] as String,
+      ),
+    );
+  }
+  final parties = <AgingPartyRow>[
+    // الترتيب بلفظ D-130: المدينة (هم يدينون لنا) ثم الدائنة، وكل
+    // مجموعة بأسمائها.
+    for (final id in partyOrder)
+      if (partyByKey[id]!.theyOweUs) partyByKey[id]!.build(n + 2),
+    for (final id in partyOrder)
+      if (!partyByKey[id]!.theyOweUs) partyByKey[id]!.build(n + 2),
+  ];
+  final totals = List<int>.filled(n + 2, 0);
+  for (final p in parties) {
+    for (var i = 0; i < totals.length; i++) {
+      totals[i] += p.bucketMinor[i];
+    }
+  }
+  return AgingReport(
+    thresholds: List<int>.unmodifiable(clean),
+    bucketLabels: List<String>.unmodifiable(labels),
+    parties: parties,
+    bucketTotalsMinor: totals,
+  );
+}
+
+/// س-152/D-150: دفتر اليومية — قراءة خالصة ثالثة من نوعها منذ دفعة
+/// التقارير (نمط كشف الحساب D-137): قيود المرحّل بترتيب الزمن
+/// (تاريخ القيد ثم معرفه ثم أسطره) بأسطرها كاملة (الحساب الورقي
+/// والطرف والجانبتان)، بفلتر مدى تاريخ يُدقق قبل لمس القاعدة
+/// (D-077) وفلتر دفتر من الأنواع الخمسة (D-076)، ومجموعا الجانبين
+/// ضابط توازنهما روح F-068 — وقراءة واحدة تجمع القيود وأسطرها
+/// فيصير الترتيب بلسان SQL لا محاكاة.
+Future<JournalBookReport> journalBookReport({
+  String? fromText,
+  String? toText,
+  String? journalKind,
+}) async {
+  final from = fromText?.trim() ?? '';
+  final to = toText?.trim() ?? '';
+  if (from.isNotEmpty || to.isNotEmpty) {
+    final errors = validateReportRange(from, to);
+    if (errors.isNotEmpty) {
+      throw ReportValidationException(errors);
+    }
+  }
+  final jk = journalKind?.trim() ?? '';
+  assert(
+    jk == '' ||
+        jk == 'sales' ||
+        jk == 'purchase' ||
+        jk == 'cash' ||
+        jk == 'stock' ||
+        jk == 'general',
+    'فلتر الدفتر: أحد الأنواع الخمسة أو الكل',
+  );
+  final rows = await customSelect(
+    'SELECT m.id AS move_id, m.date_text AS move_date, '
+    'm.number AS move_number, m.narration AS narration, '
+    'j.name AS journal_name, '
+    'a.code AS account_code, a.name AS account_name, '
+    'p.name AS party_name, '
+    'l.debit_minor AS debit_minor, l.credit_minor AS credit_minor '
+    'FROM move_lines l '
+    'JOIN moves m ON m.id = l.move_id '
+    'JOIN journals j ON j.id = m.journal_id '
+    'JOIN accounts a ON a.id = l.account_id '
+    'LEFT JOIN parties p ON p.id = l.party_id '
+    "WHERE m.state = 'posted' AND m.is_deleted = 0 "
+    'AND l.is_deleted = 0 '
+    "AND (?1 = '' OR m.date_text >= ?1) "
+    "AND (?2 = '' OR m.date_text <= ?2) "
+    "AND (?3 = '' OR j.kind = ?3) "
+    'ORDER BY m.date_text ASC, m.id ASC, l.id ASC',
+    variables: [
+      Variable.withString(from),
+      Variable.withString(to),
+      Variable.withString(jk),
+    ],
+  ).get();
+  final builders = <JournalBookBuilder>[];
+  JournalBookBuilder? current;
+  var totalDebit = 0;
+  var totalCredit = 0;
+  for (final r in rows) {
+    final moveId = r.data['move_id'] as int;
+    if (current == null || current.moveId != moveId) {
+      final moveDate = r.data['move_date'] as String;
+      final moveNumber = r.data['move_number'] as String;
+      final journalName = r.data['journal_name'] as String;
+      final narration = r.data['narration'] as String?;
+      current = JournalBookBuilder(
+        moveId: moveId,
+        moveDate: moveDate,
+        moveNumber: moveNumber,
+        journalName: journalName,
+        narration: narration,
+      );
+      builders.add(current);
+    }
+    final debit = r.data['debit_minor'] as int;
+    final credit = r.data['credit_minor'] as int;
+    totalDebit += debit;
+    totalCredit += credit;
+    current.addLine(
+      JournalBookLine(
+        accountCode: r.data['account_code'] as String,
+        accountName: r.data['account_name'] as String,
+        partyName: r.data['party_name'] as String?,
+        debitMinor: debit,
+        creditMinor: credit,
+      ),
+    );
+  }
+  // القيد يُبنى بعد اكتمال أسطره حصراً — مجاميعه من أسطره المخزونة
+  // لا من لقطة مبكرة (علّة مُصلَحة قبل CI: لقطة late final كانت
+  // تلتقط الأصفار لحظة أول قراءة قبل الملء).
+  final entries = [for (final b in builders) b.build()];
+  return JournalBookReport(
+    entries: entries,
+    totalDebitMinor: totalDebit,
+    totalCreditMinor: totalCredit,
+  );
+}
+
 /// تقرير المخزون (س-74) — من stock_balances مباشرة (السجل مصدراً
 /// D-067) والمتوسط عرضاً حصراً بالمجال (رسة النصف بعيداً عن الصفر).
 Future<List<InventoryReportRow>> inventoryReport() async {
@@ -5856,6 +6165,10 @@ class UndeliveredLineRow {
   /// بقرار المالك يجمع بالوحدة لا رقماً عرياً، والقائمة تعرضها.
   final String unitName;
 
+  /// س-153/D-151 (دفعة 15): خانة «ملاحظة التسليم» مع صف المتابعة —
+  /// المواصفات الخاصة أو وعد التسليم، وnull لمن بلا ملاحظة.
+  final String? deliveryNote;
+
   const UndeliveredLineRow({
     required this.lineId,
     required this.invoiceId,
@@ -5870,6 +6183,7 @@ class UndeliveredLineRow {
     required this.supplierPartyId,
     required this.supplierName,
     required this.unitName,
+    this.deliveryNote,
   });
 }
 
@@ -5983,6 +6297,217 @@ class ItemStockMoveRow {
     required this.dateText,
     required this.docLabel,
   });
+}
+
+// ═══ دفعة (15) «ما قبل إغلاق م1» — صفوف التقريرَين الجديدَين ═══
+// (درس بنية الملف الكبرى س43: الأصناف الجديدة خارج الصنف العملاق
+// DiqqahDatabase حصراً بعد إقفاله — فتوليد database.g.dart يبقى سالماً)
+
+/// س-151/D-149: فاتورة مفتوحة داخل أعمار طرف — رصيدها المفتوح
+/// بوحدات المستند والأساسية، وأيام تجاوزها عن موعد الاستحقاق
+/// (سالب = لم يستحق بعد، وصفر = استحقاق اليوم).
+class AgingInvoiceRow {
+  final int invoiceId;
+  final String number;
+  final String invoiceDate;
+  final String? dueDate;
+  final int remainingDocMinor;
+  final int remainingBaseMinor;
+  final int daysOver;
+  final String currencyCode;
+
+  const AgingInvoiceRow({
+    required this.invoiceId,
+    required this.number,
+    required this.invoiceDate,
+    required this.dueDate,
+    required this.remainingDocMinor,
+    required this.remainingBaseMinor,
+    required this.daysOver,
+    required this.currencyCode,
+  });
+}
+
+/// س-151/D-149: صف طرف واحد بتقرير الأعمار — مبالغه موزعة على الفوهج
+/// بمؤشر الفوهة (0 = غير مستحق، ثم الفوهج بالترتيب، وأخيراً «أكثر من
+/// آخر فوهة»)، والاتجاهان بمجال الذمم (05 §5): هم يدينون لنا / نحن
+/// مدينون لهم، وفواتيره المفتوحة مدخلها (D-135).
+class AgingPartyRow {
+  final int partyId;
+  final String partyName;
+  final bool theyOweUs;
+
+  /// المبالغ بالأساسية بمؤشر الفوهة — بطول الفوهج + 2 دائماً.
+  final List<int> bucketMinor;
+  final List<AgingInvoiceRow> invoices;
+
+  int get totalMinor => bucketMinor.fold(0, (a, b) => a + b);
+
+  const AgingPartyRow({
+    required this.partyId,
+    required this.partyName,
+    required this.theyOweUs,
+    required this.bucketMinor,
+    required this.invoices,
+  });
+}
+
+/// س-151/D-149: تقرير الأعمار كاملاً — الفوهج بنسخها المعتمدة
+/// ولسانها المحسوب («حتى 30 يوماً»...)، وصفوف الأطراف بترتيب
+/// المدينة ثم الدائنة (D-130)، ومجاميع الفوهج والإجمالي.
+class AgingReport {
+  final List<int> thresholds;
+  final List<String> bucketLabels;
+  final List<AgingPartyRow> parties;
+  final List<int> bucketTotalsMinor;
+
+  int get totalMinor => bucketTotalsMinor.fold(0, (a, b) => a + b);
+
+  const AgingReport({
+    required this.thresholds,
+    required this.bucketLabels,
+    required this.parties,
+    required this.bucketTotalsMinor,
+  });
+}
+
+/// س-152/D-150: سطر قيد بدفتر اليومية — الحساب الورقي والطرف
+/// والجانبتان كما خُزّنت.
+class JournalBookLine {
+  final String accountCode;
+  final String accountName;
+  final String? partyName;
+  final int debitMinor;
+  final int creditMinor;
+
+  const JournalBookLine({
+    required this.accountCode,
+    required this.accountName,
+    required this.partyName,
+    required this.debitMinor,
+    required this.creditMinor,
+  });
+}
+
+/// س-152/D-150: قيد واحد بدفتر اليومية — ترويسته (التاريخ والرقم
+/// والدفتر والبيان) وأسطره، بمجاميع جانبَيه من أسطره حصراً.
+class JournalBookEntry {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String journalName;
+  final String? narration;
+  final List<JournalBookLine> lines;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+
+  const JournalBookEntry({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.journalName,
+    required this.narration,
+    required this.lines,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+  });
+}
+
+/// س-152/D-150: دفتر اليومية كاملاً — القيود بترتيب الزمن ومجموعا
+/// الجانبين، وضابط توازنهما روح F-068: المجموعان متساويان حصراً.
+class JournalBookReport {
+  final List<JournalBookEntry> entries;
+  final int totalDebitMinor;
+  final int totalCreditMinor;
+
+  bool get isBalanced => totalDebitMinor == totalCreditMinor;
+
+  const JournalBookReport({
+    required this.entries,
+    required this.totalDebitMinor,
+    required this.totalCreditMinor,
+  });
+}
+
+/// بانِي صف طرف بالأعمار — يجمع فواتير الطرف الواحد قبل تصفيته
+/// (أداة داخلية للقارئة لا واجهة عامة).
+class _AgingPartyBuilder {
+  final int partyId;
+  final String partyName;
+  final bool theyOweUs;
+  final List<int> _buckets;
+  final List<AgingInvoiceRow> _invoices = [];
+
+  _AgingPartyBuilder({
+    required this.partyId,
+    required this.partyName,
+    required this.theyOweUs,
+  }) : _buckets = <int>[];
+
+  /// طول الفوهج لا يُعرف لحظة البناء فتُمدد القائمة عند كل إضافة.
+  void add(int bucketIndex, int amountMinor, AgingInvoiceRow invoice) {
+    while (_buckets.length <= bucketIndex) {
+      _buckets.add(0);
+    }
+    _buckets[bucketIndex] += amountMinor;
+    _invoices.add(invoice);
+  }
+
+  /// التصفية بطول الفوهج الكلي (n+2) — فقصر قائمة طرف ما (بلا مبالغ
+  /// في الفوهج الأخيرة) لا يكسر مجاميع التقرير.
+  AgingPartyRow build(int bucketCount) {
+    final padded = [..._buckets];
+    while (padded.length < bucketCount) {
+      padded.add(0);
+    }
+    return AgingPartyRow(
+      partyId: partyId,
+      partyName: partyName,
+      theyOweUs: theyOweUs,
+      bucketMinor: List<int>.unmodifiable(padded),
+      invoices: List<AgingInvoiceRow>.unmodifiable(_invoices),
+    );
+  }
+}
+
+/// بانِي قيد دفتر اليومية — يبني الصف عند أول سطر ثم يملاه ببقية
+/// الأسطر (أداة داخلية للقارئة لا واجهة عامة).
+class JournalBookBuilder {
+  final int moveId;
+  final String moveDate;
+  final String moveNumber;
+  final String journalName;
+  final String? narration;
+  final List<JournalBookLine> lines = [];
+  int _debit = 0;
+  int _credit = 0;
+
+  JournalBookBuilder({
+    required this.moveId,
+    required this.moveDate,
+    required this.moveNumber,
+    required this.journalName,
+    required this.narration,
+  });
+
+  /// القيد يُبنى بعد اكتمال الأسطر حصراً — مجاميعه من أسطره المخزونة
+  /// لا من لقطة مبكرة.
+  JournalBookEntry build() => JournalBookEntry(
+        moveId: moveId,
+        moveDate: moveDate,
+        moveNumber: moveNumber,
+        journalName: journalName,
+        narration: narration,
+        lines: List<JournalBookLine>.unmodifiable(lines),
+        totalDebitMinor: _debit,
+        totalCreditMinor: _credit,
+      );
+
+  void addLine(JournalBookLine line) {
+    lines.add(line);
+    _debit += line.debitMinor;
+    _credit += line.creditMinor;
+  }
 }
 
 class LedgerValidationException implements Exception {
@@ -6127,6 +6652,11 @@ class InvoiceLineDocument {
   /// شراء مرحّل، ويُخزّن على السطر فيظهر بشاشة المتابعة وحده.
   final int? supplierPartyId;
 
+  /// س-153/D-151 (دفعة 15): خانة «ملاحظة التسليم» القصيرة — المواصفات
+  /// الخاصة أو وعد التسليم على السطر غير المستلم، وتظهر بشاشة
+  /// المتابعة والمطبوع بلفظ البوابة. null لمن بلا ملاحظة.
+  final String? deliveryNote;
+
   const InvoiceLineDocument({
     required this.id,
     required this.invoiceId,
@@ -6143,6 +6673,7 @@ class InvoiceLineDocument {
     required this.uuid,
     this.delivered = false,
     this.supplierPartyId,
+    this.deliveryNote,
   });
 }
 

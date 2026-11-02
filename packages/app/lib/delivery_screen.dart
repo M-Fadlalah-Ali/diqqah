@@ -72,6 +72,49 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     }
   }
 
+  /// س-153/D-151 (دفعة 15): تحرير خانة «ملاحظة التسليم» القصيرة على
+  /// السطر غير المستلم — المواصفات الخاصة أو وعد التسليم، والفراغ
+  /// يمحو الملاحظة، والفشل رسالة لا صمت.
+  Future<void> _editNote(UndeliveredLineRow row) async {
+    final controller = TextEditingController(text: row.deliveryNote ?? '');
+    final saved = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('ملاحظة التسليم — ${row.itemName}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'المواصفات الخاصة أو وعد التسليم',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('حفظ'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || saved == null) return; // إلغاء بلا مساس
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.db
+          .setInvoiceLineDeliveryNote(row.lineId, note: saved);
+      _reload();
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر حفظ الملاحظة — $e')),
+      );
+    }
+  }
+
   /// النقر على السطر يفتح فاتورته (س-139) — والعودة تُحدّث القائمة
   /// إن علّم المالك مربعاً هناك.
   Future<void> _openInvoice(UndeliveredLineRow row) async {
@@ -92,7 +135,15 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       final bytes = await buildDocumentPdf(
         title: 'متابعة التسليم — الأسطر غير المستلمة',
         headerPairs: const [],
-        columns: const ['الصنف', 'الكمية', 'الفاتورة', 'التاريخ', 'الطرف', 'المورد المسؤول'],
+        columns: const [
+          'الصنف',
+          'الكمية',
+          'الفاتورة',
+          'التاريخ',
+          'الطرف',
+          'المورد المسؤول',
+          'الملاحظة',
+        ],
         rows: [
           for (final row in rows)
             [
@@ -102,6 +153,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               row.invoiceDate,
               row.partyName ?? '—',
               row.supplierName ?? 'بلا مورد',
+              // س-153/D-151: الملاحظة بصف المتابعة المطبوع.
+              row.deliveryNote ?? '—',
             ],
         ],
         footerPairs: [
@@ -257,10 +310,25 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                               subtitle: Text(
                                   '${row.invoiceNumber} · ${row.invoiceDate}'
                                   ' · ${row.partyName ?? 'بلا طرف'}'
-                                  ' · المورد: ${row.supplierName ?? 'بلا مورد'}'),
-                              trailing: FilledButton.tonal(
-                                onPressed: () => _markDelivered(row),
-                                child: const Text('سُلِّم'),
+                                  ' · المورد: ${row.supplierName ?? 'بلا مورد'}'
+                                  // س-153/D-151: الملاحظة بصف المتابعة
+                                  // حين وُجدت — فلا صمت ولا ضجيج.
+                                  '${row.deliveryNote == null || row.deliveryNote!.isEmpty ? '' : ' · ملاحظة: ${row.deliveryNote}'}'),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // س-153/D-151: تحرير خانة الملاحظة
+                                  // القصيرة على السطر غير المستلم.
+                                  IconButton(
+                                    tooltip: 'ملاحظة التسليم',
+                                    icon: const Icon(Icons.edit_note),
+                                    onPressed: () => _editNote(row),
+                                  ),
+                                  FilledButton.tonal(
+                                    onPressed: () => _markDelivered(row),
+                                    child: const Text('سُلِّم'),
+                                  ),
+                                ],
                               ),
                               onTap: () => _openInvoice(row),
                             ),

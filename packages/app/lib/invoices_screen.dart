@@ -53,6 +53,12 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   final kind = InvoiceKind.fromStorage(invoice.kind);
   final isSale = kind == InvoiceKind.sale;
 
+  // س-153/D-151 (دفعة 15): عمود «ملاحظة» بقسيمة البيع حصراً حين
+  // وُجدت ملاحظة على أسطر غير مستلمة — فلا عمود فارغ يعمّم الضجيج.
+  final hasDeliveryNotes = isSale &&
+      lines.any((l) =>
+          l.deliveryNote != null && l.deliveryNote!.trim().isNotEmpty);
+
   // الصور بمفتاحها المستقل (س-127/D-123) — الافتراضي معطل فلا قراءة ملفات.
   List<Uint8List?>? rowImages;
   List<String>? rowLetters;
@@ -69,12 +75,15 @@ Future<Uint8List> buildInvoicePrintoutBytes(
 
   // س-140/D-134: عمود «مستلم» بقسيمة البيع حصراً — «سُلِّم» للمحدد
   // و«بانتظار التسليم» لغيره، وسطر الخلاصة تحت الجدول.
+  // س-153/D-151 (دفعة 15): وعمود «ملاحظة» حين وُجدت ملاحظة تسليم
+  // على أسطر الفاتورة — فلا عمود فارغ يعمّم الضجيج.
   final columns = <String>[
     'الصنف',
     'الكمية',
     'سعر الوحدة',
     'صافي السطر',
     if (isSale) 'مستلم',
+    if (hasDeliveryNotes) 'ملاحظة',
   ];
   final rows = [
     for (final line in lines)
@@ -84,6 +93,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
         formatMinorAmount(line.unitPriceMinor),
         formatMinorAmount(line.lineTotalDocMinor),
         if (isSale) line.delivered ? 'سُلِّم' : 'بانتظار التسليم',
+        if (hasDeliveryNotes) line.deliveryNote ?? '—',
       ],
   ];
   String? summary;

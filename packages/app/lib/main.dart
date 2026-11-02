@@ -6,6 +6,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'aging_prefs.dart';
 import 'first_run_screen.dart';
 import 'home_screen.dart';
 import 'item_images.dart';
@@ -19,6 +20,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await loadFontChoice();
   await loadPrintImagePrefs();
+  // س-151/D-149 (دفعة 15): فوهج أعمار الذمم المخزنة — قراءتها عند
+  // الإقلاع بنمط مفاتيح الصور، والفاسد يعيد الافتراضي لا يكسر.
+  await loadAgingPrefs();
   await preloadAppFonts();
   runApp(const DiqqahApp());
 }

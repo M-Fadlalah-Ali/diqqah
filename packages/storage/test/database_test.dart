@@ -18,7 +18,7 @@ void main() {
   });
 
   test('نسخة المخطط = 7 (F-011: كل تغيير مخطط إصدار وترحيلة — v7 دفعة الفواتير: D-079..D-082 معروضة)', () {
-    expect(db.schemaVersion, 13);
+    expect(db.schemaVersion, 14);
   });
 
   test('إنشاء المخطط وإدراج صنف وقراءته — الجلسة الأولى سليمة بعد v2',
@@ -480,7 +480,7 @@ void main() {
     // أول استخدام يثير الترقية المتسلسلة 4→5→6 — إعادة بناء items في
     // v5 ثم جداول القلب وستة مشغلاتها وبذرها في v6 (دفعة م1 (3))
     await migrated.select(migrated.items).get();
-    expect(migrated.schemaVersion, 13);
+    expect(migrated.schemaVersion, 14);
 
     final rows = await migrated.select(migrated.items).get();
     expect(rows, hasLength(1), reason: 'بيانات القائمة حفظت كاملة');
@@ -527,7 +527,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 13);
+    expect(migrated.schemaVersion, 14);
     final row = (await migrated.customSelect(
       'SELECT discount_rate, state FROM invoices',
     ).getSingle()).data;
@@ -617,5 +617,62 @@ void main() {
         reason: 'التقليم قبل المطابقة الحرفية');
     expect(await db.itemIdByBarcode('6290000000999'), isNull,
         reason: 'رمز غير مرتبط بأي صنف — رسالة س-132');
+  });
+
+  test('ترحيلة v14 (س-153/D-151 دفعة 15): خانة ملاحظة التسليم تُضاف '
+      'بـADD COLUMN بحرس pragma — وكل القائمة تولد بلا ملاحظة', () async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_v14_mig_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final dbPath = p.join(tempDir.path, 'migrate14.db');
+    // قاعدة كاملة المخطط v13 (بترحيلاتها كلها) ثم تخفيض user_version
+    // إلى 13 كي تُجري إعادة الفتح ترحيلة 13→14 أمامنا.
+    final seeded = DiqqahDatabase(filePath: dbPath);
+    await seeded.customStatement(
+      "INSERT INTO invoices (kind, number, invoice_date, currency_id, "
+      "fx_rate, discount_rate, subtotal_doc_minor, discount_doc_minor, "
+      "total_doc_minor, total_base_minor, state, uuid, created_at, "
+      "updated_at, is_deleted) "
+      "VALUES ('sale', '2026/000001', '2026-03-15', 1, 1000000, 0, "
+      "30000, 0, 30000, 30000, 'posted', 'uuid-v14-1', 0, 0, 0)",
+    );
+    await seeded.customStatement(
+      "INSERT INTO invoice_lines (invoice_id, item_id, unit_id, "
+      "factor_at_entry, qty, qty_base, unit_price_minor, discount_minor, "
+      "tax_rate, line_total_doc_minor, line_total_base_minor, delivered, "
+      "uuid, created_at, updated_at, is_deleted) "
+      "SELECT id, 1, 1, 1, 1, 1, 30000, 0, 0, 30000, 30000, 0, "
+      "'uuid-v14-l1', 0, 0, 0 FROM invoices LIMIT 1",
+    );
+    await seeded.close();
+    final raw = sqlite3.open(dbPath);
+    final before = raw.select(
+        "SELECT name FROM pragma_table_info('invoice_lines')");
+    expect(
+      before.map((r) => r['name']),
+      isNot(contains('delivery_note')),
+      reason: 'قاعدة v13 بلا عمود الملاحظة',
+    );
+    raw.execute('PRAGMA user_version = 13');
+    raw.dispose();
+
+    final migrated = DiqqahDatabase(filePath: dbPath);
+    addTearDown(migrated.close);
+    expect(migrated.schemaVersion, 14);
+    // العمود وُلد لكل القائمة بلا ملاحظة (null) — لا تهجير قيم.
+    final col = (await migrated.customSelect(
+      "SELECT name FROM pragma_table_info('invoice_lines') "
+      "WHERE name = 'delivery_note'",
+    ).get());
+    expect(col, hasLength(1));
+    final note = await migrated.customSelect(
+      'SELECT delivery_note FROM invoice_lines',
+    ).getSingle();
+    expect(note.data['delivery_note'], isNull);
+    // والملاحظة تُكتب على سطر مرحّل بلا فك إقفال (علم عمل — D-131).
+    await migrated.setInvoiceLineDeliveryNote(1, note: 'بعد الترحيلة');
+    final written = await migrated.customSelect(
+      'SELECT delivery_note FROM invoice_lines',
+    ).getSingle();
+    expect(written.data['delivery_note'], 'بعد الترحيلة');
   });
 }

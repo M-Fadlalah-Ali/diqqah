@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'aging_prefs.dart';
 import 'item_images.dart';
 import 'print_image_prefs.dart';
 import 'periods_screen.dart';
@@ -66,6 +67,25 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('الذمم المدينة والدائنة'),
             subtitle: const Text('صافي كل طرف — هم يدينون لنا / نحن مدينون لهم'),
             onTap: () => _open(context, _ReceivablesPayablesView(db: db)),
+          ),
+          // س-151/D-149 (دفعة 15): أعمار الذمم — أقرب ربح من دراسة
+          // محضر الخبراء (س46/D-140): قراءة خالصة فوق الفواتير
+          // المفتوحة والمصالحة المنجزة سلفاً، بفوهج قابلة للتهيئة.
+          ListTile(
+            leading: const Icon(Icons.hourglass_bottom),
+            title: const Text('أعمار الذمم'),
+            subtitle: const Text(
+                'كل طرف بمبلغه المفتوح موزعاً على فترات التأخر عن الاستحقاق'),
+            onTap: () => _open(context, _AgingView(db: db)),
+          ),
+          // س-152/D-150 (دفعة 15): دفتر اليومية — قيود المرحّل
+          // بترتيب الزمن بأسطرها بفلاتر المدى والدفتر.
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('دفتر اليومية'),
+            subtitle: const Text(
+                'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
+            onTap: () => _open(context, _JournalBookView(db: db)),
           ),
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
@@ -493,6 +513,509 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
                                   widget.db,
                                   row.partyId,
                                   row.partyName),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// تقرير أعمار الذمم (س-151/D-149 — دفعة 15): كل طرف بمبلغه المفتوح
+/// موزعاً على فهرات التأخر — قراءة خالصة فوق محرك المصالحة المنجز
+/// (D-140 روحاً من س46) بلا ترحيلة ولا حساب جديد.
+///
+/// الفوهج إعدادات لا كود (قرار الدراسة): قوائم جاهزة بقائمة منسدلة
+/// محفوظة بمخزن الخيارات (نمط D-123)، والافتراض 30/60/90/120.
+/// والفلتر «حسب النوع» بقاعدة D-130 الموثقة: الكل بترتيب المدينة ثم
+/// الدائنة — وكل اسم يصير مدخلاً (D-135): النقر على الطرف يعرض
+/// فواتيره المفتوحة بأيام تأخرها.
+class _AgingView extends StatefulWidget {
+  final DiqqahDatabase db;
+
+  const _AgingView({required this.db});
+
+  @override
+  State<_AgingView> createState() => _AgingViewState();
+}
+
+class _AgingViewState extends State<_AgingView> {
+  /// فلتر النوع بقاعدة D-130 — null الكل، sale مدينة، purchase دائنة.
+  String? _kind;
+
+  Future<AgingReport>? _future;
+
+  static const Map<String, String> _kindLabels = {
+    'sale': 'المدينة — فواتير البيع',
+    'purchase': 'الدائنة — فواتير الشراء',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    agingPresetIndex.addListener(_onPrefs);
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    agingPresetIndex.removeListener(_onPrefs);
+    super.dispose();
+  }
+
+  /// تغيّر مخزن الفوهج يعيد القراءة بالقائمة الجديدة (درس السرد
+  /// الكسول: المستقبل يُنشأ بأمر صريح هنا لا في build).
+  void _onPrefs() {
+    if (!mounted) return;
+    _reload();
+  }
+
+  void _reload() {
+    setState(() {
+      _future = widget.db.agingReport(
+        thresholds: agingThresholds,
+        kindStorageValue: _kind,
+      );
+    });
+  }
+
+  String get _kindLabel => _kind == null
+      ? 'أعمار الذمم'
+      : 'أعمار الذمم — ${_kindLabels[_kind]!}';
+
+  /// لسان صف الطرف — الفوهج غير الصفرية حصراً فلا صمت ولا ضجيج.
+  String _partySubtitle(AgingPartyRow row, List<String> labels) {
+    final parts = <String>[];
+    for (var i = 0;
+        i < row.bucketMinor.length && i < labels.length;
+        i++) {
+      if (row.bucketMinor[i] > 0) {
+        parts.add(
+            '${labels[i]}: ${formatMinorAmount(row.bucketMinor[i])}');
+      }
+    }
+    return parts.isEmpty ? '—' : parts.join(' · ');
+  }
+
+  Future<void> _print(AgingReport report) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await buildDocumentPdf(
+        title: _kindLabel,
+        headerPairs: [
+          ('فترات الأعمار', agingPresetLabel(report.thresholds)),
+        ],
+        columns: [
+          'الطرف',
+          'الاتجاه',
+          ...report.bucketLabels,
+          'الإجمالي',
+        ],
+        rows: [
+          for (final party in report.parties)
+            [
+              party.partyName,
+              party.theyOweUs ? 'هم يدينون لنا' : 'نحن مدينون لهم',
+              for (final amount in party.bucketMinor)
+                amount == 0 ? '—' : formatMinorAmount(amount),
+              formatMinorAmount(party.totalMinor),
+            ],
+        ],
+        footerPairs: [
+          for (var i = 0; i < report.bucketLabels.length; i++)
+            if (report.bucketTotalsMinor[i] > 0)
+              (
+                report.bucketLabels[i],
+                formatMinorAmount(report.bucketTotalsMinor[i]),
+              ),
+          ('الإجمالي', formatMinorAmount(report.totalMinor)),
+        ],
+        format: resolvePageFormat(docKind: 'report'),
+      );
+      if (!context.mounted) return;
+      await sharePdfBytes(bytes, 'أعمار الذمم.pdf');
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
+  }
+
+  /// س-135/D-135: اسم الطرف مدخل — الورقة تعرض فواتيره المفتوحة
+  /// بأيام تأخرها فتُعرف الذمة تفصيلاً لا إجمالاً فقط.
+  void _showPartyInvoices(AgingPartyRow party) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(
+              title: Text(party.partyName),
+              subtitle: Text(party.theyOweUs
+                  ? 'هم يدينون لنا — الفواتير المفتوحة'
+                  : 'نحن مدينون لهم — الفواتير المفتوحة'),
+            ),
+            for (final inv in party.invoices)
+              ListTile(
+                title: Text('فاتورة ${inv.number}'),
+                subtitle: Text(
+                    'الاستحقاق: ${inv.dueDate ?? inv.invoiceDate}'
+                    ' · ${inv.daysOver < 0
+                        ? 'غير مستحق'
+                        : inv.daysOver == 0
+                            ? 'استحقاق اليوم'
+                            : 'متأخر ${inv.daysOver} يوماً'}'),
+                trailing: Text(formatMinorAmount(inv.remainingBaseMinor)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('أعمار الذمم')),
+      body: FutureBuilder<AgingReport>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('${snapshot.error}'));
+          }
+          if (!snapshot.hasData) return _reportWait();
+          final report = snapshot.data!;
+          if (report.parties.isEmpty) {
+            return _reportEmpty('لا ذمم مفتوحة — كل الفواتير مصفاة');
+          }
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _kind,
+                        decoration:
+                            const InputDecoration(labelText: 'حسب النوع'),
+                        items: const [
+                          DropdownMenuItem<String>(
+                              value: null, child: Text('الكل')),
+                          DropdownMenuItem<String>(
+                              value: 'sale',
+                              child: Text('المدينة — فواتير البيع')),
+                          DropdownMenuItem<String>(
+                              value: 'purchase',
+                              child: Text('الدائنة — فواتير الشراء')),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _kind = value;
+                            _reload();
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<int>(
+                        initialValue: agingPresetIndex.value,
+                        decoration: const InputDecoration(
+                            labelText: 'فترات الأعمار'),
+                        items: [
+                          for (var i = 0;
+                              i < kAgingBucketPresets.length;
+                              i++)
+                            DropdownMenuItem<int>(
+                                value: i,
+                                child: Text(
+                                    agingPresetLabel(kAgingBucketPresets[i]))),
+                        ],
+                        // الفوهج إعدادات لا كود (قرار الدراسة) —
+                        // الاختيار يُحفظ فيبقى لعجله، والمستمع
+                        // يعيد القراءة بالقائمة الجديدة.
+                        onChanged: (value) {
+                          if (value == null) return;
+                          saveAgingPreset(value);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _ReportActionsBar(
+                      onPrint: () => _print(report),
+                    ),
+                  ],
+                ),
+              ),
+              Card(
+                margin: const EdgeInsets.all(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'الإجمالي ${formatMinorAmount(report.totalMinor)}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final party in report.parties)
+                      ListTile(
+                        title: Text(party.partyName),
+                        subtitle: Text(
+                            '${party.theyOweUs ? 'هم يدينون لنا' : 'نحن مدينون لهم'}'
+                            ' — ${_partySubtitle(party, report.bucketLabels)}'),
+                        trailing:
+                            Text(formatMinorAmount(party.totalMinor)),
+                        // كل اسم يصير مدخلاً (D-135): فواتير الطرف
+                        // المفتوحة بأيام تأخرها.
+                        onTap: () => _showPartyInvoices(party),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// دفتر اليومية (س-152/D-150 — دفعة 15): قيود المرحّل بترتيب الزمن
+/// بأسطرها — قراءة خالصة نمط كشف الحساب (D-137) بفلاتر المدى والدفتر
+/// ومجموعا الجانبين ضابط توازنهما روح F-068.
+class _JournalBookView extends StatefulWidget {
+  final DiqqahDatabase db;
+
+  const _JournalBookView({required this.db});
+
+  @override
+  State<_JournalBookView> createState() => _JournalBookViewState();
+}
+
+class _JournalBookViewState extends State<_JournalBookView> {
+  final TextEditingController _from = TextEditingController();
+  final TextEditingController _to = TextEditingController();
+
+  /// فلتر الدفتر — null الكل، وإلا أحد الأنواع الخمسة (D-076).
+  String? _journalKind;
+
+  Future<JournalBookReport>? _future;
+
+  static const Map<String, String> _journalKindLabels = {
+    'sales': 'المبيعات',
+    'purchase': 'المشتريات',
+    'cash': 'الصندوق',
+    'stock': 'المخزون',
+    'general': 'القيود العامة',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  @override
+  void dispose() {
+    _from.dispose();
+    _to.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    setState(() {
+      _future = widget.db.journalBookReport(
+        fromText: _from.text.trim(),
+        toText: _to.text.trim(),
+        journalKind: _journalKind,
+      );
+    });
+  }
+
+  Future<void> _print(JournalBookReport report) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final rows = <List<String>>[
+        for (final entry in report.entries)
+          for (final line in entry.lines)
+            [
+              entry.moveDate,
+              entry.moveNumber,
+              entry.journalName,
+              '${line.accountCode} ${line.accountName}',
+              line.partyName ?? '—',
+              formatMinorAmount(line.debitMinor),
+              formatMinorAmount(line.creditMinor),
+            ],
+      ];
+      final bytes = await buildDocumentPdf(
+        title: 'دفتر اليومية',
+        headerPairs: const [],
+        columns: const [
+          'التاريخ',
+          'القيد',
+          'الدفتر',
+          'الحساب',
+          'الطرف',
+          'مدين',
+          'دائن',
+        ],
+        rows: rows,
+        footerPairs: [
+          ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
+          ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
+          (
+            'الحالة',
+            report.isBalanced
+                ? 'المجموعان متوازنان ✓ (F-068)'
+                : 'غير متوازن — راجع فوراً!',
+          ),
+        ],
+        format: resolvePageFormat(docKind: 'report'),
+      );
+      if (!context.mounted) return;
+      await sharePdfBytes(bytes, 'دفتر اليومية.pdf');
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('دفتر اليومية')),
+      body: FutureBuilder<JournalBookReport>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            // المدى الفاسد يُعرض بلسان المدقق من الـFutureBuilder —
+            // لا صمت ولا انهيار (D-077: المدقق حرس أول).
+            return Center(child: Text('${snapshot.error}'));
+          }
+          if (!snapshot.hasData) return _reportWait();
+          final report = snapshot.data!;
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _from,
+                        decoration: const InputDecoration(
+                            labelText: 'من تاريخ (سنة-شهر-يوم)'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _to,
+                        decoration: const InputDecoration(
+                            labelText: 'إلى تاريخ (سنة-شهر-يوم)'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _journalKind,
+                        decoration:
+                            const InputDecoration(labelText: 'الدفتر'),
+                        items: [
+                          const DropdownMenuItem<String>(
+                              value: null, child: Text('كل الدفاتر')),
+                          for (final e in _journalKindLabels.entries)
+                            DropdownMenuItem<String>(
+                                value: e.key, child: Text(e.value)),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _journalKind = value;
+                            _reload();
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: _reload,
+                      child: const Text('عرض'),
+                    ),
+                  ],
+                ),
+              ),
+              Card(
+                margin: const EdgeInsets.all(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Text(
+                        'مجموع المدين ${formatMinorAmount(report.totalDebitMinor)}'
+                        ' — مجموع الدائن ${formatMinorAmount(report.totalCreditMinor)}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _print(report),
+                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                            label: const Text('طباعة / PDF'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: report.entries.isEmpty
+                    ? _reportEmpty('لا قيود مرحّلة في هذا المدى')
+                    : ListView(
+                        children: [
+                          for (final entry in report.entries)
+                            Card(
+                              margin: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(
+                                        '${entry.moveDate} · قيد ${entry.moveNumber}'
+                                        ' · ${entry.journalName}'),
+                                    subtitle: entry.narration == null ||
+                                            entry.narration!.isEmpty
+                                        ? null
+                                        : Text(entry.narration!),
+                                    dense: true,
+                                  ),
+                                  for (final line in entry.lines)
+                                    ListTile(
+                                      dense: true,
+                                      title: Text(
+                                          '${line.accountCode} ${line.accountName}'),
+                                      subtitle: line.partyName == null
+                                          ? null
+                                          : Text('الطرف: ${line.partyName}'),
+                                      trailing: Text(
+                                          'مدين ${formatMinorAmount(line.debitMinor)}'
+                                          ' · دائن ${formatMinorAmount(line.creditMinor)}'),
+                                    ),
+                                ],
+                              ),
                             ),
                         ],
                       ),
