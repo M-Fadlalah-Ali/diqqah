@@ -454,19 +454,47 @@ pw.Widget _imageTable({
   );
 }
 
+/// تعقيم اسم ملف المشاركة (س-154/D-152 — دفعة 16، علّة المالك الحية
+/// 2026-11-02): تسمية العرض المعتمدة للفواتير والسندات (م-44/D-071)
+/// تحمل المائل `/` بين السنة والرقم — «فاتورة بيع 2026/000003» —
+/// والنظام الملفي في كل المنصات يفسره فاصل مجلد فيتولد مسار
+/// «cache/فاتورة بيع 2026/000003.pdf» بمجلد لا وجود له فتقعد
+/// PathNotFoundException (errno = 2) وتُمنع مشاركة طباعة فاتورة
+/// المالك كما بلغ بصورته. العلاج بنقطة واحدة كما عادة الدوال النقية
+/// (نمط rtlColumnOrder): كل اسم ملف مشاركة يمر من هنا قبل كتابته —
+/// محارف المسار المحجوزة في المنصات الثلاث `\ / : * ? " < > |`
+/// ومحارف التحكم تصير شرطة، والمتواليات تنقل لشرطة واحدة، وأطراف
+/// النقطة والشرطة والفراغ تنظف (فلا ملف مخفي بنقطة أولى ولا اسم
+/// ينتهي بشرطة)، والخالي يعود «مستند». تسمية العرض على الشاشات
+/// وداخل الورقة المطبوعة كما هي بلا مساس — العلة في حدّ الملف
+/// لا في الصيغة المعتمدة.
+String safeFileName(String name) {
+  var out = name
+      .replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1F]'), '-')
+      .replaceAll(RegExp(r'-{2,}'), '-')
+      .trim();
+  out = out
+      .replaceAll(RegExp(r'^[.\-]+'), '')
+      .replaceAll(RegExp(r'[.\s\-]+$'), '');
+  return out.isEmpty ? 'مستند' : out;
+}
+
 /// مشاركة ملف PDF بنافذة النظام (نمط D-056 المعتمد للنسخ الاحتياطية:
 /// إخراج الملف من مجلد التطبيق إلى مكان يختاره المالك) — يُكتب ملف
-/// مؤقت بمجلد التخزين المؤقت ويُشارك باسمه.
+/// مؤقت بمجلد التخزين المؤقت ويُشارك باسمه، والاسم يعقَّم بـ
+/// safeFileName حصراً قبل الكتابة (س-154/D-152) فلا مائل تسمية
+/// العرض ولا محرف مسار يمرر للنظام الملفي.
 Future<void> sharePdfBytes(
   Uint8List bytes,
   String fileName,
 ) async {
   final dir = await getTemporaryDirectory();
-  final file = File(p.join(dir.path, fileName));
+  final safeName = safeFileName(fileName);
+  final file = File(p.join(dir.path, safeName));
   await file.writeAsBytes(bytes, flush: true);
   await Share.shareXFiles(
     [XFile(file.path, mimeType: 'application/pdf')],
-    subject: fileName,
+    subject: safeName,
     text: 'مستند من دِقَّة',
   );
 }

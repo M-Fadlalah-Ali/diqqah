@@ -1,6 +1,9 @@
+import 'dart:io' show Directory, File;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:path/path.dart' as p;
 
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 
@@ -115,5 +118,45 @@ void main() {
     // مقاسا الصفحة مختلفان فيتميز المحتوى (التحويل التلقائي بين
     // القياسين موثق D-016) — الأرقام داخل البايتات تحمل أبعاد الصفحة.
     expect(reportBytes, isNot(invoiceBytes));
+  });
+
+  // ═══ س-154/D-152 (دفعة 16): تعقيم اسم ملف المشاركة ═══
+  // علّة المالك الحية 2026-11-02: تسمية العرض «فاتورة بيع 2026/000003»
+  // تحمل المائل ففسره النظام الملفي فاصل مجلد وقعدت المشاركة
+  // بـPathNotFoundException (errno = 2).
+
+  test('تعقيم اسم المشاركة: مائل تسمية العرض المعتمدة يصير شرطة — لا فاصل مسار', () {
+    final safe = safeFileName('فاتورة بيع 2026/000003.pdf');
+    expect(safe, 'فاتورة بيع 2026-000003.pdf');
+    expect(safe.contains('/'), isFalse,
+        reason: 'علّة المالك: المائل في الاسم يولّد مجلداً وهمياً');
+    expect(safe.contains('\\'), isFalse);
+    // والسندات بصيغة التسمية ذاتها
+    expect(safeFileName('سند قبض 2026/000001.pdf'), 'سند قبض 2026-000001.pdf');
+  });
+
+  test('تعقيم اسم المشاركة: محارف المسار المحجوزة كلها شرطة والمتواليات تنقل لشرطة واحدة', () {
+    expect(safeFileName(r'a\\b:c*d?e"f<g>h|i.pdf'), 'a-b-c-d-e-f-g-h-i.pdf');
+    expect(safeFileName('تقرير // خاص.pdf'), 'تقرير - خاص.pdf');
+    expect(safeFileName('كشف حساب/مصرف الشام/2026.pdf'),
+        'كشف حساب-مصرف الشام-2026.pdf');
+  });
+
+  test('تعقيم اسم المشاركة: الأطراف تنظف والخالي يعود «مستند»', () {
+    expect(safeFileName(' تقرير - '), 'تقرير');
+    expect(safeFileName('...تقرير.pdf'), 'تقرير.pdf',
+        reason: 'النقطة الأولى تصير الملف مخفياً على يونكس');
+    expect(safeFileName('///'), 'مستند');
+  });
+
+  test('الكتابة الفعلية بالاسم المعقم تنجح على مسار حقيقي — محاكاة علّة المالك نفسها', () async {
+    final tmp = await Directory.systemTemp.createTemp('diqqah_share_test');
+    final label = 'فاتورة بيع 2026/000003.pdf';
+    final file = File(p.join(tmp.path, safeFileName(label)));
+    await file.writeAsBytes(Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]));
+    expect(file.existsSync(), isTrue,
+        reason: 'الاسم المعقم يكتب بلا PathNotFoundException');
+    expect(p.basename(file.path), 'فاتورة بيع 2026-000003.pdf');
+    await tmp.delete(recursive: true);
   });
 }
