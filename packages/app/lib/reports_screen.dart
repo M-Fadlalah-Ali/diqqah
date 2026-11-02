@@ -68,25 +68,6 @@ class ReportsScreen extends StatelessWidget {
             subtitle: const Text('صافي كل طرف — هم يدينون لنا / نحن مدينون لهم'),
             onTap: () => _open(context, _ReceivablesPayablesView(db: db)),
           ),
-          // س-151/D-149 (دفعة 15): أعمار الذمم — أقرب ربح من دراسة
-          // محضر الخبراء (س46/D-140): قراءة خالصة فوق الفواتير
-          // المفتوحة والمصالحة المنجزة سلفاً، بفوهج قابلة للتهيئة.
-          ListTile(
-            leading: const Icon(Icons.hourglass_bottom),
-            title: const Text('أعمار الذمم'),
-            subtitle: const Text(
-                'كل طرف بمبلغه المفتوح موزعاً على فترات التأخر عن الاستحقاق'),
-            onTap: () => _open(context, _AgingView(db: db)),
-          ),
-          // س-152/D-150 (دفعة 15): دفتر اليومية — قيود المرحّل
-          // بترتيب الزمن بأسطرها بفلاتر المدى والدفتر.
-          ListTile(
-            leading: const Icon(Icons.menu_book_outlined),
-            title: const Text('دفتر اليومية'),
-            subtitle: const Text(
-                'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
-            onTap: () => _open(context, _JournalBookView(db: db)),
-          ),
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
             title: const Text('تقرير المخزون'),
@@ -113,6 +94,27 @@ class ReportsScreen extends StatelessWidget {
             subtitle: const Text(
                 'إقفال فترة وما فيها يثبّت إلى الأبد — والفك طارئ بسبب نصي إلزامي'),
             onTap: () => _open(context, PeriodsScreen(db: db)),
+          ),
+          // س-151/D-149 (دفعة 15): أعمار الذمم — أقرب ربح من دراسة
+          // محضر الخبراء (س46/D-140): قراءة خالصة فوق الفواتير
+          // المفتوحة والمصالحة المنجزة سلفاً، بفوهج قابلة للتهيئة.
+          // البندان الجديدان خلف قائمة التقارير القائمة — نمو القائمة
+          // بنهايتها فلا يُزاح بند معتمد من موضعه المختبر.
+          ListTile(
+            leading: const Icon(Icons.hourglass_bottom),
+            title: const Text('أعمار الذمم'),
+            subtitle: const Text(
+                'كل طرف بمبلغه المفتوح موزعاً على فترات التأخر عن الاستحقاق'),
+            onTap: () => _open(context, _AgingView(db: db)),
+          ),
+          // س-152/D-150 (دفعة 15): دفتر اليومية — قيود المرحّل
+          // بترتيب الزمن بأسطرها بفلاتر المدى والدفتر.
+          ListTile(
+            leading: const Icon(Icons.menu_book_outlined),
+            title: const Text('دفتر اليومية'),
+            subtitle: const Text(
+                'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
+            onTap: () => _open(context, _JournalBookView(db: db)),
           ),
         ],
       ),
@@ -708,11 +710,9 @@ class _AgingViewState extends State<_AgingView> {
                           DropdownMenuItem<String>(
                               value: null, child: Text('الكل')),
                           DropdownMenuItem<String>(
-                              value: 'sale',
-                              child: Text('المدينة — فواتير البيع')),
+                              value: 'sale', child: Text('المدينة')),
                           DropdownMenuItem<String>(
-                              value: 'purchase',
-                              child: Text('الدائنة — فواتير الشراء')),
+                              value: 'purchase', child: Text('الدائنة')),
                         ],
                         onChanged: (value) {
                           setState(() {
@@ -815,7 +815,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
     'purchase': 'المشتريات',
     'cash': 'الصندوق',
     'stock': 'المخزون',
-    'general': 'القيود العامة',
+    'general': 'قيد عام',
   };
 
   @override
@@ -934,7 +934,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                             const InputDecoration(labelText: 'الدفتر'),
                         items: [
                           const DropdownMenuItem<String>(
-                              value: null, child: Text('كل الدفاتر')),
+                              value: null, child: Text('الكل')),
                           for (final e in _journalKindLabels.entries)
                             DropdownMenuItem<String>(
                                 value: e.key, child: Text(e.value)),

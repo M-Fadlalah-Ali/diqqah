@@ -26,7 +26,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // البندان الجديدان بقائمة التقارير.
+    // البندان الجديدان خلف القائمة القائمة (نمو بنهايتها) — سحبة
+    // واحدة تُظهرهما في ساحة الاختبار قبل الفتح.
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('أعمار الذمم'), findsOneWidget);
     expect(find.text('دفتر اليومية'), findsOneWidget);
 
@@ -55,6 +59,11 @@ void main() {
     await seedKnownCycle(db);
 
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // سحبة تُظهر البند الأخير في ساحة الاختبار قبل الفتح.
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 

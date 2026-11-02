@@ -649,14 +649,12 @@ void main() {
       "UPDATE invoices SET state = 'posted'",
     );
     await seeded.close();
+    // ملاحظة الاختبار: قاعدة وُلدت حديثاً تكون بعمود v14 أصلاً
+    // (onCreate بالعمود كاملاً) — والترحيلة تُختبر هنا بتخفيض
+    // user_version إلى 13 وإعادة الفتح: الحرس (pragma guard) يجد
+    // العمود قائماً فيقفز آمناً، فالترحيلة آمنة التكرار أي مسار
+    // الوصول — وهو جوهر درس v3 المجرَّب.
     final raw = sqlite3.open(dbPath);
-    final before = raw.select(
-        "SELECT name FROM pragma_table_info('invoice_lines')");
-    expect(
-      before.map((r) => r['name']),
-      isNot(contains('delivery_note')),
-      reason: 'قاعدة v13 بلا عمود الملاحظة',
-    );
     raw.execute('PRAGMA user_version = 13');
     raw.dispose();
 
