@@ -210,19 +210,25 @@ String _scalePart(int g, _Scale s, bool nounFollows) {
     return '$hPrefix واثنان ${s.one}';
   }
   if (rest <= 10) {
-    return '$hPrefix و${_onesM[rest]} ${s.plural}';
+    final few = hPrefix.isEmpty ? '' : '$hPrefix و';
+    return '$few${_onesM[rest]} ${s.plural}';
   }
   final scaleWord = nounFollows ? s.one : s.accusative;
   // كلمات الباقي حصراً (لا المئة — فهي في البادئة) والواو بينهما.
-  return '$hPrefix و${_groupWords(rest, TafqitGender.masculine, false)} $scaleWord';
+  final mid = hPrefix.isEmpty ? '' : '$hPrefix و';
+  return '$mid${_groupWords(rest, TafqitGender.masculine, false)} $scaleWord';
 }
 
 /// باقي المجموعة (1..99) بلسان المعدود وصيغته — والفاصلة فارغة عند
-/// صفر الباقي.
+/// صفر الباقي. والعشرة من صنف الجمع لا المفرد: «عشر ليرات».
 String _restWithNoun(int rest, TafqitNoun noun) {
   if (rest == 0) return '';
   if (rest == 1) return noun.one;
   if (rest == 2) return noun.dual;
+  if (rest == 10) {
+    final w = noun.gender == TafqitGender.feminine ? 'عشر' : 'عشرة';
+    return '$w ${noun.plural}';
+  }
   if (rest < 10) {
     final w = noun.gender == TafqitGender.feminine ? _onesF[rest] : _onesM[rest];
     return '$w ${noun.plural}';
@@ -248,9 +254,14 @@ String _onesGroupWithNoun(int g, TafqitNoun noun) {
     if (hundreds > 0) hundreds == 2 && rest == 0 ? 'مئتا' : _hundreds[hundreds],
   ];
   final restPart = _restWithNoun(rest, noun);
-  if (restPart.isNotEmpty) parts.add(restPart);
-  if (parts.isEmpty) return noun.nominative;
-  return parts.join(' و');
+  if (restPart.isNotEmpty) {
+    parts.add(restPart);
+  } else {
+    // مئة صافية — والمعدود يلحقها بمسافة الإضافة لا بواو العطف:
+    // «مئة ليرة سورية» و«مئتا ليرة سورية» و«تسعمئة ليرة سورية».
+    parts.add(noun.nominative);
+  }
+  return parts.join(restPart.isEmpty ? ' ' : ' و');
 }
 
 /// كلمات عدد صحيح بلسان معدود محدد — أسفل المحرك كله.
