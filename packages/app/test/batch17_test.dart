@@ -75,6 +75,8 @@ void main() {
     expect(await db.invoiceCoveredDocMinor(purchaseId), 0);
 
     // بيع نقدي 2×15,000 = 30,000 — المرحّل مسدّد بمجرد ترحيله (س-03)
+    // — والصنف يُخزن أولاً بشراء نقدي من الصندوق المبيت بالبذرة
+    // (منع السالب F-042 على المخزون والصندوق معاً)
     final date = await cycleDate(db);
     final boxId = await firstBoxId(db);
     final warehouseId = await firstWarehouseId(db);
@@ -87,6 +89,17 @@ void main() {
         purchasePriceMinor: 0,
         salePriceMinor: 15000,
         priceCurrencyId: 1);
+    final stockedPurchaseId = await db.createInvoiceDraft(InvoiceDraft(
+      kind: InvoiceKind.purchase,
+      dateText: date,
+      cashBoxId: boxId,
+      warehouseId: warehouseId,
+      lines: [
+        InvoiceLineDraft(
+            itemId: oilId, unitId: unitId, qtyBase: 5, unitPriceMinor: 10000),
+      ],
+    ));
+    await db.postInvoice(stockedPurchaseId);
     final cashSaleId = await db.createInvoiceDraft(InvoiceDraft(
       kind: InvoiceKind.sale,
       dateText: date,
@@ -165,6 +178,30 @@ void main() {
         purchasePriceMinor: 0,
         salePriceMinor: 15000,
         priceCurrencyId: 1);
+    // ضخ رأس المال كي يبيت الصندوق (منع السالب) ثم شراء نقدي يخزن
+    // الصنف قبل بيعه — عرف الدورة المعروفة بنمط seedKnownCycle
+    final capitalId = (await db.customSelect(
+      "SELECT id FROM accounts WHERE code = '311'",
+    ).getSingle()).data['id'] as int;
+    final capital = await db.createVoucherDraft(VoucherDraft(
+      kind: VoucherKind.receipt,
+      dateText: date,
+      directAccountId: capitalId,
+      cashBoxId: boxId,
+      amountDocMinor: 500000,
+    ));
+    await db.postVoucher(capital);
+    final stockedPurchaseId = await db.createInvoiceDraft(InvoiceDraft(
+      kind: InvoiceKind.purchase,
+      dateText: date,
+      cashBoxId: boxId,
+      warehouseId: warehouseId,
+      lines: [
+        InvoiceLineDraft(
+            itemId: oilId, unitId: unitId, qtyBase: 5, unitPriceMinor: 10000),
+      ],
+    ));
+    await db.postInvoice(stockedPurchaseId);
     final cashSaleId = await db.createInvoiceDraft(InvoiceDraft(
       kind: InvoiceKind.sale,
       dateText: date,
