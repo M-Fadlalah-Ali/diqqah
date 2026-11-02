@@ -80,15 +80,14 @@ void main() {
     final date = await cycleDate(db);
     final boxId = await firstBoxId(db);
     final warehouseId = await firstWarehouseId(db);
-    final unitId = await db.insertUnit(name: 'قطعة');
-    final oilId = await db.insertItem(
-        sku: 'Z-200',
-        name: 'زيت نقدي',
-        kind: 'good',
-        baseUnitId: unitId,
-        purchasePriceMinor: 0,
-        salePriceMinor: 15000,
-        priceCurrencyId: 1);
+    // الوحدة والصنف من البذرة ذاتها (فريد الاسم D-074 يمنع إدراج ثانية
+    // باسم «قطعة» بنفس القاعدة) — والبذرة تخزن 4 وحدات باقية من زيتها
+    final unitId = (await db.customSelect(
+      'SELECT id FROM units ORDER BY id LIMIT 1',
+    ).getSingle()).data['id'] as int;
+    final oilId = (await db.customSelect(
+      "SELECT id FROM items WHERE sku = 'Z-100'",
+    ).getSingle()).data['id'] as int;
     final stockedPurchaseId = await db.createInvoiceDraft(InvoiceDraft(
       kind: InvoiceKind.purchase,
       dateText: date,
