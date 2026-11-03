@@ -309,7 +309,7 @@ void main() {
       final fourthRow = await (db.select(db.moves)
             ..where((t) => t.id.equals(fourth)))
           .getSingle();
-      expect(fourthRow.number, '$year/000004',
+      expect(fourthRow.number, '${seqNum(year, 4)}',
           reason: 'الترحيل اللاحق يواصل التسلسل بلا فجوة ولا إعادة');
       final actions =
           (await db.select(db.events).get()).map((e) => e.action).toList();

@@ -970,7 +970,7 @@ void main() {
       ],
     ));
     await migrated.postInvoice(invId);
-    expect((await migrated.invoiceById(invId))!.number, '$year/000001');
+    expect((await migrated.invoiceById(invId))!.number, '${seqNum(year, 1)}');
     expect(
         await migrated.stockBalanceOf(
             itemId: oilId, warehouseId: warehouseId),

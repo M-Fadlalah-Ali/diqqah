@@ -58,6 +58,11 @@ void main() {
     expect(await db.counterWidth(), 5,
         reason: 'الضبط مخزون في app_meta ويقرؤه التوليد عند كل ترحيل');
 
+    // درس الجولة 164: الإشعار الأول ما يزال معروضًا (مدته 4 ثوان) ويغطي
+    // أسفل الشاشة فيبتلع نقرة الزر — انقضاؤه قبل النقرة الثانية
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 500));
+
     // الخارج عن النطاق (9) يُرفض برسالة عربية بلا كتابة
     await tester.enterText(
         find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),

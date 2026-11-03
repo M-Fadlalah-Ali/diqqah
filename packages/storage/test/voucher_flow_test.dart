@@ -825,7 +825,7 @@ void main() {
       amountDocMinor: 500000,
     ));
     await migrated.postVoucher(voucherId);
-    expect((await migrated.voucherById(voucherId))!.number, '$year/000001');
+    expect((await migrated.voucherById(voucherId))!.number, '${seqNum(year, 1)}');
     expect(await migrated.cashBoxBalanceOf(boxId), 500000);
   });
 }
