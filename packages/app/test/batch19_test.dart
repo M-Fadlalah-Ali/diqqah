@@ -41,9 +41,29 @@ void main() {
     expect(find.textContaining('معاينة: «فاتورة بيع 26000001»'),
         findsOneWidget);
 
-    // حفظ عرض 5 — مثال المالك نفسه — والمعاينة الحية قبله.
-    // درس الجولة 160 الموثق: الزر تحت مرمى النقر فالضربة تفوته صمتاً —
-    // إبرازه بensureVisible قبل كل نقرة.
+    // ═══ الحالة الأولى: الرفض — قبل وجود أي إشعار في الحياة ═══
+    // درس الجولتين 163/164 الموثق: الإشعار عائده 4 ثوان ويغطي أسفل
+    // الشاشة فيبتلع نقرات ما بعده (سلسلة Overlay/AbsorbPointer في نتيجة
+    // الاصطدام بسجل الجولة 164) — فالرفض يُختبر أولًا والإبراز قبل كل
+    // نقرة عرف الجولة 160.
+    await tester.enterText(
+        find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),
+        '9');
+    await tester.pump();
+    await tester.ensureVisible(find.text('حفظ عدد خانات العدّاد'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('حفظ عدد خانات العدّاد'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('بين 3 و 8'), findsOneWidget);
+    expect(await db.counterWidth(), 6,
+        reason: 'الرفض بلا كتابة — الافتراضي باقٍ');
+
+    // ═══ الحالة الثانية: حفظ 5 — بعد انقضاء إشعار الرفض حتماً ═══
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('بين 3 و 8'), findsNothing,
+        reason: 'حارس: إشعار الرفض انقضى فلا يغطي الزر');
     await tester.enterText(
         find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),
         '5');
@@ -51,30 +71,11 @@ void main() {
     expect(find.textContaining('فاتورة بيع 2600001'), findsOneWidget,
         reason: 'المعاينة الحية بمثال المالك «2600001»');
     await tester.ensureVisible(find.text('حفظ عدد خانات العدّاد'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('حفظ عدد خانات العدّاد'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(await db.counterWidth(), 5,
         reason: 'الضبط مخزون في app_meta ويقرؤه التوليد عند كل ترحيل');
-
-    // درس الجولة 164: الإشعار الأول ما يزال معروضًا (مدته 4 ثوان) ويغطي
-    // أسفل الشاشة فيبتلع نقرة الزر — انقضاؤه قبل النقرة الثانية
-    await tester.pump(const Duration(seconds: 4));
-    await tester.pump(const Duration(milliseconds: 500));
-
-    // الخارج عن النطاق (9) يُرفض برسالة عربية بلا كتابة
-    await tester.enterText(
-        find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),
-        '9');
-    await tester.pump();
-    await tester.ensureVisible(find.text('حفظ عدد خانات العدّاد'));
-    await tester.pump();
-    await tester.tap(find.text('حفظ عدد خانات العدّاد'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('بين 3 و 8'), findsOneWidget);
-    expect(await db.counterWidth(), 5,
-        reason: 'الرفض بلا مساس بالقيمة المحفوظة');
   });
 }
