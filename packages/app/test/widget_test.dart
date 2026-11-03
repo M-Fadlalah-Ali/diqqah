@@ -170,6 +170,11 @@ void main() {
     await tester.pumpAndSettle();
 
     // زر البيع يفتح النموذج بنوعه المثبت — لا مبدّل نوع بالنموذج (س-163)
+    // درس جولة CI (فشل الدفعة 18): العودة من الأرشيف أعادت القائمة
+    // بموضع تمريرها القديم فصار زر البيع فوق مرمى النقر (y سالب) —
+    // إظهار الهدف بالعهد قبل النقر (نمط سحبة الاختبار).
+    await tester.ensureVisible(find.text('فاتورة بيع'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('فاتورة بيع'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

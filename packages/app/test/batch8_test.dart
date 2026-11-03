@@ -171,6 +171,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
+    // درس جولة CI (فشل الدفعة 18): حقل «الصنف» عند حافة الساحة السفلى
+    // بنموذج البيع فلا يلتقط النقر (y=568 من 600) — سحبة الاختبار قبل
+    // الفتح تعيد الحقل مرمى النقر (نمط _scrollTo الموثق أعلاه).
+    await tester.drag(find.byType(ListView).first, const Offset(0, -200));
+    await tester.pump();
     await tester.tap(find.text('الصنف').first);
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('زيت محلي').last);
