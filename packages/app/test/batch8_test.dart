@@ -163,15 +163,21 @@ void main() {
         reason: 'سعر الشراء عُبّئ مفصولاً في حقل سعر الوحدة');
 
     // تبديل الجهة إلى بيع يعبّئ البند المعبأ آلياً بسعر البيع (س-108)
-    await tester.drag(find.byType(ListView).first, const Offset(0, 800));
+    // — محوّل س-163/D-161 (دفعة 18): الجهة لا تتبدل بالنموذج بعد العزل
+    // فالتحويل نموذجَ ثانٍ بلسان زر البيع المعزول (عرف تحويل دفعة 17).
+    await tester.pumpWidget(MaterialApp(
+        home: InvoiceEditScreen(
+            db: db, initialKind: InvoiceKind.sale)));
     await tester.pump();
-    await tester.tap(find.textContaining('فاتورة شراء').first);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('الصنف').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('فاتورة بيع').last);
+    await tester.tap(find.textContaining('زيت محلي').last);
     await tester.pump(const Duration(milliseconds: 100));
     await _scrollTo(tester, 'سعر الوحدة بوحدة صغرى');
     expect(find.text('40,000'), findsWidgets,
-        reason: 'سعر البيع عُبّئ آلياً بعد تبديل الجهة');
+        reason: 'سعر البيع عُبّئ آلياً بنموذج زر البيع المعزول');
   });
 
   testWidgets('س-106 (D-106): الرصيد الآن للصندوق المختار ظاهر قبل الحفظ',
@@ -204,23 +210,28 @@ void main() {
     expect(find.text(todayIsoDate()), findsOneWidget);
   });
 
-  testWidgets('س-113: تبديل جهة الفاتورة يصفّر الطرف كي لا يبقى «العميل» '
-      'بلون التحديد في قائمة الموردين (إصلاح علة المالك)', (tester) async {
+  testWidgets('س-113 (منقولة لسان العزل س-163/D-161 دفعة 18): النوع مثبت من زر الدخول — '
+      'لا مبدّل نوع بالنموذج فلا تبديل جهة أصلاً، واختيار العميل بالجهة '
+      'الثابتة يعمل بلسانها', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
 
     await tester.pumpWidget(MaterialApp(
-        home: InvoiceEditScreen(db: db)));
+        home: InvoiceEditScreen(
+            db: db, initialKind: InvoiceKind.sale)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // بيع ← آجل ← اختيار العميل
-    await tester.tap(find.textContaining('فاتورة شراء').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('فاتورة بيع').last);
-    await tester.pump(const Duration(milliseconds: 100));
+    // عزل الإدخال: لا مبدّل نوع بالنموذج حصراً — فعلّة س-113 (بقاء
+    // «العميل» بلون التحديد بعد تبديل الجهة) زالت بزوال التبديل ذاته
+    expect(find.text('نوع الفاتورة'), findsNothing,
+        reason: 'النوع من زر القائمة الرئيسية لا بانتقاء بالنموذج');
+    expect(find.text('فاتورة بيع'), findsWidgets,
+        reason: 'لافتة النوع المثبت بلسان زر الدخول');
+
+    // بيع ← آجل ← اختيار العميل — بالجهة الثابتة من الزر
     await tester.tap(find.text('نقدي'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('آجل').last);
@@ -230,14 +241,6 @@ void main() {
     await tester.tap(find.textContaining('عميل الأمل').last);
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.textContaining('عميل الأمل'), findsWidgets);
-
-    // العودة إلى شراء — العميل يزول ولا يبقى معروضاً بلون التحديد
-    await tester.tap(find.textContaining('فاتورة بيع').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('فاتورة شراء').last);
-    await tester.pump(const Duration(milliseconds: 100));
-    expect(find.textContaining('عميل الأمل'), findsNothing,
-        reason: 'الطرف صُفّر عند تبديل الجهة — لا قيمة قديمة باقية');
   });
 
   testWidgets('س-105 (D-106): رصيد الطرف الجاري في نموذج السند — بالقائمة '

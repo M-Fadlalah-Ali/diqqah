@@ -29,6 +29,23 @@ Future<Uint8List?> loadItemImageBytes(String? relativePath) async {
   }
 }
 
+/// لون كل نوع بالأزرار المعزولة ولافتة النموذج — عرف المعاينة المعتمدة
+/// (س-163/D-161): بيع أخضر وشراء برتقالي ومردود بيع أزرق ومردود شراء وردي.
+Color invoiceKindColor(InvoiceKind kind) => switch (kind) {
+      InvoiceKind.sale => Colors.green,
+      InvoiceKind.purchase => Colors.orange,
+      InvoiceKind.saleReturn => Colors.indigo,
+      InvoiceKind.purchaseReturn => Colors.pink,
+    };
+
+/// أيقونة كل نوع — البيع ورقته والشراء عربة والمردودان سهم الرجوع بجهتيهما.
+IconData invoiceKindIcon(InvoiceKind kind) => switch (kind) {
+      InvoiceKind.sale => Icons.receipt_outlined,
+      InvoiceKind.purchase => Icons.shopping_cart_outlined,
+      InvoiceKind.saleReturn => Icons.redo_outlined,
+      InvoiceKind.purchaseReturn => Icons.undo_outlined,
+    };
+
 /// بناء قسيمة الفاتورة — نقطة واحدة لكل مسارات إخراج الفاتورة (س-133/
 /// D-127، دفعة 11): زر التفاصيل النصي وزر القائمة السريع والمشاركة كلها
 /// تستدعيها فلا يختلف مطبوع عن مطبوع. البيانات تُجلب هنا حصراً من
@@ -260,11 +277,67 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   }
 
   void _openNew() async {
+    // عزل الإدخال من الأرشيف أيضاً (س-163/D-161): أربعة أزرار تُحدد النوع
+    // بالضغط لا قائمة منسدلة — نمط القائمة الرئيسية ذاته، واختيار النوع
+    // هنا يفتح النموذج بنوعه المثبت.
+    final kind = await showModalBottomSheet<InvoiceKind>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('فاتورة جديدة — اختر النوع بالضغط',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Row(children: [
+                _sheetKindButton(sheetContext, InvoiceKind.sale),
+                const SizedBox(width: 10),
+                _sheetKindButton(sheetContext, InvoiceKind.purchase),
+              ]),
+              const SizedBox(height: 10),
+              Row(children: [
+                _sheetKindButton(sheetContext, InvoiceKind.saleReturn),
+                const SizedBox(width: 10),
+                _sheetKindButton(sheetContext, InvoiceKind.purchaseReturn),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (kind == null || !mounted) return;
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
-          builder: (_) => InvoiceEditScreen(db: widget.db)),
+          builder: (_) => InvoiceEditScreen(db: widget.db, initialKind: kind)),
     );
     if (created == true) _reload();
+  }
+
+  /// زر نوع بقائمة الأرشيف السفلية — بلون نوعه وأيقونته عرف الرئيسية.
+  Widget _sheetKindButton(BuildContext sheetContext, InvoiceKind kind) {
+    final color = invoiceKindColor(kind);
+    return Expanded(
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: color.shade50,
+          side: BorderSide(color: color.shade300),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+        onPressed: () => Navigator.of(sheetContext).pop(kind),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(invoiceKindIcon(kind), color: color.shade700),
+            const SizedBox(height: 6),
+            Text(kind.label,
+                style:
+                    TextStyle(color: color.shade700, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
   }
 
   void _openDetail(int invoiceId) {
@@ -428,9 +501,6 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 class _LineUi {
   int? itemId;
 
-  /// هل عُبّئ السعر آلياً من بطاقة الصنف (س-108) — للمتابعة بعد
-  /// تبديل جهة الفاتورة بالتعبئة الصحيحة لا كسر ما كتبه المستخدم يدوياً.
-  bool priceAutoFilled = false;
   final TextEditingController qty = TextEditingController();
   final TextEditingController price = TextEditingController();
   final TextEditingController discount = TextEditingController();
@@ -457,14 +527,23 @@ class _LineUi {
 class InvoiceEditScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
-  const InvoiceEditScreen({super.key, required this.db});
+  /// عزل الإدخال (س-163/D-161): النوع يُحدد بزر القائمة الرئيسية ولا
+  /// مبدّل نوع بالنموذج — والافتراضي شراء عرف النموذج الموحد قبل الأزرار
+  /// (فتح برمجي مباشر كالاختبارات والأرشيف يمرره صريحاً).
+  final InvoiceKind initialKind;
+
+  const InvoiceEditScreen({
+    super.key,
+    required this.db,
+    this.initialKind = InvoiceKind.purchase,
+  });
 
   @override
   State<InvoiceEditScreen> createState() => _InvoiceEditScreenState();
 }
 
 class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
-  InvoiceKind _kind = InvoiceKind.purchase;
+  late InvoiceKind _kind = widget.initialKind;
 
   /// النقدية استدلال من الصندوق — هذا المبدّل يحدد أي الحقلين يظهر
   /// (صندوق أو طرف) ولا يغذّي المسودة بنوع مستقل أبداً.
@@ -633,25 +712,15 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 
   /// السعر الافتراضي من بطاقة الصنف بحسب جهة الفاتورة (س-108/D-107):
   /// بيع ومردوده ← سعر البيع، شراء ومردوده ← سعر الشراء — و«بلا سعر
-  /// بعد» (الصفر س6) يبقى الحقل فارغاً لا صفراً. المعبأ آلياً وُسم
-  /// فتُعاد التعبئة الصحيحة عند تبديل جهة الفاتورة لا كسر ما كُتب يدوياً.
+  /// بعد» (الصفر س6) يبقى الحقل فارغاً لا صفراً. وبعد عزل الإدخال
+  /// (س-163/D-161) النوع ثابت من زر الدخول فلا إعادة تعبئة عند تبديل
+  /// جهة — لا تبديل أصلاً — فأُزيل وسم «المعبأ آلياً» وعيدُه معه.
   void _fillDefaultPrice(_LineUi line) {
     final item = _itemOf(line.itemId);
     if (item == null) return;
     final minor =
         _kind.isSalesSide ? item.salePriceMinor : item.purchasePriceMinor;
     line.price.text = minor > 0 ? groupDigits(minor) : '';
-    line.priceAutoFilled = minor > 0;
-  }
-
-  /// إعادة تعبئة أسعار البنود المعباة آلياً بعد تبديل جهة الفاتورة —
-  /// فسعر الجهة الجديدة هو المتوقع، وما كتبه المستخدم يدوياً لا يُلمس.
-  void _refillAutoPrices() {
-    for (final l in _lines) {
-      if (l.itemId != null && l.priceAutoFilled) {
-        _fillDefaultPrice(l);
-      }
-    }
   }
 
   /// إجمالي السطر الخام — الكمية × السعر − خصم السطر (س-120/D-115)
@@ -873,26 +942,24 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       ),
                     ),
                   ),
-                DropdownButtonFormField<String>(
-                  initialValue: _kind.storageValue,
-                  decoration:
-                      const InputDecoration(labelText: 'نوع الفاتورة'),
-                  items: [
-                    for (final k in InvoiceKind.values)
-                      DropdownMenuItem<String>(
-                          value: k.storageValue, child: Text(k.label)),
-                  ],
-                  onChanged: (value) => setState(() {
-                    final next = InvoiceKind.values
-                        .firstWhere((k) => k.storageValue == value);
-                    if (next == _kind) return;
-                    _kind = next;
-                    // علة س-113 (إصلاح، دفعة 8): تبديل الجهة يصفّر الطرف كي
-                    // لا يبقى «العميل» معروضاً بلون التحديد في قائمة
-                    // الموردين — والصندوق باقٍ بلا مساس.
-                    _partyId = null;
-                    _refillAutoPrices();
-                  }),
+                // عزل الإدخال (س-163/D-161): لا مبدّل نوع بالنموذج حصراً —
+                // النوع من زر القائمة الرئيسية فلا انزلاق جهة بعد كتابة
+                // الأسطر، وعلة س-113 (الطرف القديم بعد تبديل الجهة) زالت
+                // بزوال التبديل ذاته، والتعبئة الآلية والترحيل تلتزم نوع
+                // الدخول من أول سطر.
+                Card(
+                  color: invoiceKindColor(_kind).shade50,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    leading: Icon(invoiceKindIcon(_kind),
+                        color: invoiceKindColor(_kind).shade700),
+                    title: Text(_kind.label,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: invoiceKindColor(_kind).shade700)),
+                    subtitle: const Text(
+                        'النوع يُحدد من زر القائمة الرئيسية'),
+                  ),
                 ),
                 Row(
                   children: [

@@ -48,7 +48,9 @@ void main() {
     expect(find.text('المالك'), findsNothing); // لا معلومات المستخدم على الشاشة
     expect(find.text('الأطراف'), findsOneWidget);
     expect(find.text('المزامنة'), findsOneWidget);
-    expect(find.byType(ListTile), findsNWidgets(16)); // 15 وحدة + الإعدادات
+    // دفعة (18) — س-163/D-161: الفواتير خرجت من القائمة إلى بطاقتها
+    // بأزرار الأنواع فصارت 15 وحدة بقائمة Tile (كانت 16)
+    expect(find.byType(ListTile), findsNWidgets(15));
 
     // F-015: device_id وُلد خلال التهيئة وأصبح في القاعدة
     expect(await db.deviceId(), hasLength(36));
@@ -80,16 +82,17 @@ void main() {
     await tester.pumpAndSettle();
 
     final tiles = tester.widgetList<ListTile>(find.byType(ListTile));
-    expect(tiles.length, 16); // 15 وحدة + الإعدادات
+    expect(tiles.length, 15); // 14 وحدة + الإعدادات — الفواتير بطاقة أزرار (س-163)
     final locked = tiles.where((t) => t.enabled != true).length;
     expect(locked, 7,
-        reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1 1..6-ب) والفواتير '
+        reason: 'الأطراف والأصناف والتقارير اليومية (دفعات م1 1..6-ب) '
             'والصناديق والصلاحيات (دفعة 6-ج) والسندات (دفعة الإغلاق س37) '
-            'ومتابعة التسليم (دفعة 12/D-133) فُتحت — والبقية (7 وحدات) معطلة');
+            'ومتابعة التسليم (دفعة 12/D-133) فُتحت — والبقية (7 وحدات) معطلة '
+            '— والفواتير بطاقة أزرار خارج القائمة من دفعة (18) س-163');
     final open = tiles.where((t) => t.enabled == true).length;
-    expect(open, 9,
-        reason: 'الأطراف والأصناف والتقارير والفواتير والسندات ومتابعة التسليم '
-            'والصناديق والصلاحيات والإعدادات');
+    expect(open, 8,
+        reason: 'الأطراف والأصناف والتقارير والسندات ومتابعة التسليم '
+            'والصناديق والصلاحيات والإعدادات — والفواتير بطاقتها أعلاه');
 
     // الأطراف فوق الخط الافتراضي — تمرير ثم فتح ثم رجوع
     await tester.scrollUntilVisible(
@@ -142,13 +145,19 @@ void main() {
     await tester.pumpWidget(DiqqahApp(db: db));
     await tester.pumpAndSettle();
 
-    // الفواتير — فراغها رسالة إرشاد لا صمت (F-162 روحاً)
+    // الفواتير — بطاقة الأنواع الأربعة (س-163/D-161 دفعة 18) لا بنداً
+    // بالقائمة: الأزرار الأربعة ظاهرة وزر السجل يفتح الأرشيف وفراغه
+    // رسالة إرشاد لا صمت (F-162 روحاً) وزر البيع يفتح النموذج بنوعه المثبت
     await tester.scrollUntilVisible(
-      find.text('الفواتير'),
+      find.text('سجل الفواتير'),
       200,
       scrollable: find.byType(Scrollable),
     );
-    await tester.tap(find.text('الفواتير'));
+    expect(find.text('فاتورة بيع'), findsOneWidget);
+    expect(find.text('فاتورة شراء'), findsOneWidget);
+    expect(find.text('مردود بيع'), findsOneWidget);
+    expect(find.text('مردود شراء'), findsOneWidget);
+    await tester.tap(find.text('سجل الفواتير'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -160,7 +169,16 @@ void main() {
     await tester.tap(find.backButton());
     await tester.pumpAndSettle();
 
-    // الصناديق — القائمة تعرض الصندوق المبذر بحسابه
+    // زر البيع يفتح النموذج بنوعه المثبت — لا مبدّل نوع بالنموذج (س-163)
+    await tester.tap(find.text('فاتورة بيع'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(InvoiceEditScreen), findsOneWidget);
+    expect(find.text('نوع الفاتورة'), findsNothing);
+    expect(find.text('اختر النوع بالضغط — لا قائمة انتقاء'), findsNothing);
+    await tester.tap(find.backButton());
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('الصناديق'),
       200,

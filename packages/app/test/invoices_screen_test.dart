@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/invoices_screen.dart';
 
@@ -107,18 +108,15 @@ void main() {
     await seedKnownCycle(db);
 
     await tester.pumpWidget(MaterialApp(
-        home: InvoiceEditScreen(db: db)));
+        home: InvoiceEditScreen(
+            db: db, initialKind: InvoiceKind.sale)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // النوع: من فاتورة شراء إلى فاتورة بيع — والقائمة المنبثقة بعناصرها
-    await tester.tap(find.text('فاتورة شراء'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.tap(find.text('فاتورة بيع').last);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
+    // س-163/D-161 (دفعة 18): النوع من زر القائمة الرئيسية حصراً —
+    // لا مبدّل نوع بالنموذج فتحول الاختبار من لسان الانتقاء إلى لسان
+    // زر الدخول المعزول (عرف تحويل دفعة 17 لاختبارَي التجميد).
 
     // التاريخ من فترات الدورة
     await tester.enterText(
