@@ -41,13 +41,17 @@ void main() {
     expect(find.textContaining('معاينة: «فاتورة بيع 26000001»'),
         findsOneWidget);
 
-    // حفظ عرض 5 — مثال المالك نفسه — والمعاينة الحية قبله
+    // حفظ عرض 5 — مثال المالك نفسه — والمعاينة الحية قبله.
+    // درس الجولة 160 الموثق: الزر تحت مرمى النقر فالضربة تفوته صمتاً —
+    // إبرازه بensureVisible قبل كل نقرة.
     await tester.enterText(
         find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),
         '5');
     await tester.pump();
     expect(find.textContaining('فاتورة بيع 2600001'), findsOneWidget,
         reason: 'المعاينة الحية بمثال المالك «2600001»');
+    await tester.ensureVisible(find.text('حفظ عدد خانات العدّاد'));
+    await tester.pump();
     await tester.tap(find.text('حفظ عدد خانات العدّاد'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -58,6 +62,8 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'عدد خانات العدّاد بعد السنة (3–8)'),
         '9');
+    await tester.pump();
+    await tester.ensureVisible(find.text('حفظ عدد خانات العدّاد'));
     await tester.pump();
     await tester.tap(find.text('حفظ عدد خانات العدّاد'));
     await tester.pump();

@@ -383,9 +383,10 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // زر التصفح بجوار حقل المسار (suffixIcon) — لا قنوات منصة في وجوده
-    expect(find.byTooltip('اختيار ملف النسخة'), findsOneWidget);
-
+    // سيل النسخ أولًا (زرها أعلى الشاشة) — ودرس دفعة 19: بطاقة الترقيم
+    // (D-169) أزاحت بطاقة الاستعادة تحت الطي والقابل عنصرُ شجرةٍ غير
+    // مبني فلا يجده الباحث — سحبٌ لإظهارها قبل فحص زر التصفح في آخر
+    // الاختبار.
     // زر الإخراج يظهر في حوار نجاح النسخة — وجوده لا يستدعي أي قناة منصة
     // D-060: النسخة مشفرة بمفتاح البرنامج افتراضياً — بلا أي حقل كلمة
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
@@ -406,6 +407,13 @@ void main() {
     expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
     expect(find.text('إخراج النسخة'), findsOneWidget);
     expect(find.text('حسناً'), findsOneWidget);
+    // إغلاق الحوار ثم سحب لإظهار بطاقة الاستعادة (درس دفعة 19 أعلاه)
+    await tester.tap(find.text('حسناً'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    // زر التصفح بجوار حقل المسار (suffixIcon) — لا قنوات منصة في وجوده
+    expect(find.byTooltip('اختيار ملف النسخة'), findsOneWidget);
   });
 
   testWidgets('F-013: الاستعادة بتأكيد مزدوج — والإلغاء في أي تأكيد لم يحدث شيئاً',
@@ -435,6 +443,10 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // درس دفعة 19: بطاقة الترقيم أزاحت حقل المسار تحت الطي فيُبنى
+    // المتأخر حصراً — سحبة إظهار قبل الكتابة (وفوق سحبة الزر القائمة)
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'مسار ملف النسخة الاحتياطية'),
       p.join(tempDir.path, 'غير-موجود.db'),

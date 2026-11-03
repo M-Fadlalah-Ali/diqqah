@@ -132,7 +132,16 @@ void main() {
     );
     expect(a5, isNotEmpty);
     expect(a4, isNotEmpty);
-    expect(a4.length, isNot(a5.length),
+    // درس الجولة 163 (دفعة 19): أطوال تيارات الضغط قد تتساوى مصادفةً
+    // بمستند سطرٍ واحد وعنوان رقمي أقصر — والحكم الصادم بمقاس الصفحة
+    // النصي في MediaBox (غير مضغوط بالملف) فلا اعتماد لحظة طول مضغوطة.
+    String mediaBoxOf(List<int> pdf) {
+      final t = String.fromCharCodes(pdf);
+      final i = t.indexOf('/MediaBox');
+      return t.substring(i, t.indexOf(']', i) + 1);
+    }
+
+    expect(mediaBoxOf(a4) == mediaBoxOf(a5), isFalse,
         reason: 'مقاسان مختلفان تخطيطان مختلفان بنسب كلٍّ منهما');
     final invoice = resolvePageFormat(docKind: 'invoice');
     expect(invoice.width, closeTo(PdfPageFormat.a5.width, 0.5));
