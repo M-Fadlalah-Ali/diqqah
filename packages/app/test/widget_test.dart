@@ -181,7 +181,15 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(InvoiceEditScreen), findsOneWidget);
     expect(find.text('نوع الفاتورة'), findsNothing);
-    expect(find.text('اختر النوع بالضغط — لا قائمة انتقاء'), findsNothing);
+    // درس جولة CI (فشل الدفعة 18): لسان البطاقة بالشاشة التحتية ما يزال
+    // مبنياً لحظة الفحص (لمعان الانتقال) — والنطاق شاشة النموذج ذاتها
+    // فهو الحارس الحقيقي: النموذج لا يعرض لسان البطاقة أصلاً.
+    expect(
+        find.descendant(
+            of: find.byType(InvoiceEditScreen),
+            matching:
+                find.text('اختر النوع بالضغط — لا قائمة انتقاء')),
+        findsNothing);
     await tester.tap(find.backButton());
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(

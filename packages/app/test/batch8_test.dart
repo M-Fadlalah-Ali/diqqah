@@ -165,17 +165,18 @@ void main() {
     // تبديل الجهة إلى بيع يعبّئ البند المعبأ آلياً بسعر البيع (س-108)
     // — محوّل س-163/D-161 (دفعة 18): الجهة لا تتبدل بالنموذج بعد العزل
     // فالتحويل نموذجَ ثانٍ بلسان زر البيع المعزول (عرف تحويل دفعة 17).
+    // درس جولة CI (فشل الدفعة 18): pumpWidget بشاشة من النوع ذاته يعيد
+    // استخدام الحالة ولا يشغّل initState — و`_kind = widget.initialKind`
+    // يُقرأ عند الولادة حصراً فبقي النموذج شراءً وسعر 25,000 — والمفتاح
+    // الفريد يجبل حداً جديداً بنوعه المثبت بيعاً.
     await tester.pumpWidget(MaterialApp(
         home: InvoiceEditScreen(
-            db: db, initialKind: InvoiceKind.sale)));
+            key: const ValueKey('س-108-نموذج-البيع'),
+            db: db,
+            initialKind: InvoiceKind.sale)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    // درس جولة CI (فشل الدفعة 18): حقل «الصنف» عند حافة الساحة السفلى
-    // بنموذج البيع فلا يلتقط النقر (y=568 من 600) — سحبة الاختبار قبل
-    // الفتح تعيد الحقل مرمى النقر (نمط _scrollTo الموثق أعلاه).
-    await tester.drag(find.byType(ListView).first, const Offset(0, -200));
-    await tester.pump();
     await tester.tap(find.text('الصنف').first);
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('زيت محلي').last);
