@@ -15,6 +15,29 @@
 ///
 /// السيناريوهات المعتمدة من المالك بلفظه «معتمدة» (س17): س-29..س-35 (06 §1-ب).
 
+// ── نزاهة الإدخال الدنيا للنصوص الحرة (D-170 — س56 بكلمة المالك) ────
+
+/// تجريد علامات العرض غير المرئية من الاسم الحر (D-170): العرض الصفري
+/// (ZWSP/ZWNJ/ZWJ) وعلامات الاتجاه (LRM/RLM وأقرانها BOM) تتسرب لصقاً
+/// من النسخ الخارجي (واتساب/الويب) فتخفي تكرار الأسماء وتكسر البحث
+/// خفيةً — وهي علامات لا يراها المستخدم أصلاً فالمخزَّن يطابق المرئي
+/// المفهوم (نقيض السحر الخفي لا سحره). ثم تُقلَّم الأطراف. مشتركة بين
+/// أسماء الأطراف والأصناف والوحدات (D-170).
+String sanitizeFreeName(String raw) => raw
+    .replaceAll(RegExp('[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]'), '')
+    .trim();
+
+/// محارف التحكم (C0/C1 وحذف) في الاسم الحر مرفوضة لا تُجرد (D-170):
+/// لا تأتي إلا بخطأ إدخال أو إبراق خفي — والرفض برسالة عربية أوضح من
+/// الصمت الذي يخفي التلف.
+bool freeNameHasControlChars(String name) =>
+    RegExp(r'[\x00-\x1F\x7F\u0080-\u009F]').hasMatch(name);
+
+/// اسم طرف يحمل محارف تحكم خفية (D-170) — مرفوض.
+class PartyNameControlChars extends PartyValidationError {
+  const PartyNameControlChars();
+}
+
 /// نزع الأصفار الزائدة (D-063): مفتاح التفرد الرقمي.
 ///
 /// «0053» و«53» يعودان بالمفتاح نفسه؛ الفراغات الطرفية تُقلَّم أولاً؛
@@ -323,10 +346,13 @@ List<PartyValidationError> validatePartyDraft(
   int? excludePartyId,
 }) {
   final errors = <PartyValidationError>[];
-  final name = draft.name.trim();
+  final name = sanitizeFreeName(draft.name);
   final number = draft.number.trim();
 
   if (name.isEmpty) errors.add(const PartyNameRequired());
+  if (name.isNotEmpty && freeNameHasControlChars(name)) {
+    errors.add(const PartyNameControlChars());
+  }
   if (number.isEmpty) errors.add(const PartyNumberRequired());
   if (draft.currencyId <= 0) errors.add(const PartyCurrencyMissing());
   final credit = draft.creditLimitBaseMinor;

@@ -19,8 +19,8 @@ void main() {
       expect(sequenceKindLabels['cash_adjustment'], 'تسوية صندوق');
     });
 
-    test('رقم مستند بالصيغة الموحدة «سند قبض 2026/000001»', () {
-      expect(formatDocumentNumber(2026, 1), '2026/000001');
+    test('رقم مستند بالصيغة الموحدة «سند قبض 26000001» (D-169)', () {
+      expect(formatDocumentNumber(2026, 1), '26000001');
     });
   });
 

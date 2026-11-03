@@ -42,8 +42,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // ضخ رأس المال «سند قبض 2026/000001» على 311 بغير طرف (س-13)
-    expect(find.textContaining('سند قبض 2026/000001'), findsOneWidget);
+    // ضخ رأس المال «سند قبض 26000001» على 311 بغير طرف (س-13)
+    expect(find.textContaining('سند قبض 26000001'), findsOneWidget);
     expect(find.textContaining('حساب 311'), findsOneWidget);
 
     // تبويب التسويات — عجز 5,000 بسبب «فرق جرد يومي» (س-17)
@@ -51,7 +51,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.textContaining('تسوية صندوق 2026/000001'), findsOneWidget);
+    expect(find.textContaining('تسوية صندوق 26000001'), findsOneWidget);
     expect(find.textContaining('فرق جرد يومي'), findsOneWidget);
     expect(find.textContaining('عجز'), findsOneWidget);
   });

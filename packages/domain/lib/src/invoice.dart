@@ -129,10 +129,6 @@ int wacExitValue(int totalValue, int onHand, int qtyOut) {
   return roundHalfAwayFromZeroRatio(totalValue * qtyOut, onHand);
 }
 
-/// نص رقم مستند بصيغة السنة المبطنة (07 §1.9 نفسها): «2026/000001».
-String formatDocumentNumber(int year, int number) =>
-    '$year/${number.toString().padLeft(6, '0')}';
-
 /// نص نسبة مخزنة ×100 للعرض (س-117/D-112): 350 → «3.5» و1000 → «10»
 /// و275 → «2.75» — بلا أصفار زائدة، والفاصلة نقطة عشرية. السالب
 /// سليم تلقائياً (Dart: العلامة مع القسمة الصحيحة والباقي غير السالب).

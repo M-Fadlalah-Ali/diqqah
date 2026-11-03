@@ -7,6 +7,10 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:drift/drift.dart' show Variable;
 
+/// الصيغة الجديدة D-169 (سنة رقمين + عدّاد مبطن) — مشتقة من سنة البذرة.
+String seqNum(int year, int n, [int w = 6]) =>
+    '${(year % 100).toString().padLeft(2, '0')}${n.toString().padLeft(w, '0')}';
+
 /// أدوات الدفعة — بنمط invoice_flow_test: معرفات بالبحث بالكود لا
 /// بالثبوت الأعمى، وسنة ديناميكية من البذر.
 Future<int> accountIdByCode(DiqqahDatabase db, String code) async {
@@ -299,9 +303,9 @@ void main() {
         allocations: [VoucherAllocationDraft(invoiceId: saleId, appliedDocMinor: 100000)]);
     final voucher = (await db.voucherById(voucherId))!;
     expect(voucher.state, 'posted');
-    expect(voucher.number, '${f.year}/000002',
+    expect(voucher.number, '${seqNum(f.year, 2)}',
         reason: 'سند القبض الثاني — ضخ رأس المال الأول');
-    expect(voucherDisplayLabel(voucher), 'سند قبض ${f.year}/000002');
+    expect(voucherDisplayLabel(voucher), 'سند قبض ${seqNum(f.year, 2)}');
     expect(voucher.moveId, isNotNull);
 
     // القيد: 1111 مدين 100,000 / 112 دائن 100,000 بحمولة الطرف ولقطة
@@ -367,7 +371,7 @@ void main() {
             ]),
         throwsA(isA<VoucherValidationException>()));
     final secondVoucher = (await db.voucherById(second))!;
-    expect(secondVoucher.number, '${f.year}/000003');
+    expect(secondVoucher.number, '${seqNum(f.year, 3)}');
   });
 
   test('س-65 سند صرف لمورد: قيد 211/1111 وحركة خروج وذمة تصفو', () async {
@@ -389,7 +393,7 @@ void main() {
     final voucher = (await db.voucherById(voucherId))!;
     // D-105 (دفعة 8 س39): «سند دفع» في أرقام المستندات المعروضة —
     // والنص الحرفي تحديثًا بقرار المصطلح (درس س35: الحكم بالنص الحرفي).
-    expect(voucherDisplayLabel(voucher), 'سند دفع ${f.year}/000001');
+    expect(voucherDisplayLabel(voucher), 'سند دفع ${seqNum(f.year, 1)}');
     final lines = await moveLinesOf(db, voucher.moveId!);
     expect(lines[0]['account_id'], await accountIdByCode(db, '211'));
     expect(lines[0]['debit_minor'], 250000);
@@ -421,7 +425,7 @@ void main() {
 
     final capitalId = await f.capitalInjection(500000);
     final capital = (await db.voucherById(capitalId))!;
-    expect(voucherDisplayLabel(capital), 'سند قبض ${f.year}/000001');
+    expect(voucherDisplayLabel(capital), 'سند قبض ${seqNum(f.year, 1)}');
     final capitalLines = await moveLinesOf(db, capital.moveId!);
     expect(capitalLines[0]['account_id'], boxAcc);
     expect(capitalLines[0]['debit_minor'], 500000);
@@ -568,7 +572,7 @@ void main() {
       variables: [Variable.withInt(transferId)],
     ).getSingle();
     expect(transferRows.data['state'], 'posted');
-    expect(transferRows.data['number'], '${f.year}/000001');
+    expect(transferRows.data['number'], '${seqNum(f.year, 1)}');
     final lines = await moveLinesOf(db, transferRows.data['move_id'] as int);
     expect(lines[0]['account_id'], await accountIdByCode(db, '1112'),
         reason: 'صندوق الفرع أُنشئ أولاً فيأخذ 1112 والدولاري يليه 1113');
@@ -654,7 +658,7 @@ void main() {
       variables: [Variable.withInt(adjId)],
     ).getSingle();
     expect(adj.data['state'], 'posted');
-    expect(adj.data['number'], '${f.year}/000001');
+    expect(adj.data['number'], '${seqNum(f.year, 1)}');
     final lines = await moveLinesOf(db, adj.data['move_id'] as int);
     expect(lines[0]['account_id'], acc57);
     expect(lines[0]['debit_minor'], 5000);
@@ -757,7 +761,7 @@ void main() {
     // والسند التالي يأخذ الرقم التالي بلا فجوة ولا إعادة استخدام (07 §1.9):
     // المرحّلان 000001 و000002 ثم المسودة حُذفت بلا رقم فالتالي 000003
     final nextId = await f.receiptFromCustomer(amount: 7000);
-    expect((await db.voucherById(nextId))!.number, '${f.year}/000003');
+    expect((await db.voucherById(nextId))!.number, '${seqNum(f.year, 3)}');
   });
 
   test('ترحيلة 6→8 بقاعدة خام (F-011): جداول السندات وفعالية 44/55 فوق قائمة',

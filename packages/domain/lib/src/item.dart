@@ -52,6 +52,15 @@ String itemDisplayLabel(String name, String sku) => '$name ($sku)';
 /// لا بكود صنف متنوع).
 String itemSkuKey(String raw) => raw.trim();
 
+/// قائمة بيضاء كود الصنف (D-171 — س56 بلفظ المالك «أعتمد بكثرة على
+/// الكود فلا بد منه عند الطباعة والإدخال والبحث»): حروف بأي لغة
+/// (`\p{L}`: العربية واللاتينية) وأرقام (`\p{N}`) و `- _ .` حصراً —
+/// بلا مسافات ولا فاصل مسار ولا محارف عرضية. الكود مفتاح يُطبع ويُبحث
+/// ويُفرز فالتشابهات الخادعة (`Z-100` مقابل `Z_100` مقابل «Z 100») لا
+/// مكان لها فيه، وفاصل المسار `/` علّته حية موثقة (س-154/D-152).
+bool isValidItemSku(String sku) =>
+    RegExp(r'^[\p{L}\p{N}_.\-]+$', unicode: true).hasMatch(sku);
+
 /// حقول الصنف القابلة للبحث الجامع (س-38، D-064 نفسه): الاسم والكود
 /// والتصنيف — والتطبيع العربي للبحث حصراً دالة الأطراف النقية ذاتها.
 ///
@@ -228,6 +237,18 @@ class ItemPriceInvalid extends ItemValidationError {
   const ItemPriceInvalid();
 }
 
+/// اسم صنف يحمل محارف تحكم خفية (D-170) — مرفوض برسالة عربية واضحة.
+class ItemNameControlChars extends ItemValidationError {
+  const ItemNameControlChars();
+}
+
+/// كود خارج القائمة البيضاء (D-171) — يحمل الكود المرفوض ليُعرض.
+class ItemSkuInvalidFormat extends ItemValidationError {
+  final String sku;
+
+  const ItemSkuInvalidFormat(this.sku);
+}
+
 /// فهرس التفرد للأصناف القائمة: بالكود الحرفي بعد تقليم الفراغات حصراً
 /// (D-073) وبالاسم الحرفي بعد تقليم الفراغات حصراً بلا أي تطبيع (D-074).
 class ItemUniquenessIndex {
@@ -266,10 +287,13 @@ List<ItemValidationError> validateItemDraft(
   int? excludeItemId,
 }) {
   final errors = <ItemValidationError>[];
-  final name = draft.name.trim();
+  final name = sanitizeFreeName(draft.name);
   final sku = draft.sku.trim();
 
   if (name.isEmpty) errors.add(const ItemNameRequired());
+  if (name.isNotEmpty && freeNameHasControlChars(name)) {
+    errors.add(const ItemNameControlChars());
+  }
   if (sku.isEmpty) errors.add(const ItemSkuRequired());
   if (draft.baseUnitId <= 0) errors.add(const ItemUnitMissing());
   if (draft.currencyId <= 0) errors.add(const ItemCurrencyMissing());
@@ -279,6 +303,14 @@ List<ItemValidationError> validateItemDraft(
 
   if (sku.isNotEmpty) {
     final holder = existing.bySkuKey(sku);
+    // D-171: القائمة البيضاء تُفرض على الكود الجديد أو المتغير حصراً —
+    // والكود القائم غير المتغير يمر كما هو (الاستثناء الذاتي نمط D-153)
+    // فلا يُحبس تعديلُ اسم صنف قديم على كودِ ما قبل D-171؛ وإن غيّره
+    // فالكود الجديد بقواعد القائمة البيضاء كاملة.
+    final unchangedSelf = holder != null && holder.id == excludeItemId;
+    if (!unchangedSelf && !isValidItemSku(sku)) {
+      errors.add(ItemSkuInvalidFormat(sku));
+    }
     if (holder != null && holder.id != excludeItemId) {
       errors.add(ItemSkuTaken(sku, holder.displayLabel));
     }

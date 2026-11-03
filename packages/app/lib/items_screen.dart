@@ -922,6 +922,11 @@ String itemErrorText(ItemValidationError error) {
       'عملة السعر لا تُحفظ فارغة — أعد اختيار العملة (D-066)',
     ItemPriceInvalid() =>
       'السعر عدد موجب إن أُدخل — والفراغ يعني بلا سعر بعد (س6)',
+    ItemNameControlChars() =>
+      'الاسم يحمل محارف تحكم غير مرئية — أعد كتابته بلا لصق خارجي (D-170)',
+    ItemSkuInvalidFormat(:final sku) =>
+      'الكود $sku يقبل الحروف والأرقام و - _ . حصراً — بلا مسافات ولا '
+          'رموز أخرى (D-171)',
     UnitNameRequired() => 'اسم الوحدة إلزامي (F-031)',
     UnitNameTaken(:final existingName) =>
       'الاسم مطابق حرفياً لوحدة قائمة: $existingName — اختر اسماً آخر '

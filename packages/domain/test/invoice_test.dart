@@ -337,9 +337,9 @@ void main() {
       expect(sequenceKindLabels['move_purchase'], 'قيد مشتريات');
       expect(sequenceKindLabels['move_general'], 'قيد عام');
     });
-    test('صيغة الرقم المبطنة', () {
-      expect(formatDocumentNumber(2026, 1), '2026/000001');
-      expect(formatDocumentNumber(2026, 123456), '2026/123456');
+    test('صيغة الرقم الجديدة D-169 (سنة رقمين + عدّاد مبطن بلا فاصل)', () {
+      expect(formatDocumentNumber(2026, 1), '26000001');
+      expect(formatDocumentNumber(2026, 123456), '26123456');
     });
     test('أوصاف الأخطاء تحمل أرقامها وأصحابها', () {
       expect(

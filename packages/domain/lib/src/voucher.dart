@@ -31,8 +31,7 @@
 import 'invoice.dart' show baseCurrencyFxRate, convertToBaseMinor;
 import 'journal.dart' show isValidIsoDate;
 
-export 'invoice.dart'
-    show baseCurrencyFxRate, convertToBaseMinor, formatDocumentNumber, fxRateScale;
+export 'invoice.dart' show baseCurrencyFxRate, convertToBaseMinor, fxRateScale;
 
 /// نوع السند (05 §4.2): قبض أو دفع — والاتجاه يحدد أرجل القيد وجهة حركة
 /// الصندوق: القبض «داخل» والدفع «خارج» (س-12/س-14).

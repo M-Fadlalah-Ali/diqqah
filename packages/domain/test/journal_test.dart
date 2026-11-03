@@ -118,12 +118,33 @@ void main() {
       expect(nextSequenceNumber(6), 7);
     });
 
-    test('الصيغة «قيد عام 2026/000001» — مبطنة 6 مواضع', () {
-      expect(formatSequenceLabel('قيد عام', 2026, 1), 'قيد عام 2026/000001');
+    test('الصيغة الجديدة D-169 «قيد عام 26000001» — سنة رقمين وعدّاد مبطن', () {
+      expect(formatSequenceLabel('قيد عام', 2026, 1), 'قيد عام 26000001');
       expect(formatSequenceLabel('قيد عام', 2026, 12345),
-          'قيد عام 2026/012345');
+          'قيد عام 26012345');
       expect(formatSequenceLabel('قيد عام', 2026, 1234567),
-          'قيد عام 2026/1234567');
+          'قيد عام 261234567');
+      expect(formatSequenceLabel('قيد عام', 2026, 1, counterWidth: 5),
+          'قيد عام 2600001');
+    });
+
+    test('formatDocumentNumber (D-169): الافتراضي 6 ومثال المالك 5 والفيض يطول ولا يلتف', () {
+      expect(formatDocumentNumber(2026, 1), '26000001');
+      expect(formatDocumentNumber(2026, 1, counterWidth: 5), '2600001');
+      expect(formatDocumentNumber(2026, 1, counterWidth: 3), '26001');
+      expect(formatDocumentNumber(2026, 123456), '26123456');
+      // الفيض الموثق: تجاوز العدّاد للعرض يطول الرقم بلا لفّ (F-053/F-054)
+      expect(formatDocumentNumber(2026, 1000000), '261000000');
+      // والخارج عن النطاق 3..8 يعود الافتراضية (التالف كالغياب)
+      expect(formatDocumentNumber(2026, 1, counterWidth: 2), '26000001');
+      expect(formatDocumentNumber(2026, 1, counterWidth: 99), '26000001');
+    });
+
+    test('نطاق عرض العدّاد (D-169): 3..8', () {
+      expect(isValidCounterWidth(3), isTrue);
+      expect(isValidCounterWidth(8), isTrue);
+      expect(isValidCounterWidth(2), isFalse);
+      expect(isValidCounterWidth(9), isFalse);
     });
   });
 

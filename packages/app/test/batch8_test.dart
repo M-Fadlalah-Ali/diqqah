@@ -114,7 +114,7 @@ void main() {
   test('س-114 (D-103): التخطيط بالنسب — نفس المستند يُبنى بمقاسين ويبقى '
       'PDF صحيحاً، والافتراضيات لا تتغير (A5 فواتير A4 تقارير)', () async {
     final a5 = await buildDocumentPdf(
-      title: 'سند دفع 2026/000001',
+      title: 'سند دفع 26000001',
       headerPairs: const [('التاريخ', '2026-03-15')],
       columns: const ['الصنف', 'الكمية'],
       rows: const [['زيت محلي', '2']],
@@ -122,7 +122,7 @@ void main() {
       format: PdfPageFormat.a5,
     );
     final a4 = await buildDocumentPdf(
-      title: 'سند دفع 2026/000001',
+      title: 'سند دفع 26000001',
       headerPairs: const [('التاريخ', '2026-03-15')],
       columns: const ['الصنف', 'الكمية'],
       rows: const [['زيت محلي', '2']],

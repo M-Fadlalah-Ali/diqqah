@@ -7,6 +7,10 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:drift/drift.dart' show Value, Variable;
 
+/// الصيغة الجديدة D-169 (سنة رقمين + عدّاد مبطن) — مشتقة من سنة البذرة.
+String seqNum(int year, int n, [int w = 6]) =>
+    '${(year % 100).toString().padLeft(2, '0')}${n.toString().padLeft(w, '0')}';
+
 /// أدوات الدفعة — بنمط ledger_test: معرفات بالبحث بالكود لا بالثبوت
 /// الأعمى، وسنة ديناميكية من البذر لا مثبتة كي لا يكسرها تغيّر سنة CI.
 Future<int> accountIdByCode(DiqqahDatabase db, String code) async {
@@ -233,11 +237,11 @@ void main() {
         lines: [f.line(f.oilId, 10, 25000)]);
     final inv = (await db.invoiceById(id))!;
     expect(inv.state, 'posted');
-    expect(inv.number, '${f.year}/000001');
+    expect(inv.number, '${seqNum(f.year, 1)}');
     expect(inv.totalDocMinor, 250000);
     expect(inv.totalBaseMinor, 250000);
     expect(inv.moveId, isNotNull);
-    expect(invoiceDisplayLabel(inv), 'فاتورة شراء ${f.year}/000001');
+    expect(invoiceDisplayLabel(inv), 'فاتورة شراء ${seqNum(f.year, 1)}');
 
     final acc113 = await accountIdByCode(db, '113');
     final acc211 = await accountIdByCode(db, '211');
@@ -280,7 +284,7 @@ void main() {
       'SELECT number, journal_id FROM moves WHERE id = ?',
       variables: [Variable.withInt(inv.moveId!)],
     ).getSingle()).data;
-    expect(move['number'], '${f.year}/000001');
+    expect(move['number'], '${seqNum(f.year, 1)}');
     final seqInvoice = await db.customSelect(
       'SELECT last_number FROM sequences WHERE kind = ? AND year = ?',
       variables: [
@@ -319,7 +323,7 @@ void main() {
     final id = await f.saleCredit(lines: [f.line(f.oilId, 4, 40000)]);
     final inv = (await db.invoiceById(id))!;
     expect(inv.state, 'posted');
-    expect(inv.number, '${f.year}/000001');
+    expect(inv.number, '${seqNum(f.year, 1)}');
 
     // تكلفة الخروج: 250,000 × 4/10 = 100,000 تام (لا غبار)
     final acc112 = await accountIdByCode(db, '112');
@@ -416,8 +420,8 @@ void main() {
         saleId, lines: [f.line(f.oilId, 2, 40000)]);
     final retInv = (await db.invoiceById(firstReturn))!;
     expect(retInv.state, 'posted');
-    expect(retInv.number, '${f.year}/000001');
-    expect(invoiceDisplayLabel(retInv), 'مردود بيع ${f.year}/000001');
+    expect(retInv.number, '${seqNum(f.year, 1)}');
+    expect(invoiceDisplayLabel(retInv), 'مردود بيع ${seqNum(f.year, 1)}');
 
     // الدخول بلقطة كلفة خروج الأصل (25,000×2 = 50,000) والنظير صفر
     // لأن المتوسط على مخزون فارغ صفر — فالفرق كله على 58 (م-25/س-56)
@@ -611,7 +615,7 @@ void main() {
 
     // الترقيم لحظة الترحيل حصراً فالحذف لا يهدر رقماً (07 §1.9)
     final id = await f.purchaseCredit(lines: [f.line(f.oilId, 1, 25000)]);
-    expect((await db.invoiceById(id))!.number, '${f.year}/000001');
+    expect((await db.invoiceById(id))!.number, '${seqNum(f.year, 1)}');
 
     // والمرحّلة مستحيلة الحذف حرساً ومشغلاً
     Object? caught;
@@ -629,9 +633,9 @@ void main() {
     final p1 = await f.purchaseCredit(lines: [f.line(f.oilId, 1, 25000)]);
     final p2 = await f.purchaseCredit(lines: [f.line(f.oilId, 1, 25000)]);
     final s1 = await f.saleCredit(lines: [f.line(f.oilId, 1, 40000)]);
-    expect((await db.invoiceById(p1))!.number, '${f.year}/000001');
-    expect((await db.invoiceById(p2))!.number, '${f.year}/000002');
-    expect((await db.invoiceById(s1))!.number, '${f.year}/000001',
+    expect((await db.invoiceById(p1))!.number, '${seqNum(f.year, 1)}');
+    expect((await db.invoiceById(p2))!.number, '${seqNum(f.year, 2)}');
+    expect((await db.invoiceById(s1))!.number, '${seqNum(f.year, 1)}',
         reason: 'تسلسل البيع مستقل عن الشراء');
 
     // قيود المستندات من دفاتر جهتها (D-080 معروض)
@@ -643,9 +647,9 @@ void main() {
       ).getSingle()).data['number'] as String;
     }
 
-    expect(await moveNumberOf(p1), '${f.year}/000001');
-    expect(await moveNumberOf(p2), '${f.year}/000002');
-    expect(await moveNumberOf(s1), '${f.year}/000001');
+    expect(await moveNumberOf(p1), '${seqNum(f.year, 1)}');
+    expect(await moveNumberOf(p2), '${seqNum(f.year, 2)}');
+    expect(await moveNumberOf(s1), '${seqNum(f.year, 1)}');
 
     // حذف مسودة لا يفتح فجوة: الثالثة 000003
     final draftId = await db.createInvoiceDraft(InvoiceDraft(
@@ -657,7 +661,7 @@ void main() {
     ));
     await db.deleteInvoiceDraft(draftId);
     final p3 = await f.purchaseCredit(lines: [f.line(f.oilId, 1, 25000)]);
-    expect((await db.invoiceById(p3))!.number, '${f.year}/000003');
+    expect((await db.invoiceById(p3))!.number, '${seqNum(f.year, 3)}');
   });
 
   test('الزمن المحاسبي: الفترة المقفلة ترفض الترحيل والخارج يرفض صراحة',

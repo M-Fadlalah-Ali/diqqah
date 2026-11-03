@@ -373,10 +373,13 @@ class Periods extends Table {
 ///
 /// - `date_text` تواريخ العملية نص ISO «YYYY-MM-DD» حصراً — فرزها
 ///   المعجمي زمني صحيح (D-077 معروض)، والميلادي أساس التخزين حصراً (F-167).
-/// - `number` نص الرقم المُصدَر «2026/000001» (سنة/رقم مبطن 6) — والمسودة
-///   بلا رقم («»): الترقيم لحظة الترحيل حصراً فلا رقم يُصدر ولا يُعاد (07 §1.9).
-///   الصيغة الكاملة المعروضة «قيد عام 2026/000001» تولّد للعرض ب
-///   formatSequenceLabel (م-44 — الاسم الكامل بلا بادئة مختصرة).
+/// - `number` نص الرقم المُصدَر — والمسودة بلا رقم («»): الترقيم لحظة
+///   الترحيل حصراً فلا رقم يُصدر ولا يُعاد (07 §1.9). الصيغة الجديدة
+///   D-169 «سنة رقمين + عدّاد مبطن بلا فاصل» («26000001» بعرض 6)،
+///   والصادرة قبلها بصيغة «2026/000001» بيانات أعمال لا تُمسّ — فتعيش
+///   القاعدة فترة انتقالية بصيغتين موثقة. الصيغة الكاملة المعروضة
+///   «قيد عام …» تولّد للعرض من الرقم المخزن كما هو بformatSequenceLabel
+///   (م-44 — الاسم الكامل بلا بادئة مختصرة).
 /// - `period_id` يُكتب عند الترحيل بعد فحص الفترة المفتوحة — فالمسودة
 ///   القائمة فوق شهر مقفل تبقى معلقة لا مرحّلة.
 /// - `ref_doc_type/ref_doc_id` مرجع المستند المولد للقيد (05 §2) — القيد
@@ -1060,6 +1063,48 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     return row == null ? null : int.tryParse(row.value);
   }
 
+  /// عرض عدّاد الترقيم (D-169 — س56 بلفظ المالك) — يُخزَّن في app_meta
+  /// (مفاتيح نظام معفاة من اصطلاح المزامنة D-055) ويقرؤه التوليد عند
+  /// كل ترحيل فتسري الخانة على كل أنواع المستندات واحدة. الغائب أو
+  /// التالف يعود الافتراضي 6 — القاعدة الموثقة: التالف كالغياب بلا
+  /// سحر ولا استثناء.
+  static const String counterWidthMetaKey = 'numbering.counter_width';
+
+  /// القراءة المعلنة للواجهة (بطاقة الإعدادات تعرض القيمة النافذة).
+  Future<int> counterWidth() => _counterWidth();
+
+  Future<int> _counterWidth() async {
+    final row = await (select(appMeta)
+          ..where((t) => t.key.equals(counterWidthMetaKey)))
+        .getSingleOrNull();
+    final parsed = row == null ? null : int.tryParse(row.value.trim());
+    return (parsed != null && isValidCounterWidth(parsed))
+        ? parsed
+        : kDefaultCounterWidth;
+  }
+
+  /// ضبط عرض العدّاد (D-169) — خارج النطاق 3..8 يُرفض بلا كتابة،
+  /// والواجهة تدقق قبل هذا الحرس الثانوي.
+  Future<void> setCounterWidth(int width) async {
+    if (!isValidCounterWidth(width)) {
+      throw ArgumentError(
+          'عرض عدّاد الترقيم خارج النطاق المسموح '
+          '($kCounterWidthMin..$kCounterWidthMax): $width');
+    }
+    final existing = await (select(appMeta)
+          ..where((t) => t.key.equals(counterWidthMetaKey)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await (update(appMeta)..where((t) => t.key.equals(counterWidthMetaKey)))
+          .write(AppMetaCompanion(value: Value('$width')));
+    } else {
+      await into(appMeta).insert(AppMetaCompanion.insert(
+        key: counterWidthMetaKey,
+        value: '$width',
+      ));
+    }
+  }
+
   /// المستخدم صاحب الجلسة الحالية — الحالي المخزن إن كان نشطاً، وإلا
   /// أول مستخدم نشط، وإلا أي مستخدم (قاعدة فيها معطلون حصراً)، وإلا
   /// null (قاعدة قبل التهيئة — لا يصلها الواجهة أصلاً ببوابة F-014).
@@ -1152,7 +1197,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     return into(parties).insert(
       PartiesCompanion.insert(
         number: number,
-        name: name,
+        name: sanitizeFreeName(name),
         kind: kind,
         phone: Value(_nullIfBlank(phone)),
         address: Value(_nullIfBlank(address)),
@@ -1187,7 +1232,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     await (update(parties)..where((t) => t.id.equals(party.id))).write(
       PartiesCompanion(
         number: Value(number),
-        name: Value(name),
+        name: Value(sanitizeFreeName(name)),
         kind: Value(kind),
         phone: Value(_nullIfBlank(phone)),
         address: Value(_nullIfBlank(address)),
@@ -1263,7 +1308,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     return into(items).insert(
       ItemsCompanion.insert(
         sku: sku.trim(),
-        name: name.trim(),
+        name: sanitizeFreeName(name),
         category: Value(_nullIfBlank(category)),
         kind: kind,
         baseUnitId: baseUnitId,
@@ -1300,7 +1345,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     await (update(items)..where((t) => t.id.equals(item.id))).write(
       ItemsCompanion(
         sku: Value(sku.trim()),
-        name: Value(name.trim()),
+        name: Value(sanitizeFreeName(name)),
         category: Value(_nullIfBlank(category)),
         kind: Value(kind),
         baseUnitId: Value(baseUnitId),
@@ -1813,8 +1858,10 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       final now = DateTime.now().millisecondsSinceEpoch;
       final year = yearOfIsoDate(moveRow.dateText);
       final nextNumber = await _advanceSequenceWithinTx(sequenceKind, year);
-      final numberText =
-          '$year/${nextNumber.toString().padLeft(6, '0')}';
+      // الصيغة الجديدة D-169 (سنة رقمين + عدّاد مبطن بلا فاصل) — للأرقام
+      // الجديدة حصراً؛ الصادرة قبلها «2026/000001» بيانات لا تُمس.
+      final numberText = formatDocumentNumber(year, nextNumber,
+          counterWidth: await _counterWidth());
 
       // الحاجز الثاني (07 §2.2): المُشغِّلات تفحص التوازن والأسطر عند
       // كتابة الحالة — ورفضها ABORT يتراجع المعاملة كاملة بما فيه العدّاد.
@@ -1831,7 +1878,8 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   }
 
   /// س-48: مسودة العكس لقيد مرحّل (07 §1.3) — الأسطر نفسها بجانبين
-  /// متقابلين، والوصف الافتراضي «عكس قيد 2026/000001» والمرجع محفوظ
+  /// متقابلين، والوصف الافتراضي «عكس قيد …» بالرقم المخزن كما هو (قديم
+  /// «2026/000001» أو جديد «26000001» — D-169) والمرجع محفوظ
   /// (ref_doc_type='move'). تُنشأ مسودةً بكل حواجز الإنشاء ثم يرحّلها
   /// المحرك نفسه (postMove) فلا مسار عكس بلا فحص. وأي محاولة عكس قيد
   /// غير مرحّل رفض صريح — العكس للمرحّل وحده.
@@ -3100,7 +3148,8 @@ Future<int> postInvoice(int invoiceId) async {
     final year = yearOfIsoDate(draft.dateText);
 
     final invoiceNumber = formatDocumentNumber(year,
-        await _advanceSequenceWithinTx(invoiceSequenceKind(draft.kind), year));
+        await _advanceSequenceWithinTx(invoiceSequenceKind(draft.kind), year),
+        counterWidth: await _counterWidth());
 
     final journalCode = draft.kind.isSalesSide ? 'sales' : 'purchase';
     final journalId = await _journalIdByCodeTx(journalCode);
@@ -3855,7 +3904,8 @@ Future<List<CurrencyRow>> currenciesOf() async {
       final now = DateTime.now().millisecondsSinceEpoch;
       final year = yearOfIsoDate(draft.dateText);
       final voucherNumber = formatDocumentNumber(year,
-          await _advanceSequenceWithinTx(voucherSequenceKind(draft.kind), year));
+          await _advanceSequenceWithinTx(voucherSequenceKind(draft.kind), year),
+          counterWidth: await _counterWidth());
       final journalId = await _journalIdByCodeTx('cash');
       final acc112 = await _accountIdByCodeTx('112');
       final acc211 = await _accountIdByCodeTx('211');
@@ -4235,7 +4285,19 @@ Future<List<CurrencyRow>> currenciesOf() async {
       "SELECT id, number, invoice_date, due_date, total_doc_minor "
       "FROM invoices WHERE party_id = ?1 AND kind = ?2 AND currency_id = ?3 "
       "AND state IN ('posted', 'partially_paid') AND is_deleted = 0 "
-      "ORDER BY COALESCE(due_date, '9999-12-31'), invoice_date, number",
+      // أقدمية المطابقات (02 §8: الاستحقاق ثم التاريخ ثم الرقم) — والرقم
+      // يُرتب بسنته وعدّاده المستخلصين لا بالنص الخام (D-169): الفترة
+      // الانتقالية تعيش صيغتين («2026/000001» القديمة و«26000001» الجديدة)
+      // والفرز النصي الخام يقلب الترتيب بينهما لأطوال وفواصل مختلفة.
+      // القديمة: السنة قبل المائل والعدّاد بعده؛ الجديدة: رقما السنة
+      // ثم العدّاد.
+      "ORDER BY COALESCE(due_date, '9999-12-31'), invoice_date, "
+      "CASE WHEN number LIKE '%/%' "
+      "THEN CAST(substr(number, 1, instr(number, '/') - 1) AS INTEGER) "
+      "ELSE 2000 + CAST(substr(number, 1, 2) AS INTEGER) END, "
+      "CASE WHEN number LIKE '%/%' "
+      "THEN CAST(substr(number, instr(number, '/') + 1) AS INTEGER) "
+      "ELSE CAST(substr(number, 3) AS INTEGER) END",
       variables: [
         Variable.withInt(partyId),
         Variable.withString(docKind),
@@ -4331,7 +4393,8 @@ Future<List<CurrencyRow>> currenciesOf() async {
       final now = DateTime.now().millisecondsSinceEpoch;
       final year = yearOfIsoDate(draft.dateText);
       final number = formatDocumentNumber(year,
-          await _advanceSequenceWithinTx('box_transfer', year));
+          await _advanceSequenceWithinTx('box_transfer', year),
+          counterWidth: await _counterWidth());
       final journalId = await _journalIdByCodeTx('cash');
       final fromBox = (await _cashBoxByIdTx(draft.fromBoxId))!;
       final toBox = (await _cashBoxByIdTx(draft.toBoxId))!;
@@ -4515,7 +4578,8 @@ Future<List<CurrencyRow>> currenciesOf() async {
       final now = DateTime.now().millisecondsSinceEpoch;
       final year = yearOfIsoDate(draft.dateText);
       final number = formatDocumentNumber(year,
-          await _advanceSequenceWithinTx('cash_adjustment', year));
+          await _advanceSequenceWithinTx('cash_adjustment', year),
+          counterWidth: await _counterWidth());
       final journalId = await _journalIdByCodeTx('cash');
       final acc57 = await _accountIdByCodeTx('57');
       final box = (await _cashBoxByIdTx(draft.cashBoxId))!;
@@ -6759,7 +6823,9 @@ class _StockLinePlan {
   });
 }
 
-/// الصيغة المعروضة لرقم الفاتورة (م-44/D-071): «فاتورة بيع 2026/000001».
+/// الصيغة المعروضة لرقم الفاتورة (م-44/D-071): «فاتورة بيع » + الرقم
+/// المخزن كما هو — «فاتورة بيع 2026/000001» للصادرة قبل D-169
+/// و«فاتورة بيع 26000001» بعدها — فلا عرض يخالف المخزن أبداً.
 String invoiceDisplayLabel(InvoiceDocument invoice) {
   final kind = InvoiceKind.fromStorage(invoice.kind);
   final label =
@@ -6830,7 +6896,8 @@ class VoucherAllocationDocument {
   });
 }
 
-/// الصيغة المعروضة لرقم السند (م-44/D-071): «سند قبض 2026/000001».
+/// الصيغة المعروضة لرقم السند (م-44/D-071): «سند قبض » + الرقم المخزن
+/// كما هو (قديم «2026/000001» أو جديد «26000001» — D-169).
 String voucherDisplayLabel(VoucherDocument voucher) {
   final kind = VoucherKind.fromStorage(voucher.kind);
   final label =
@@ -6871,7 +6938,8 @@ class InvoiceListRow {
     required this.boxName,
   });
 
-  /// «فاتورة بيع 2026/000001» — والمسودة بلا رقم بعد فتسميتها «— مسودة».
+  /// «فاتورة بيع » + الرقم المخزن كما هو (قديم أو جديد — D-169) —
+  /// والمسودة بلا رقم بعد فتسميتها «— مسودة».
   String get displayLabel {
     final k = InvoiceKind.fromStorage(kind);
     final kindLabel =

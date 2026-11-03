@@ -20,6 +20,20 @@ void main() {
     });
   });
 
+  group('نزاهة اسم الطرف (D-170 — س56 بكلمة المالك)', () {
+    test('sanitizeFreeName يجرد العلامات غير المرئية ويقلّم الأطراف', () {
+      expect(sanitizeFreeName('\u200Fمحمد\u200B علي\uFEFF '), 'محمد علي');
+    });
+
+    test('محارف التحكم بالاسم تُرفض بالمدقق (D-170)', () {
+      final errors = validatePartyDraft(
+        PartyDraft(number: '53', name: 'محمد\x01', kind: PartyKind.customer),
+        existing: PartyUniquenessIndex.build(const []),
+      );
+      expect(errors, contains(isA<PartyNameControlChars>()));
+    });
+  });
+
   group('الترتيب الرقمي الذكي (س-29: 1، 2، 10 لا 1، 10، 2)', () {
     test('يرتب عددياً ويلحق غير الرقمي آخراً بترتيبه المعجمي', () {
       final numbers = ['10', '1', 'A-12', '2', '53', '9'];

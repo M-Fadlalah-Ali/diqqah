@@ -510,6 +510,61 @@ void main() {
     expect(await migrated.select(migrated.units).get(), hasLength(1));
   });
 
+  test('D-169 (س56): عرض العدّاد يُقرأ ويُضبط — والخارج عن النطاق مرفوض '
+      'والتالف كالغياب يعود الافتراضي 6', () async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_width_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final db = DiqqahDatabase(filePath: p.join(tempDir.path, 'width.db'));
+    addTearDown(db.close);
+    // الغائب يعود الافتراضي 6
+    expect(await db.counterWidth(), 6);
+    await db.setCounterWidth(5);
+    expect(await db.counterWidth(), 5);
+    // والخارج عن النطاق 3..8 مرفوض بلا كتابة (حرس التخزين الثاني)
+    await expectLater(db.setCounterWidth(2), throwsArgumentError);
+    await expectLater(db.setCounterWidth(9), throwsArgumentError);
+    expect(await db.counterWidth(), 5);
+    // والتالف كالغياب: قيمة خام قذرة تعود الافتراضي بلا سحر
+    await db.customStatement(
+        "UPDATE app_meta SET value = 'سمج' "
+        "WHERE key = 'numbering.counter_width'");
+    expect(await db.counterWidth(), 6);
+  });
+
+  test('D-169 (س56): فرز أقدمية المطابقات بالسنة والعدّاد عبر الصيغتين '
+      'القديمة والجديدة لا بالنص الخام (02 §8 باقية بمعناها)', () async {
+    final tempDir = Directory.systemTemp.createTempSync('diqqah_seqsort_');
+    addTearDown(() => tempDir.deleteSync(recursive: true));
+    final db = DiqqahDatabase(filePath: p.join(tempDir.path, 'seqsort.db'));
+    addTearDown(db.close);
+    final partyId = await db.insertParty(
+        number: '53',
+        name: 'عميل التجربة',
+        kind: 'customer',
+        defaultCurrencyId: 1);
+    // فاتورتان مفتوحتان للتاريخ والاستحقاق نفسيهما: واحدة بصيغة ما قبل
+    // D-169 بعدّاد 9 وواحدة بالصيغة الجديدة بعدّاد 2 — الفرز النصي الخام
+    // يقدم «2026/000009» (صفرٌ بعد الاثنين) والفرز الصحيح بالعدّاد
+    // يقدم «26000002» (2 قبل 9).
+    for (final row in [
+      "('sale', '2026/000009', '2026-03-01', '2026-03-01', $partyId, 1, "
+          "1000000, 0, 50000, 0, 50000, 50000, 'posted', 'uuid-seq-1', 0, 0, 0)",
+      "('sale', '26000002', '2026-03-01', '2026-03-01', $partyId, 1, "
+          "1000000, 0, 30000, 0, 30000, 30000, 'posted', 'uuid-seq-2', 0, 0, 0)",
+    ]) {
+      await db.customStatement(
+        "INSERT INTO invoices (kind, number, invoice_date, due_date, party_id, "
+        "currency_id, fx_rate, discount_rate, subtotal_doc_minor, "
+        "discount_doc_minor, total_doc_minor, total_base_minor, state, "
+        "uuid, created_at, updated_at, is_deleted) VALUES $row",
+      );
+    }
+    final open = await db.openInvoicesForParty(
+        kind: VoucherKind.receipt, partyId: partyId, currencyId: 1);
+    expect(open.map((c) => c.number).toList(), ['26000002', '2026/000009'],
+        reason: 'الأقدمية بالعدّاد المستخلص (2 قبل 9) لا بالنص الخام');
+  });
+
   test('ترحيلة v11 (س-117/D-112): قيم الخصم القديمة تُضرب 100 والمشغل '
       'الثابت يُطرح للتحديث ويُعاد بعده', () async {
     final tempDir = Directory.systemTemp.createTempSync('diqqah_v11_mig_');

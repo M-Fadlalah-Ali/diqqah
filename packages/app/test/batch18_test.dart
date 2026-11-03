@@ -123,7 +123,7 @@ void main() {
       "AND total_doc_minor = 30000",
       variables: [],
     ).getSingle();
-    expect(seq.data['number'], '2026/000002',
+    expect(seq.data['number'], '26000002',
         reason: 'التسلسل السنوي لكل نوع (س-60/D-080) — العزل بالترقيم');
   });
 }

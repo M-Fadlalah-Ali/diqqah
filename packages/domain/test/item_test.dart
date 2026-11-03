@@ -11,6 +11,57 @@ void main() {
     });
   });
 
+  group('نزاهة الإدخال D-170/D-171 (س56 بكلمة المالك)', () {
+    ExistingItem oil(int id) =>
+        ExistingItem(id: id, sku: 'A/1', name: 'زيت', isActive: true);
+
+    ItemDraft draft({String sku = 'Z-12', String name = 'سكر'}) =>
+        ItemDraft(sku: sku, name: name, kind: ItemKind.good, baseUnitId: 1);
+
+    test('sanitizeFreeName (D-170): تجريد العلامات غير المرئية وتقليم الأطراف',
+        () {
+      expect(sanitizeFreeName('\u200Bزيت\u200F سمسم\uFEFF '), 'زيت سمسم');
+    });
+
+    test('محارف التحكم في الاسم مرفوضة لا تُجرد (D-170)', () {
+      final errors = validateItemDraft(draft(name: 'زيت\x01'),
+          existing: ItemUniquenessIndex.build(const []));
+      expect(errors, contains(isA<ItemNameControlChars>()));
+    });
+
+    test('قائمة بيضاء الكود (D-171): حروف بأي لغة وأرقام و - _ . حصراً', () {
+      expect(isValidItemSku('Z-12'), isTrue);
+      expect(isValidItemSku('زيت_100.أ'), isTrue);
+      expect(isValidItemSku('Z/12'), isFalse,
+          reason: 'فاصل المسار علّته حية (س-154/D-152)');
+      expect(isValidItemSku('Z 12'), isFalse);
+      expect(isValidItemSku('Z*12'), isFalse);
+    });
+
+    test('كود خارج القائمة يُرفض عند الإنشاء (D-171)', () {
+      final errors = validateItemDraft(draft(sku: 'Z/12'),
+          existing: ItemUniquenessIndex.build([oil(7)]));
+      expect(errors, contains(isA<ItemSkuInvalidFormat>()));
+    });
+
+    test('الكود القائم غير المتغير يمر عند التعديل — الاستثناء الذاتي (D-171)',
+        () {
+      final index = ItemUniquenessIndex.build([oil(7)]);
+      // نفس الكود القائم «A/1» على نفس الصنف: بلا خطأ صيغة فلا يُحبس
+      // تعديلُ اسم صنف قديم على كودِ ما قبل D-171
+      final same = validateItemDraft(draft(sku: 'A/1'),
+          existing: index, excludeItemId: 7);
+      expect(same.whereType<ItemSkuInvalidFormat>(), isEmpty);
+      // وتغييره لكود سليم يمر، وتغييره لكود خارج القائمة يُرفض
+      final changed = validateItemDraft(draft(sku: 'B-2'),
+          existing: index, excludeItemId: 7);
+      expect(changed.whereType<ItemSkuInvalidFormat>(), isEmpty);
+      final bad = validateItemDraft(draft(sku: 'B/2'),
+          existing: index, excludeItemId: 7);
+      expect(bad, contains(isA<ItemSkuInvalidFormat>()));
+    });
+  });
+
   group('نوع الصنف (05 §3.2) — التخزين والقراءة والملصق', () {
     test('القيم الثلاث مخزنة والواجهة في م1 تعرض الأولى والثانية حصراً', () {
       expect(ItemKind.good.storageValue, 'good');

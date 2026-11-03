@@ -418,5 +418,7 @@ String partyErrorText(PartyValidationError error) {
       'عملة الطرف لا تُحفظ فارغة — أعد اختيار العملة (D-066)',
     PartyCreditLimitInvalid() =>
       'حد الائتمان عدد موجب إن أُدخل — والفراغ يعني بلا سقف (س-34)',
+    PartyNameControlChars() =>
+      'الاسم يحمل محارف تحكم غير مرئية — أعد كتابته بلا لصق خارجي (D-170)',
   };
 }

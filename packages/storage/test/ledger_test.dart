@@ -7,6 +7,11 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:drift/drift.dart' show Value, Variable;
 
+/// الصيغة الجديدة D-169 (سنة رقمين + عدّاد مبطن بلا فاصل) — تُشتق من
+/// سنة البذرة نفسها كي لا يكسر تغيّر سنة CI (نمط التواريخ المشتقة).
+String seqNum(int year, int n, [int w = 6]) =>
+    '${(year % 100).toString().padLeft(2, '0')}${n.toString().padLeft(w, '0')}';
+
 /// أدوات الدفعة: معرفات حسابات البذر بالبحث بالكود (لا بالثبوت الأعمى
 /// من الترتيب) — الدليل بيانات إعداد وقد يعاد ترقيمه (07 §1.6).
 Future<int> accountIdByCode(DiqqahDatabase db, String code) async {
@@ -216,6 +221,31 @@ void main() {
       );
     });
 
+    test('D-169 (س56): ضبط عرض العدّاد 5 يجعل الترقيم «سنة رقمين + عدّاد 5» بلا فاصل',
+        () async {
+      await db.setCounterWidth(5);
+      final journalId = await generalJournalId(db);
+      final cash = await accountIdByCode(db, '1111');
+      final withdrawals = await accountIdByCode(db, '321');
+      final year = await seededYear(db);
+      final dateText = await isoDate(db, month: 10);
+      final moveId = await db.createMoveDraft(
+        journalId: journalId,
+        dateText: dateText,
+        narration: 'تجربة العرض',
+        lines: [
+          line(withdrawals, debit: 1000, credit: 0),
+          line(cash, debit: 0, credit: 1000),
+        ],
+      );
+      await db.postMove(moveId);
+      final move = await (db.select(db.moves)
+            ..where((t) => t.id.equals(moveId)))
+          .getSingle();
+      expect(move.number, seqNum(year, 1, 5),
+          reason: 'مثال المالك نفسه: 2026 بعرض 5 = «2600001» (D-169)');
+    });
+
     test('س-46: الترحيل يكتب الحالة والرقم والفترة وحدث «posted»', () async {
       final journalId = await generalJournalId(db);
       final cash = await accountIdByCode(db, '1111');
@@ -236,7 +266,7 @@ void main() {
             ..where((t) => t.id.equals(moveId)))
           .getSingle();
       expect(move.state, 'posted');
-      expect(move.number, '$year/000001',
+      expect(move.number, '${seqNum(year, 1)}',
           reason: 'الترقيم السنوي من سنة تاريخ القيد (07 §1.9)');
       expect(move.periodId, isNotNull);
       final actions = (await db.select(db.events).get())
@@ -270,7 +300,7 @@ void main() {
           .map((m) => m.number)
           .toSet();
       expect(numbers,
-          {'$year/000001', '$year/000002', '$year/000003'});
+          {'${seqNum(year, 1)}', '${seqNum(year, 2)}', '${seqNum(year, 3)}'});
       // حذف مسودة لا يعيد رقمها للأمام ولا للأثر — السجل يوثق الحذف
       final draftToDelete = await makeDraft();
       await db.deleteMoveDraft(draftToDelete);
@@ -462,12 +492,12 @@ void main() {
       expect(reversal.state, 'draft');
       expect(reversal.refDocType, 'move');
       expect(reversal.refDocId, originalId);
-      expect(reversal.narration, 'عكس قيد $year/000001');
+      expect(reversal.narration, 'عكس قيد ${seqNum(year, 1)}');
       await db.postMove(reversalId);
       final posted = await (db.select(db.moves)
             ..where((t) => t.id.equals(reversalId)))
           .getSingle();
-      expect(posted.number, '$year/000002',
+      expect(posted.number, '${seqNum(year, 2)}',
           reason: 'العكس قيد جديد برقم متصل (07 §1.9)');
       // وبعد العكس رصيدا الحسابين صفر — التوازن الحقيقي
       expect(await db.accountBalanceOf(withdrawals), 0);

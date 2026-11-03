@@ -3,6 +3,10 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:drift/drift.dart' show Variable;
 
+/// الصيغة الجديدة D-169 (سنة رقمين + عدّاد مبطن) — مشتقة من سنة البذرة.
+String seqNum(int year, int n, [int w = 6]) =>
+    '${(year % 100).toString().padLeft(2, '0')}${n.toString().padLeft(w, '0')}';
+
 /// اختبارات دفعة (12) متابعة التسليم (س-137..س-142/D-131..D-134) —
 /// الترحيلة v13 (عمودا العلم والمورد) والحرس المحدَّث والقارئة
 /// الجديدة بأرقام الدورة المعروفة: ضخ 500,000 فشراء 10×10,000 آجل
@@ -148,7 +152,7 @@ void main() {
     var rows = await db.undeliveredSaleLinesReport();
     expect(rows, hasLength(2));
     expect(rows[0].lineId, saleLines[0].id, reason: 'السطر الأول أقدم');
-    expect(rows[0].invoiceNumber, '$year/000001');
+    expect(rows[0].invoiceNumber, '${seqNum(year, 1)}');
     expect(rows[0].itemName, 'زيت محلي');
     expect(rows[1].itemName, 'سكر أحمر');
     expect(rows[0].partyName, 'عميل الأمل');

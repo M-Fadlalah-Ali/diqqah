@@ -46,8 +46,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     // أرقام الدورة المعروفة: كل نوع بتسلسله فكلاهما 2026/000001 (D-080)
-    expect(find.textContaining('فاتورة شراء 2026/000001'), findsOneWidget);
-    expect(find.textContaining('فاتورة بيع 2026/000001'), findsOneWidget);
+    expect(find.textContaining('فاتورة شراء 26000001'), findsOneWidget);
+    expect(find.textContaining('فاتورة بيع 26000001'), findsOneWidget);
     // الحالات المشتقة بالمطابقات حصراً (D-084): الشراء لم يُقبض ولم يُصرف
     // فمرحّلة، والبيع قُبض نصفه فجزئية
     expect(find.textContaining('مرحّلة'), findsWidgets);

@@ -1,6 +1,7 @@
 import 'dart:io' show Directory, File, Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
@@ -157,11 +158,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<AppUser> _activeUsers = const [];
   int? _selectedUserId;
 
+  /// ── بطاقة الترقيم (D-169 — س56): عرض عدّاد الترقيم بعد السنة —
+  /// يُقرأ النافذ عند الفتح ويُحفظ مدققاً 3..8 في app_meta، ومعاينة
+  /// حية قبل الحفظ، والأرقام الصادرة لا تُمسّ بالتغيير أبداً.
+  final _counterWidthController = TextEditingController();
+  int _counterWidth = kDefaultCounterWidth;
+
   @override
   void initState() {
     super.initState();
     _loadUsers();
     _loadImagesInfo();
+    _loadCounterWidth();
+  }
+
+  /// قراءة العرض النافذ (D-169) عند الفتح وبعد كل استعادة.
+  Future<void> _loadCounterWidth() async {
+    final width = await widget.db.counterWidth();
+    if (!mounted) return;
+    setState(() {
+      _counterWidth = width;
+      _counterWidthController.text = '$width';
+    });
+  }
+
+  /// المعاينة الحية — المدخل يعرض إن كان ضمن النطاق وإلا القيمة المحفوظة،
+  /// والمثال رقم 1 من سنة اليوم دائماً (formatDocumentNumber نفسها التي
+  /// يولّد بها المحرك فلا معاينة تخالف الواقع).
+  String _counterWidthPreview() {
+    final parsed = int.tryParse(_counterWidthController.text.trim());
+    final width = (parsed != null && isValidCounterWidth(parsed))
+        ? parsed
+        : _counterWidth;
+    return formatDocumentNumber(DateTime.now().year, 1, counterWidth: width);
+  }
+
+  /// حفظ العرض بعد تدقيقه — خارج 3..8 رفض برسالة عربية بلا كتابة
+  /// (وحرس setCounterWidth ثانٍ في التخزين).
+  Future<void> _saveCounterWidth() async {
+    final parsed = int.tryParse(_counterWidthController.text.trim());
+    if (parsed == null || !isValidCounterWidth(parsed)) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('عدد الخانات يجب أن يكون بين $kCounterWidthMin '
+            'و $kCounterWidthMax (D-169)'),
+      ));
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await widget.db.setCounterWidth(parsed);
+      if (!mounted) return;
+      setState(() => _counterWidth = parsed);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('تم حفظ عدد خانات العدّاد — يسري على الأرقام الجديدة'),
+      ));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// حجم مجلد الصور الحي — يُقرأ عند الفتح وبعد كل استعادة (onRestored
@@ -201,6 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _restorePath.dispose();
     _restorePassword.dispose();
     _switchPassword.dispose();
+    _counterWidthController.dispose();
     super.dispose();
   }
 
@@ -738,6 +792,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   FilledButton(
                     onPressed: _busy ? null : _backup,
                     child: const Text('إنشاء نسخة احتياطية'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── بطاقة الترقيم (D-169 — س56): سنة برقمين فالعدّاد بلا فاصل،
+          // وعرض العدّاد بعد السنة خانة إعداد المالك (3..8) بمعاينة حية —
+          // والأرقام الصادرة لا تُمسّ فالتغيير للوثائق الجديدة حصراً.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'ترقيم المستندات (D-169)',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'الصيغة: سنة برقمين فالعدّاد مبطناً بلا فاصل — «26000001». '
+                    'عدد خانات العدّاد بعد السنة من 3 إلى 8، والأرقام الصادرة '
+                    'لا تتغير — فالتغيير للوثائق الجديدة حصراً.',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _counterWidthController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(1),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'عدد خانات العدّاد بعد السنة (3–8)',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('معاينة: «فاتورة بيع ${_counterWidthPreview()}»'),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: _busy ? null : _saveCounterWidth,
+                    child: const Text('حفظ عدد خانات العدّاد'),
                   ),
                 ],
               ),
