@@ -31,7 +31,9 @@ Future<Uint8List?> loadItemImageBytes(String? relativePath) async {
 
 /// لون كل نوع بالأزرار المعزولة ولافتة النموذج — عرف المعاينة المعتمدة
 /// (س-163/D-161): بيع أخضر وشراء برتقالي ومردود بيع أزرق ومردود شراء وردي.
-Color invoiceKindColor(InvoiceKind kind) => switch (kind) {
+/// (النوع MaterialColor لا Color خلافاً — الدرجات shade50/300/700 على
+/// عائلة المادة حصراً — درس CI جولة 160)
+MaterialColor invoiceKindColor(InvoiceKind kind) => switch (kind) {
       InvoiceKind.sale => Colors.green,
       InvoiceKind.purchase => Colors.orange,
       InvoiceKind.saleReturn => Colors.indigo,
