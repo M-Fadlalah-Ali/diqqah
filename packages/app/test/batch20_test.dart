@@ -29,8 +29,7 @@ void main() {
   EditableText.debugDeterministicCursor = true;
 
   testWidgets('D-174: تعديل اسم طرف قديم برقم ما قبل القائمة يمر '
-      '(الاستثناء الذاتي D-153) — وتغيير الرقم لخارج القائمة يُرفض '
-      'برسالة عربية — وإلى داخلها يُحفظ', (tester) async {
+      '(الاستثناء الذاتي D-153) — بلا رفض ولا تغيير للرقم', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     final id = await db.insertParty(
@@ -42,14 +41,13 @@ void main() {
           ..where((t) => t.id.equals(id)))
         .getSingle();
 
-    // الضخ المباشر للبطاقة (نمط batch17 المجرب) — بلا مرور بنقرة القائمة
-    // (درس جولة 182: نقرة بلاط القائمة تُبتلع فوق البطاقة).
+    // الضخ المباشر للبطاقة (نمط batch17 المجرب) — عضو واحد لكل اختبار
+    // (درس الجولة 183: عضو ثانٍ بعد pop الجذر لا يُعتمد عليه).
     await tester.pumpWidget(
         MaterialApp(home: PartyEditScreen(db: db, existing: party)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // ═══ 1) الرقم القائم غير المتغير يمر مع تعديل الاسم ═══
     await tester.enterText(
         find.widgetWithText(TextFormField, 'الاسم *'), 'طرف قديم معدل');
     await tester.tap(find.text('حفظ'));
@@ -62,14 +60,27 @@ void main() {
     expect(edited.name, 'طرف قديم معدل');
     expect(edited.number, 'A 12',
         reason: 'الاستثناء الذاتي: الرقم القائم قبل D-174 يبقى كما هو');
+  });
 
-    // ═══ 2) تغيير الرقم إلى خارج القائمة (فراغ) يُرفض برسالته ═══
-    // بطاقة جديدة مضخوخة مباشرة — والرفض أولًا قبل أي إشعار (درس
-    // الجولتين 163/164 الموثق: الإشعار يبتلع نقرات ما بعده).
+  testWidgets('D-174: تغيير رقم طرف قائم لخارج القائمة يُرفض برسالته '
+      'بلا كتابة — وإلى داخلها فيُحفظ', (tester) async {
+    final db = DiqqahDatabase.inMemorySyncClose();
+    addTearDown(db.close);
+    final id = await db.insertParty(
+        number: 'A 12',
+        name: 'طرف قديم',
+        kind: 'customer',
+        defaultCurrencyId: 1);
+    final party = await (db.select(db.parties)
+          ..where((t) => t.id.equals(id)))
+        .getSingle();
+
     await tester.pumpWidget(
-        MaterialApp(home: PartyEditScreen(db: db, existing: edited)));
+        MaterialApp(home: PartyEditScreen(db: db, existing: party)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
+
+    // ═══ الرفض أولًا قبل أي إشعار (درس الجولتين 163/164 الموثق) ═══
     await tester.enterText(
         find.widgetWithText(TextFormField, 'رقم الطرف (الأساس)'), 'B 13');
     await tester.tap(find.text('حفظ'));
@@ -82,7 +93,7 @@ void main() {
         .getSingle();
     expect(rejected.number, 'A 12', reason: 'الرفض بلا كتابة');
 
-    // ═══ 3) الرقم إلى داخل القائمة فيُحفظ ═══
+    // ═══ الرقم إلى داخل القائمة فيُحفظ ═══
     await tester.enterText(
         find.widgetWithText(TextFormField, 'رقم الطرف (الأساس)'), 'B-13');
     await tester.tap(find.text('حفظ'));
@@ -92,7 +103,6 @@ void main() {
           ..where((t) => t.id.equals(id)))
         .getSingle();
     expect(saved.number, 'B-13');
-    expect(saved.name, 'طرف قديم معدل');
   });
 
   testWidgets('D-174: الطرف الجديد برقم خارج القائمة يُرفض — '
