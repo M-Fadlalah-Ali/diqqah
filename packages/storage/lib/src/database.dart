@@ -5978,6 +5978,15 @@ Future<List<WarehouseRow>> warehousesOf() async {
 }
 
 /// صف قائمة فواتير للعرض (05 §4.1) — للتصفح لا للقرار.
+///
+/// الدفعة 21 (F-168 بكلمة المالك «سجل الفواتير موافق» س71): فلتر
+/// الاستلام — الكل (null) أو 'undelivered' (غير مستلم: كل أسطر
+/// الفاتورة غير مستلمة أو لا أسطر لها) أو 'partial' (جزئي: بعض
+/// الأسطر مستلمة) أو 'received' (مكتمل الاستلام: كل الأسطر مستلمة
+/// ولا سطر غير مستلم) — محسوباً من عمود العلم القائم v13 بلا
+/// ترحيلة جديدة، وعدّادا الأسطر يُرجَعان بالصف ليكون ما يُعرض
+/// في القائمة هو ذاته المطبوع والمصدَّر (نمط F-166: ما يُرى
+/// يُطبع ويُصدَّر).
 Future<List<InvoiceListRow>> invoicesListReport({
   String? fromText,
   String? toText,
@@ -5986,6 +5995,10 @@ Future<List<InvoiceListRow>> invoicesListReport({
   /// س-147 (دفعة 13): فلتر الطرف الاختياري — روابط الطرف من الذمم
   /// تفتح «فواتيره» بهذا الفلتر، وعرضٌ فوق القراءة لا حساب جديد.
   int? partyId,
+
+  /// الدفعة 21 (F-168): فلتر الاستلام — null الكل، وإلا 'undelivered'
+  /// أو 'partial' أو 'received' كما في التوثيق أعلاه.
+  String? receiptFilter,
 }) async {
   final from = fromText?.trim() ?? '';
   final to = toText?.trim() ?? '';
@@ -5996,27 +6009,47 @@ Future<List<InvoiceListRow>> invoicesListReport({
     }
   }
   final kind = kindStorageValue?.trim() ?? '';
+  final receipt = receiptFilter?.trim() ?? '';
   final rows = await customSelect(
     'SELECT inv.id AS id, inv.kind AS kind, inv.number AS number, '
     'inv.invoice_date AS invoice_date, inv.state AS state, '
     'inv.total_doc_minor AS total_doc_minor, '
     'inv.total_base_minor AS total_base_minor, '
-    'c.code AS currency_code, p.name AS party_name, b.name AS box_name '
+    'c.code AS currency_code, p.name AS party_name, b.name AS box_name, '
+    'COALESCE(ls.line_total, 0) AS lines_total, '
+    'COALESCE(ls.line_undelivered, 0) AS lines_undelivered '
     'FROM invoices inv '
     'JOIN currencies c ON c.id = inv.currency_id '
     'LEFT JOIN parties p ON p.id = inv.party_id '
     'LEFT JOIN cash_boxes b ON b.id = inv.cash_box_id '
+    // الدفعة 21: عدّاد الأسطر لكل فاتورة من الأعمدة القائمة — والمحذوف
+    // من الأسطر يستثنى كما قراءة متابعة التسليم (il.is_deleted = 0).
+    'LEFT JOIN (SELECT invoice_id, COUNT(*) AS line_total, '
+    'SUM(CASE WHEN delivered = 0 THEN 1 ELSE 0 END) '
+    'AS line_undelivered FROM invoice_lines WHERE is_deleted = 0 '
+    'GROUP BY invoice_id) ls ON ls.invoice_id = inv.id '
     "WHERE inv.is_deleted = 0 "
     "AND (?1 = '' OR inv.kind = ?1) "
     "AND (?2 = '' OR inv.invoice_date >= ?2) "
     "AND (?3 = '' OR inv.invoice_date <= ?3) "
     'AND (?4 IS NULL OR inv.party_id = ?4) '
+    // الدفعة 21: فلتر الاستلام الثلاثي — لا فارغ يمر والجزئي حالة
+    // مستقلة فلا تخفي الثنائية فاتورة سُلِّم نصفها (قرار المالك س71).
+    "AND (?5 = '' OR "
+    "(?5 = 'undelivered' AND COALESCE(ls.line_undelivered, 0) = "
+    'COALESCE(ls.line_total, 0)) OR '
+    "(?5 = 'partial' AND COALESCE(ls.line_undelivered, 0) > 0 "
+    'AND COALESCE(ls.line_undelivered, 0) < '
+    'COALESCE(ls.line_total, 1)) OR '
+    "(?5 = 'received' AND COALESCE(ls.line_total, 0) > 0 "
+    'AND COALESCE(ls.line_undelivered, 0) = 0)) '
     'ORDER BY inv.invoice_date DESC, inv.id DESC',
     variables: [
       Variable.withString(kind),
       Variable.withString(from),
       Variable.withString(to),
       Variable(partyId),
+      Variable.withString(receipt),
     ],
   ).get();
   return [
@@ -6032,6 +6065,8 @@ Future<List<InvoiceListRow>> invoicesListReport({
         currencyCode: r.data['currency_code'] as String,
         partyName: r.data['party_name'] as String?,
         boxName: r.data['box_name'] as String?,
+        linesTotal: r.data['lines_total'] as int,
+        linesUndelivered: r.data['lines_undelivered'] as int,
       ),
   ];
 }
@@ -6925,6 +6960,12 @@ class InvoiceListRow {
   final String? partyName;
   final String? boxName;
 
+  /// الدفعة 21 (F-168): عدّادا أسطر الفاتورة من القاعدة — الكلي
+  /// وغير المستلم منه. الأساس الذي يُبنى عليه لسان الحالة والفلتر،
+  /// فلا إعادة حساب عند العرض ولا انحراف بين الشاشة والمطبوع.
+  final int linesTotal;
+  final int linesUndelivered;
+
   const InvoiceListRow({
     required this.id,
     required this.kind,
@@ -6936,6 +6977,8 @@ class InvoiceListRow {
     required this.currencyCode,
     required this.partyName,
     required this.boxName,
+    required this.linesTotal,
+    required this.linesUndelivered,
   });
 
   /// «فاتورة بيع » + الرقم المخزن كما هو (قديم أو جديد — D-169) —
@@ -6954,6 +6997,16 @@ class InvoiceListRow {
   /// الطرف أو الصندوق بالعرض — الآجل طرفاً والنقدي صندوقاً (س-03/س-06).
   String get counterpartLabel =>
       partyName ?? boxName ?? '—';
+
+  /// لسان حالة الاستلام للقائمة والمطبوع والCSV (الدفعة 21/F-168) —
+  /// ثلاث حالات لا اثنتان: الثنائية تخفي الجزئي فتظهر فاتورة سُلِّم
+  /// نصفها «غير مستلم» وكأن لم يُسلَّم منها شيء.
+  String get receiptLabel {
+    if (linesTotal > 0 && linesUndelivered == 0) return 'مكتمل الاستلام';
+    final delivered = linesTotal - linesUndelivered;
+    if (delivered > 0) return 'جزئي: مستلم $delivered من $linesTotal';
+    return 'غير مستلم';
+  }
 }
 
 /// صف قائمة سندات القبض والدفع للتصفح (05 §4.2/D-105).

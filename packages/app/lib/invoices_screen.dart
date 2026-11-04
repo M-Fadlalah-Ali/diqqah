@@ -48,11 +48,22 @@ IconData invoiceKindIcon(InvoiceKind kind) => switch (kind) {
       InvoiceKind.purchaseReturn => Icons.undo_outlined,
     };
 
+/// لسان حالة سطر الاستلام بتفاصيل الفاتورة (الدفعة 21/F-168 — تعميم
+/// مربع «مستلم» D-131 على كل الأنواع بكلمة المالك): لسان البيع المعتمد
+/// باقٍ حرفاً والأنواع الأخرى بلسان الاستلام لا التسليم.
+String receiptLineStatusFor(InvoiceKind kind, bool delivered) => delivered
+    ? 'مستلم'
+    : kind == InvoiceKind.sale
+        ? 'بانتظار التسليم'
+        : 'بانتظار الاستلام';
+
 /// بناء قسيمة الفاتورة — نقطة واحدة لكل مسارات إخراج الفاتورة (س-133/
 /// D-127، دفعة 11): زر التفاصيل النصي وزر القائمة السريع والمشاركة كلها
 /// تستدعيها فلا يختلف مطبوع عن مطبوع. البيانات تُجلب هنا حصراً من
-/// القاعدة، والصور بمفتاحها المفعّل (D-123)، وعمود «مستلم» بقسيمة
-/// البيع حصراً (س-140/D-134 دفعة 12) بسطر خلاصته «مستلم X من Y» —
+/// القاعدة، والصور بمفتاحها المفعّل (D-123)، وعمود «مستلم» بسطر
+/// خلاصته «مستلم X من Y» — كان بقسيمة البيع حصراً (س-140/D-134 دفعة
+/// 12) فعّم لكل الأنواع بالدفعة 21 (F-168) مع تعميم العلم بكلمة
+/// المالك —
 /// عِلماً توضيحياً للزبون لا يمس أرقام الفاتورة بحال. لسان العمود
 /// كلمات لا رموز: خط الطباعة المدمج لا يحمل رسمة الصحّ ✓ فما كان
 /// ليعرضها — و«سُلِّم» أوضح للزبون من رمز أصلاً.
@@ -93,10 +104,11 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     ];
   }
 
-  // س-140/D-134: عمود «مستلم» بقسيمة البيع حصراً — «سُلِّم» للمحدد
-  // و«بانتظار التسليم» لغيره، وسطر الخلاصة تحت الجدول.
-  // س-153/D-151 (دفعة 15): وعمود «ملاحظة» حين وُجدت ملاحظة تسليم
-  // على أسطر الفاتورة — فلا عمود فارغ يعمّم الضجيج.
+  // س-140/D-134: عمود «مستلم» — «سُلِّم» للمحدد بفواتير البيع
+  // ولسان الاستلام للأنواع الأخرى (تعميم الدفعة 21/F-168)، وسطر
+  // الخلاصة تحت الجدول بكل الأنواع.
+  // س-153/D-151 (دفعة 15): وعمود «ملاحظة» بقسيمة البيع حصراً حين
+  // وُجدت ملاحظة تسليم على أسطرها — فلا عمود فارغ يعمّم الضجيج.
   final columns = <String>[
     'الصنف',
     'الكمية',
@@ -104,7 +116,8 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     // س50/5 (س-161/D-159 دفعة 17): «المبلغ» — عرف البرمجيات
     // الشهيرة لعمود مبلغ السطر، و«الإجمالي» باق للتذييل كله.
     'المبلغ',
-    if (isSale) 'مستلم',
+    // الدفعة 21 (F-168): «مستلم» بكل الأنواع بعد تعميم العلم.
+    'مستلم',
     if (hasDeliveryNotes) 'ملاحظة',
   ];
   final rows = [
@@ -114,12 +127,16 @@ Future<Uint8List> buildInvoicePrintoutBytes(
         '${line.qtyBase}',
         formatMinorAmount(line.unitPriceMinor),
         formatMinorAmount(line.lineTotalDocMinor),
-        if (isSale) line.delivered ? 'سُلِّم' : 'بانتظار التسليم',
+        line.delivered
+            ? (isSale ? 'سُلِّم' : 'مستلم')
+            : (isSale ? 'بانتظار التسليم' : 'بانتظار الاستلام'),
         if (hasDeliveryNotes) line.deliveryNote ?? '—',
       ],
   ];
   String? summary;
-  if (isSale && lines.isNotEmpty) {
+  // الدفعة 21 (F-168): سطر خلاصة «مستلم X من Y» بكل الأنواع بعد
+  // تعميم العلم — كان بقسيمة البيع حصراً (س-140/D-134).
+  if (lines.isNotEmpty) {
     // س-148/D-138: الافتراضي «مجموع الكميات بالواحدة» بقاعدة الوحدة
     // الموثقة — والقسيمة المطبوعة على الافتراضي دائماً (القائمة
     // المنسدلة عرضُ شاشة لا سياسة مطبوع).
@@ -243,6 +260,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
   /// قيمة التخزين لنوع الفلتر — null يعني الكل.
   String? _kind;
+
+  /// الدفعة 21 (F-168): قيمة فلتر الاستلام — null الكل وإلا
+  /// 'undelivered' أو 'partial' أو 'received'.
+  String? _receipt;
+
+  /// الدفعة 21 (F-168): الصفوف المعروضة حالياً — بطاقة أزرار الطباعة
+  /// والتصدير في الشريط العلوي تقرؤها، فالمطبوع والمصدّر صورة العرض
+  /// ذاتها (عرف F-166).
+  List<InvoiceListRow>? _listRows;
+
   Future<List<InvoiceListRow>>? _rows;
 
   static final List<(String?, String)> _kindChoices = [
@@ -251,6 +278,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     (InvoiceKind.sale.storageValue, InvoiceKind.sale.label),
     (InvoiceKind.saleReturn.storageValue, InvoiceKind.saleReturn.label),
     (InvoiceKind.purchaseReturn.storageValue, InvoiceKind.purchaseReturn.label),
+  ];
+
+  /// الدفعة 21 (F-168): خيارات فلتر الاستلام — ثلاث حالات لا اثنتان
+  /// لأن الثنائية تخفي الجزئي (فاتورة سُلّم نصفها تظهر «غير مستلم»
+  /// كذباً).
+  static final List<(String?, String)> _receiptChoices = [
+    (null, 'الكل'),
+    ('undelivered', 'غير مستلم'),
+    ('partial', 'جزئي'),
+    ('received', 'مكتمل الاستلام'),
   ];
 
   @override
@@ -274,6 +311,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
         fromText: _from.text.trim(),
         toText: _to.text.trim(),
         kindStorageValue: _kind,
+        // الدفعة 21 (F-168): فلتر الاستلام يمرّ للقاعدة مع البقية.
+        receiptFilter: _receipt,
       );
     });
   }
@@ -367,10 +406,102 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     }
   }
 
+  /// الدفعة 21 (F-168): أعمدة أرشيف الفواتير وصفوفه تجميعاً واحداً —
+  /// المطبوع والمصدّر صورة العرض ذاتها فلا انحراف (عرف F-166 الموثق).
+  static const List<String> _archiveColumns = [
+    'النوع',
+    'الرقم',
+    'التاريخ',
+    'الطرف / الصندوق',
+    'الحالة',
+    'الاستلام',
+    'المبلغ',
+  ];
+
+  static List<List<String>> _archiveRows(List<InvoiceListRow> rows) => [
+        for (final row in rows)
+          [
+            row.kindValue.label,
+            row.number.isEmpty ? '—' : row.number,
+            row.invoiceDate,
+            row.counterpartLabel,
+            row.stateLabel,
+            row.receiptLabel,
+            '${formatMinorAmount(row.totalDocMinor)} ${row.currencyCode}',
+          ],
+      ];
+
+  /// الدفعة 21 (F-168): طباعة القائمة المعروضة بفلاترها كلها — قسيمة
+  /// عرضية بنمط التقارير، والفشل رسالة لا صمت.
+  Future<void> _printList() async {
+    final rows = _listRows;
+    if (rows == null || rows.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await buildDocumentPdf(
+        title: 'سجل الفواتير',
+        headerPairs: const [],
+        columns: _archiveColumns,
+        rows: _archiveRows(rows),
+        footerPairs: [
+          ('عدد الفواتير', '${rows.length}'),
+        ],
+        format: resolvePageFormat(docKind: 'report'),
+      );
+      await sharePdfBytes(bytes, 'سجل الفواتير.pdf');
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد الطباعة — $e')),
+      );
+    }
+  }
+
+  /// الدفعة 21 (F-168): تصدير القائمة المعروضة CSV — باني المجال النقي
+  /// (UTF-8 مع BOM) وملف مؤقت باسم معقّم (D-152)، والفشل رسالة لا صمت.
+  Future<void> _exportCsv() async {
+    final rows = _listRows;
+    if (rows == null || rows.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final csv = buildCsvSnapshot(
+        title: 'سجل الفواتير',
+        columns: _archiveColumns,
+        rows: _archiveRows(rows),
+        footer: [('عدد الفواتير', '${rows.length}')],
+      );
+      await shareCsvBytes(csv, 'سجل الفواتير.csv');
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('تعذر توليد التصدير — $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('الفواتير')),
+      appBar: AppBar(
+        title: const Text('الفواتير'),
+        actions: [
+          // الدفعة 21 (F-168): طباعة القائمة المفلترة وتصديرها CSV —
+          // في الشريط العلوي سطراً مستقلاً لا حشواً بصف فلاتر (درس س67)،
+          // وتعطيلهما بلا صفوف فلا زر ميت (عرف زر تسليم الكل).
+          IconButton(
+            tooltip: 'طباعة القائمة',
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            onPressed: (_listRows == null || _listRows!.isEmpty)
+                ? null
+                : _printList,
+          ),
+          IconButton(
+            tooltip: 'تصدير CSV',
+            icon: const Icon(Icons.table_view_outlined),
+            onPressed: (_listRows == null || _listRows!.isEmpty)
+                ? null
+                : _exportCsv,
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNew,
         icon: const Icon(Icons.receipt_long_outlined),
@@ -422,6 +553,27 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                     FilledButton(onPressed: _reload, child: const Text('عرض')),
                   ],
                 ),
+                // الدفعة 21 (F-168): فلتر الاستلام سطراً مستقلاً — درس
+                // س67: لا حشر عنصر بصف فيه Expanded فتنضغط القوائم
+                // المنسدلة وتنكسر الاختبارات.
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _receipt,
+                        decoration: const InputDecoration(
+                            labelText: 'الاستلام'),
+                        items: [
+                          for (final (value, label) in _receiptChoices)
+                            DropdownMenuItem<String>(
+                                value: value, child: Text(label)),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _receipt = value),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -446,6 +598,9 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final rows = snapshot.data!;
+                // الدفعة 21 (F-168): بطاقة الشريط العلوي تقرأ الصفوف
+                // المعروضة ذاتها — والمطبوع والمصدّر صورة العرض.
+                _listRows = rows;
                 if (rows.isEmpty) {
                   return const Center(
                     child: Padding(
@@ -464,7 +619,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                         subtitle: Text(
                             '${row.invoiceDate}'
                             ' · ${row.counterpartLabel}'
-                            ' · ${row.stateLabel}'),
+                            ' · ${row.stateLabel}'
+                            // الدفعة 21 (F-168): حالة الاستلام بالصف —
+                            // لسان القائمة هو ذاته لسان المطبوع والCSV.
+                            ' · ${row.receiptLabel}'),
                         // س-133/D-127: زر الطباعة السريع بجانب المبلغ —
                         // يطبع القسيمة الواحدة بلا فتح التفاصيل.
                         trailing: Row(
@@ -1392,11 +1550,13 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 /// «طباعة الفاتورة غير متاحة»، والقسيمة واحدة للجميع من نقطة واحدة
 /// (buildInvoicePrintoutBytes).
 ///
-/// س-137 (D-131، دفعة 12): عمود «مستلم» بسطور فاتورة البيع حصراً —
-/// مربع واحد بلفظ المالك «أفضل عمود بعنوان "مستلم" تحته في كل سطر مربع
-/// يحدد عند التسليم، وما ليس محدد يكون غير مستلم، أظن هذا يكفي» —
-/// التحديد يحفظ بقاعدة البيانات فوراً ويتحدث على المرحّلة بلا فك إقفال
-/// (علم عمل لا محاسبة)، ولا يظهر في الشراء ومردوداته.
+/// س-137 (D-131، دفعة 12): عمود «مستلم» بسطور الفاتورة — مربع واحد
+/// بلفظ المالك «أفضل عمود بعنوان "مستلم" تحته في كل سطر مربع يحدد عند
+/// التسليم، وما ليس محدد يكون غير مستلم، أظن هذا يكفي» — التحديد يحفظ
+/// بقاعدة البيانات فوراً ويتحدث على المرحّلة بلا فك إقفال (علم عمل لا
+/// محاسبة). الدفعة 21 (F-168 بكلمة المالك): عمّم المربع لكل الأنواع
+/// — بيعاً وشراءً ومردودات — ليكون فلتر الاستلام بالأرشيف ذا معنى
+/// لكل النوع، وخانة المورد المسؤول باقت للبيع حصراً (D-132).
 ///
 /// س-138 (D-132، دفعة 12): المورد المسؤول بكل سطر — اختيار يدوي من
 /// الموردين مع اقتراح من آخر فاتورة شراء مرحّلة للصنف، والاختيار يُخزَّن
@@ -1674,10 +1834,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           // س-148/D-138 (دفعة 14): عدّاد التسليم «مستلم X من Y»
           // بأساسه الافتراضي (الكميات بالواحدة) وقائمة التبديل
           // بخيارَيها في نفس السطر — بقرار المالك الحرفي.
-          if (_isSale && _lines.isNotEmpty) _deliveryCounterRow(),
+          // الدفعة 21 (F-168): بكل الأنواع بعد تعميم العلم.
+          if (_lines.isNotEmpty) _deliveryCounterRow(),
           // زر «تسليم الكل» (س43 «لا بأس») — يظهر ما دام سطر غير مستلم
           // ويُسحب كلياً من الشاشة عند اكتمال التسليم (لا زر ميت معطل).
-          if (_isSale && _lines.isNotEmpty && _hasUndelivered)
+          // الدفعة 21 (F-168): بكل الأنواع بعد تعميم العلم.
+          if (_lines.isNotEmpty && _hasUndelivered)
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(
@@ -1690,8 +1852,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               ),
             ),
           const Divider(),
-          for (final line in _lines)
-            _lineTile(line, sale: _isSale),
+          for (final line in _lines) _lineTile(line),
           if (_lines.isEmpty) const ListTile(title: Text('لا بنود')),
         ],
       ),
@@ -1732,24 +1893,20 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
-  /// سطر الفاتورة — بعمود «مستلم» وخانة المورد في البيع (س-137/س-138)
-  /// وباسم الصنف لا رقمه (المبدأ المؤسسي س-143: كل اسم مدخلاً —
-  /// والنقر يفتح ورقة الصنف بدفعة 13).
-  Widget _lineTile(InvoiceLineDocument line, {required bool sale}) {
+  /// سطر الفاتورة — بعمود «مستلم» في كل الأنواع (الدفعة 21/F-168)
+  /// وخانة المورد في البيع حصراً (س-137/س-138) وباسم الصنف لا رقمه
+  /// (المبدأ المؤسسي س-143: كل اسم مدخلاً — والنقر يفتح ورقة الصنف
+  /// بدفعة 13).
+  Widget _lineTile(InvoiceLineDocument line) {
     final item = _itemById[line.itemId];
     final itemName = item?.name ?? 'صنف #${line.itemId}';
     final title =
         '$itemName — ${line.qtyBase} × ${formatMinorAmount(line.unitPriceMinor)}';
-    if (!sale) {
-      return ListTile(
-        title: Text(title),
-        subtitle:
-            Text('المبلغ ${formatMinorAmount(line.lineTotalDocMinor)}'),
-        // س-144/D-136: سطر الفاتورة من مواضع ورقة الصنف الخمسة.
-        onTap: () => showItemSheet(context, widget.db, line.itemId, itemName),
-      );
-    }
-    final suggestion = _supplierSuggestion[line.itemId];
+    final isSale = _isSale;
+    final kind = _invoice == null
+        ? InvoiceKind.sale
+        : InvoiceKind.fromStorage(_invoice!.kind);
+    final suggestion = isSale ? _supplierSuggestion[line.itemId] : null;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
@@ -1761,7 +1918,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               subtitle: Text(
                   'المبلغ ${formatMinorAmount(line.lineTotalDocMinor)}'),
               // س-137/D-131: مربع «مستلم» الواحد — غير محدد افتراضاً
-              // لكل سطر، والتحديد يحفظ فوراً.
+              // لكل سطر، والتحديد يحفظ فوراً. الدفعة 21 (F-168): بكل
+              // الأنواع بعد تعميم العلم بكلمة المالك.
               trailing: Checkbox(
                 value: line.delivered,
                 onChanged: _busy
@@ -1777,30 +1935,37 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
-                  line.delivered ? 'مستلم' : 'بانتظار التسليم',
+                  // الدفعة 21 (F-168): لسان الحالة من المنبع الموحد —
+                  // البيع بلفظه المعتمد والأنواع الأخرى بلسان الاستلام.
+                  receiptLineStatusFor(kind, line.delivered),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
             ),
-            DropdownButtonFormField<int>(
-              initialValue: line.supplierPartyId,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'المورد المسؤول',
-                border: InputBorder.none,
+            // س-138/D-132: خانة المورد المسؤول بفواتير البيع حصراً —
+            // عهدها D-132 ولم يمسه تعميم الدفعة 21.
+            if (isSale)
+              DropdownButtonFormField<int>(
+                initialValue: line.supplierPartyId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'المورد المسؤول',
+                  border: InputBorder.none,
+                ),
+                items: [
+                  const DropdownMenuItem<int>(
+                      value: null, child: Text('بلا مورد')),
+                  for (final p in _suppliers)
+                    DropdownMenuItem<int>(value: p.id, child: Text(p.name)),
+                ],
+                onChanged:
+                    _busy ? null : (value) => _setSupplier(line, value),
               ),
-              items: [
-                const DropdownMenuItem<int>(
-                    value: null, child: Text('بلا مورد')),
-                for (final p in _suppliers)
-                  DropdownMenuItem<int>(value: p.id, child: Text(p.name)),
-              ],
-              onChanged:
-                  _busy ? null : (value) => _setSupplier(line, value),
-            ),
             // س-138/D-132: الاقتراح من آخر شراء مرحّل — عرضاً لا كتابة،
             // ومن اختار فاختياره هو المخزّن.
-            if (line.supplierPartyId == null && suggestion != null) ...[
+            if (isSale &&
+                line.supplierPartyId == null &&
+                suggestion != null) ...[
               for (final p in _suppliers)
                 if (p.id == suggestion)
                   Align(
