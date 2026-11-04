@@ -24,7 +24,12 @@ void main() {
       'والفلترة تحسم المكتمل من غير المستلم', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
-    final saleId = await seedKnownCycle(db);
+    await seedKnownCycle(db);
+    // البذرة تعيد رقم السنة لا معرف الفاتورة (نمط batch12 المجرب):
+    // معرف فاتورة البيع الوحيدة يُقرأ من القاعدة.
+    final saleId = (await db.customSelect(
+      "SELECT id FROM invoices WHERE kind = 'sale' ORDER BY id LIMIT 1",
+    ).getSingle()).data['id'] as int;
     final saleLines = await db.invoiceLines(saleId);
     await db.setInvoiceLineDelivered(saleLines.first.id, delivered: true);
 
