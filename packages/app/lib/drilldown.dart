@@ -417,14 +417,23 @@ class PartyStatementScreen extends StatefulWidget {
 }
 
 class _PartyStatementScreenState extends State<PartyStatementScreen> {
-  late final Future<PartyStatementReport> _data =
-      widget.db.partyStatementReport(widget.partyId);
+  /// الكشف مع صف الطرف معاً — صف الطرف يحمل سقف الائتمان (F-023)
+  /// الذي تنبئ به لافتة F-164 عند فتح الكشف («رسالة لا صمت» F-162).
+  late final Future<(PartyStatementReport, Party?)> _data = () async {
+    final report = await widget.db.partyStatementReport(widget.partyId);
+    final parties = await widget.db.select(widget.db.parties).get();
+    Party? party;
+    for (final p in parties) {
+      if (p.id == widget.partyId) party = p;
+    }
+    return (report, party);
+  }();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('كشف حساب الطرف')),
-      body: FutureBuilder<PartyStatementReport>(
+      body: FutureBuilder<(PartyStatementReport, Party?)>(
         future: _data,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -433,7 +442,10 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final report = snapshot.data!;
+          final (report, party) = snapshot.data!;
+          final limit = party?.creditLimitBaseMinor;
+          final overLimit =
+              limit != null && report.closingNetDebitMinor > limit;
           return Column(
             children: [
               Card(
@@ -456,6 +468,45 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
                   ),
                 ),
               ),
+              // F-164: تنبيه حد الائتمان عند فتح كشف الطرف — «البائع
+              // يرى ويقرر» (رسالة لا منع)، فلا يفتح الكشف صامتاً عن
+              // تجاوز يعرفه المالك وحده.
+              if (overLimit)
+                Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'تجاوز حد الائتمان',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'الصافي '
+                          '${formatMinorAmount(report.closingNetDebitMinor)} '
+                          'يتجاوز الحد المسموح '
+                          '${formatMinorAmount(limit)} بفائض '
+                          '${formatMinorAmount(report.closingNetDebitMinor - limit)} '
+                          '— التنبيه إرشاد لا منع',
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               DrilldownActionsBar(
                 onPrint: () => printDrilldownDoc(
                   context,

@@ -684,6 +684,22 @@ class _LineUi {
 /// بالوحدة الأساسية حصراً في م1 (09 §2). المحرك حرس الحدود: مدقق
 /// البنية قبل الكتابة وفحوص الترحيل بعدها والقاعدة ثالثاً — والواجهة
 /// تعرض رسائل المدقق العربية كما هي فتُرى سبب الرفض لا خطأ غامضاً.
+
+/// حقيقة تنبيه F-164 المعروضة في النافذة — أرقام جاهزة للعرض لا حسابات.
+class _CreditWarning {
+  final String partyName;
+  final int limitMinor;
+  final int netAfterMinor;
+  final int excessMinor;
+
+  const _CreditWarning({
+    required this.partyName,
+    required this.limitMinor,
+    required this.netAfterMinor,
+    required this.excessMinor,
+  });
+}
+
 class InvoiceEditScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
@@ -811,7 +827,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _unitNames = {for (final u in units) u.id: u.name};
       _barcodesByItem = barcodes;
       _stockAvail = avail;
-      // الافتراضي المعقول لصاحب المحل: أول صندوق وأول مستودع نشط —
+      // الافتراضي المعقول لصاحب المنشأة: أول صندوق وأول مستودع نشط —
       // والمستودع المعين قبل قراءة المتاح (إصلاح س-119/D-114 أعلاه).
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
       _warehouseId = wid;
@@ -1027,6 +1043,72 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     );
   }
 
+  // ═══ F-164: تنبيه حد الائتمان — «البائع يرى ويقرر» (رسالة لا منع) ═══
+
+  /// فحص السقف قبل الترحيل — نطاقه الصادق: **بيع آجل** (طرف بلا صندوق)
+  /// لطرف له سقف معرف. فالشراء ذمّتُنا على المورد لا ائتمانُ عميل،
+  /// والنقدي لا ذمة له، والمسودة لا تولد ذمة أصلاً. الرصيد من تقرير
+  /// الذمم ذاته (منبع س-105/D-106 الواحد — لا حساب موازٍ).
+  Future<_CreditWarning?> _creditLimitWarning(InvoiceDraft draft) async {
+    if (draft.kind != InvoiceKind.sale) return null;
+    if (draft.partyId == null || draft.boxId != null) return null;
+    Party? party;
+    for (final p in _parties) {
+      if (p.id == draft.partyId) party = p;
+    }
+    if (party == null || party.creditLimitBaseMinor == null) return null;
+    final rows = await widget.db.receivablesPayablesReport();
+    var net = 0;
+    for (final r in rows) {
+      if (r.partyId == party.id) {
+        net = r.direction == PartyBalanceDirection.theyOweUs
+            ? r.amountMinor
+            : -r.amountMinor;
+      }
+    }
+    final excess = creditLimitExcessBaseMinor(
+      creditLimitBaseMinor: party.creditLimitBaseMinor,
+      netDebitBaseMinor: net,
+      invoiceTotalBaseMinor: draft.totalBaseMinor,
+    );
+    if (excess == null) return null;
+    return _CreditWarning(
+      partyName: party.name,
+      limitMinor: party.creditLimitBaseMinor!,
+      netAfterMinor: net + draft.totalBaseMinor,
+      excessMinor: excess,
+    );
+  }
+
+  /// نافذة الرسالة: الأرقام كلها معروضة (الحصيلة والسقف والفائض) —
+  /// و«حفظ على أي حال» مفتاحٌ صريح بالقرار، والرجوع يترك النموذج كما هو.
+  Future<bool> _confirmCreditLimit(_CreditWarning w) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تجاوز حد الائتمان'),
+        content: Text(
+          'رصيد «${w.partyName}» بعد هذه الفاتورة '
+          '${formatMinorAmount(w.netAfterMinor)} — يتجاوز الحد المسموح '
+          '${formatMinorAmount(w.limitMinor)} بفائض '
+          '${formatMinorAmount(w.excessMinor)}.\n'
+          'التنبيه إرشاد لا منع — القرار لك.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('رجوع للتعديل'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('حفظ على أي حال'),
+          ),
+        ],
+      ),
+    );
+    return proceed == true;
+  }
+
   Future<void> _save({required bool post}) async {
     if (_busy) return;
     final draft = _buildDraft();
@@ -1038,6 +1120,16 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
             for (final e in structure) describeInvoiceValidationError(e)
           ]);
       return;
+    }
+    // F-164: تنبيه حد الائتمان عند الترحيل حصراً — المسودة لا تولد ذمة
+    // أصلاً، والرسالة لا منع: «البائع يرى ويقرر» (الوجه اللين، س2).
+    if (post) {
+      final warning = await _creditLimitWarning(draft);
+      if (warning != null) {
+        if (!mounted) return;
+        final proceed = await _confirmCreditLimit(warning);
+        if (!proceed) return; // «رجوع للتعديل» — لا كتابة ولا انشغال
+      }
     }
     setState(() {
       _busy = true;

@@ -284,7 +284,7 @@ Future<Uint8List> buildDocumentPdf({
                     height: m.brandSize * 2.6),
               )
             else
-              pw.Text('دقة — نظام المحاسبة لمحلك',
+              pw.Text('دِقَّة — نظام المحاسبة العربي',
                   textAlign: pw.TextAlign.center,
                   style: pw.TextStyle(font: regular, fontSize: m.brandSize)),
             pw.SizedBox(height: m.boxGap),

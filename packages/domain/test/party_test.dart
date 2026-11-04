@@ -391,5 +391,66 @@ void main() {
       );
       expect(errors, contains(isA<PartyNumberRequired>()));
     });
+
+    // ═══ F-164: تنبيه حد الائتمان — «البائع يرى ويقرر» (رسالة لا منع) ═══
+    test('F-164: بلا سقف لا ينذر أبداً — والفراغ «بلا سقف» عهد س-34', () {
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: null,
+            netDebitBaseMinor: 90000,
+            invoiceTotalBaseMinor: 90000),
+        isNull,
+      );
+    });
+
+    test('F-164: تحت السقف وعند تمام السقف لا تجاوز — التجاوز أشد من السقف',
+        () {
+      // ذمة 40,000 وفاتورة 5,000 والسقف 50,000 — تحت السقف
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: 50000,
+            netDebitBaseMinor: 40000,
+            invoiceTotalBaseMinor: 5000),
+        isNull,
+      );
+      // الوصول بالتمام إلى السقف: 40,000 + 10,000 = 50,000 — لا تجاوز
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: 50000,
+            netDebitBaseMinor: 40000,
+            invoiceTotalBaseMinor: 10000),
+        isNull,
+      );
+    });
+
+    test('F-164: التجاوز يعيد الفائض حصراً — لا الرصيد كله', () {
+      // 40,000 + 15,000 = 55,000 والسقف 50,000 — الفائض 5,000
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: 50000,
+            netDebitBaseMinor: 40000,
+            invoiceTotalBaseMinor: 15000),
+        5000,
+      );
+    });
+
+    test('F-164: الذمة السالبة (نحن مدينون) تخفّض الحصيلة بإشارتها', () {
+      // نحن المدينون 20,000 ثم بيع 60,000 → الحصيلة 40,000 تحت السقف
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: 50000,
+            netDebitBaseMinor: -20000,
+            invoiceTotalBaseMinor: 60000),
+        isNull,
+      );
+      // نحن المدينون 20,000 ثم بيع 80,000 → الحصيلة 60,000 والفائض 10,000
+      expect(
+        creditLimitExcessBaseMinor(
+            creditLimitBaseMinor: 50000,
+            netDebitBaseMinor: -20000,
+            invoiceTotalBaseMinor: 80000),
+        10000,
+      );
+    });
   });
 }

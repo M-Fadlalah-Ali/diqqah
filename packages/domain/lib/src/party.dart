@@ -407,3 +407,29 @@ List<PartyValidationError> validatePartyDraft(
   }
   return errors;
 }
+
+// ═════════════════════════════════════════════════════════════════
+// F-164: تنبيه حد الائتمان — «البائع يرى ويقرر» (الوجه اللين، س2)
+// ═════════════════════════════════════════════════════════════════
+
+/// فائض تجاوز حد الائتمان بوحدة الصغرى الأساسية — أو null إن لم يُتجاوز.
+///
+/// F-164 (م1-تحسينات، 09 §8): «عند حفظ فاتورة آجلة أو فتح كشف الطرف،
+/// إذا تجاوز الرصيد الجاري سقف الائتمان المعرف (F-023) ← رسالة تحذير
+/// من فهرس الرسائل لا منع — البائع يرى ويقرر».
+/// - السقف الفراغي «بلا سقف» (س-34) لا ينذر أبداً.
+/// - الوصولُ بالتمام إلى السقف ليس تجاوزاً — التجاوز أشدُّ من السقف.
+/// - [netDebitBaseMinor] صافي الذمة الحالي بإشارته (موجب: يدين لنا،
+///   سالب: نحن المدينون — فيخفّض الرصيدُ السالبُ الحصيلَة الجديدة).
+/// - نطاق الاستدعاء الصادق: ترحيل فاتورة **بيع** آجلة حصراً — فالشراء
+///   ذمّتُنا على المورد لا ائتمانُ عميل، والمسودة لا تولد ذمة أصلاً.
+int? creditLimitExcessBaseMinor({
+  required int? creditLimitBaseMinor,
+  required int netDebitBaseMinor,
+  required int invoiceTotalBaseMinor,
+}) {
+  if (creditLimitBaseMinor == null) return null;
+  final after = netDebitBaseMinor + invoiceTotalBaseMinor;
+  if (after <= creditLimitBaseMinor) return null;
+  return after - creditLimitBaseMinor;
+}
