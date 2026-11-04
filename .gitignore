@@ -12,3 +12,7 @@ tool-results/
 # إصدارات Flutter المستقبلية (م0)
 .dart_tool/
 build/
+
+# مولّدات محلية لا تُلزم — CI يولّدها بنفسه (درس س71) واستكمالاً لعلاج ضجيج الشجرة (س69)
+packages/*/pubspec.lock
+packages/storage/lib/src/database.g.dart
