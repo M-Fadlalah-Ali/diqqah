@@ -265,6 +265,7 @@ const Map<String, String> sequenceKindLabels = {
   // والقيمة التخزينية voucher_payment لا تتغير فلا ترحيل بيانات.
   'voucher_payment': 'سند دفع',
   'box_transfer': 'تحويل بين صناديق',
+  'stock_transfer': 'تحويل بين مستودعات',
   'cash_adjustment': 'تسوية صندوق',
 };
 

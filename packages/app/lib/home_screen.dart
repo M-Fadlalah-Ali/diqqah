@@ -12,6 +12,7 @@ import 'vouchers_screen.dart';
 import 'boxes_screen.dart';
 import 'roles_screen.dart';
 import 'delivery_screen.dart';
+import 'warehouses_screen.dart';
 
 /// الشاشة الهيكلية (F-016): قائمة وحدات — إطار التنقل. الوحدات ومراحل
 /// توفرها من جدول النطاق (01 §5) حرفاً، والإعدادات متاحة فوراً بعد
@@ -66,7 +67,9 @@ class _HomeScreenState extends State<HomeScreen> {
     ('parties', 'الأطراف', 'متاحة الآن — بطاقة الأطراف والبحث الجامع (F-020..F-023)', true),
     ('items', 'الأصناف', 'متاحة الآن — بطاقة الصنف والوحدات الأساسية (F-030/F-031)', true),
     ('units', 'وحدات القياس والتعبئة', 'الإصدار 2 — الإدخال في م1 بالوحدة الأساسية من شاشة الأصناف', false),
-    ('warehouses', 'المستودعات', 'الإصدار 1 (واحد) → 2 (متعدد + جرد)', false),
+    // الدفعة 24 (أولى م2 — س77/D-185): المستودعات خرجت من مفرغها —
+    // الإدارة والتحويل بين المستودعات (س-18) بشاشتها (س-18/05 §3.3).
+    ('warehouses', 'المستودعات', 'متاحة الآن — الإدارة والتحويل بين المستودعات (م2 دفعة 24)', true),
     ('vouchers', 'السندات', 'متاحة الآن — قبض وصرف وتحويل وتسوية (D-098)', true),
     // س-139/D-133 (دفعة 12): شاشة متابعة أسطر البيع غير المستلمة —
     // بصلاحية مستقلة افتراضها للمدير حصراً وقابلة للتفويض.
@@ -88,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
   static const Map<String, IconData> _moduleIcons = {
     'parties': Icons.people_outline,
     'items': Icons.inventory_2_outlined,
+    'warehouses': Icons.warehouse_outlined, // الدفعة 24 (أولى م2)
     'vouchers': Icons.request_quote_outlined,
     'delivery': Icons.local_shipping_outlined, // متابعة التسليم (D-133)
     'boxes': Icons.account_balance_wallet_outlined,
@@ -230,6 +234,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                           PartiesScreen(db: widget.db),
                                         'الأصناف' =>
                                           ItemsScreen(db: widget.db),
+                                        'المستودعات' =>
+                                          WarehousesScreen(db: widget.db),
                                         'التقارير اليومية' =>
                                           ReportsScreen(db: widget.db),
                                         'السندات' =>

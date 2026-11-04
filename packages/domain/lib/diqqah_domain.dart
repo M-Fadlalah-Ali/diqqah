@@ -15,5 +15,7 @@ export 'src/reports.dart';
 export 'src/bulk_price.dart';
 export 'src/hijri.dart';
 export 'src/suggest.dart';
+export 'src/stock_transfer.dart';
+export 'src/warehouses.dart';
 export 'src/setup.dart';
 export 'src/voucher.dart';

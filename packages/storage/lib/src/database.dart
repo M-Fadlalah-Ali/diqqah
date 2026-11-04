@@ -653,7 +653,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -664,6 +664,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createInvoiceTriggers();
           await _createVoucherTables();
           await _createVoucherTriggers();
+          await _createTransferTables();
           await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
@@ -938,6 +939,18 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                     'ALTER TABLE invoice_lines ADD COLUMN '
                     'delivery_note TEXT NULL');
               }
+            }
+            // 14→15 (ومن إصدار أدنى مباشرة): الدفعة 24 — أولى م2
+            // «تعدد المستودعات والتحويل بينها» (D-184/D-185، س-77):
+            // جدولان جديدان خالصان SQL خاماً بنمط v7/v8 المجرّب
+            // (آمنة التكرار بـIF NOT EXISTS ولا مساس بجداول قائمة) —
+            // رأس تحويل بلا مسودة (يُنشأ مرحّلاً — س-18: الرفض قبل
+            // الكتابة حصراً) وأسطره، ومُشغّلات تجميدهما (نمط F-140:
+            // لقطة تاريخية لا تعدل ولا تحذف). بنية تعدد المستودعات
+            // جاهزة منذ البداية (warehouses/stock_moves/stock_balances
+            // بv7) فلا أعمدة على جداول قائمة هنا أصلاً.
+            if (version == 15) {
+              await _createTransferTables();
             }
           }
         },
@@ -2598,6 +2611,67 @@ Future<void> _seedInvoiceBaseline() async {
   }
 }
 
+/// جداول الدفعة 24 — تحويل الأصناف بين مستودعات (س-18/F-045 أولى م2):
+/// جدولان جديدان خالصان ببنية اصطلاح «كل جدول» (D-055) — الرأس بلا
+/// مسودة أصلاً (يُنشأ مرحّلاً فالرفض قبل الكتابة حصراً — س-18: لا ذمة
+/// ولا صندوق في التحويل فلا مسودة تحتاجها)، وأسطره بلقطة كلفة السطر.
+/// والمُشغِّلات الحواجز بنمط لقطات الحركات (F-140): التحويل المرحّل
+/// لقطة تاريخية لا تعدل ولا تحذف — والحركات الخلفية مرجعيتها إليه
+/// فتجريدها تعني فقد أثر التدقيق (07 §2.3).
+Future<void> _createTransferTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "stock_transfers" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"transfer_date" TEXT NOT NULL, '
+        '"from_warehouse_id" INTEGER NOT NULL, '
+        '"to_warehouse_id" INTEGER NOT NULL, '
+        '"narration" TEXT NULL, '
+        '"state" TEXT NOT NULL DEFAULT \'posted\', '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "stock_transfer_lines" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"transfer_id" INTEGER NOT NULL, '
+        '"item_id" INTEGER NOT NULL, '
+        '"qty_base" INTEGER NOT NULL, '
+        '"unit_cost_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"value_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    // الحاجز — تجميد الرأس (نمط trg_stock_moves_frozen_update/F-140)
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_transfers_frozen_update '
+        'BEFORE UPDATE ON stock_transfers FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'تحويل المستودعات لقطة تاريخية — لا تعديل "
+        "(نمط F-140)'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_transfers_frozen_delete '
+        'BEFORE DELETE ON stock_transfers FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'تحويل المستودعات لا يُحذف — لقطة تاريخية "
+        'والعكس بمردود لا بحذف\'); '
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_transfer_lines_frozen_update '
+        'BEFORE UPDATE ON stock_transfer_lines FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر التحويل لقطة تاريخية — لا تعديل'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_transfer_lines_frozen_delete '
+        'BEFORE DELETE ON stock_transfer_lines FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر التحويل لا يُحذف — لقطة تاريخية'); "
+        'END',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
 Future<Map<String, Object?>?> _itemByIdTx(int id) async {
   final rows = await customSelect(
     'SELECT id, sku, name, kind, base_unit_id, is_active FROM items '
@@ -3797,6 +3871,336 @@ Future<int> cashBoxBalanceOf(int boxId) => _cashBoxBalanceTx(boxId);
 Future<CashBoxRow?> cashBoxById(int id) => _cashBoxByIdTx(id);
 
 Future<WarehouseRow?> warehouseById(int id) => _warehouseByIdTx(id);
+
+// ═══ الدفعة 24 (أولى م2) — تعدد المستودعات والتحويل بينها ═══
+// المحرك بنمط دفعة السندات: المدقق البنيوي بالمجال والفحوص المحركية
+// هنا على ما خُزّن لا على ما قيل، والحاجز الثاني مُشغِّلات القاعدة
+// (التجميد أعلاه)، والترحيل معاملة واحدة أي رفض يتراجع كله بما فيه
+// العدّاد (07 §1.9/§2.4).
+
+/// إنشاء مستودع جديد (س-18 مركز الرفض: الاسم فريد بغير فارغ — نمط
+/// الصناديق). بلا حساب ورقي: المخزون حساب 113 موحداً على الشركة.
+Future<int> warehouseCreate({required String name}) async {
+  final err = warehouseNameError(name);
+  if (err != null) throw StateError(err);
+  final trimmed = name.trim();
+  final dup = await customSelect(
+    'SELECT id FROM warehouses WHERE name = ? AND is_deleted = 0',
+    variables: [Variable.withString(trimmed)],
+  ).get();
+  if (dup.isNotEmpty) {
+    throw StateError('اسم المستودع «$trimmed» مستخدم سلفاً — '
+        'وأسماء المستودعات فريدة');
+  }
+  final now = DateTime.now().millisecondsSinceEpoch;
+  await customStatement(
+    'INSERT INTO warehouses (name, is_active, uuid, created_at, '
+    'updated_at, is_deleted) VALUES (?, 1, ?, ?, ?, 0)',
+    [trimmed, const Uuid().v4(), now, now],
+  );
+  return (await customSelect('SELECT last_insert_rowid() AS id')
+          .getSingle())
+      .data['id'] as int;
+}
+
+/// إعادة تسمية مستودع قائم — الاسم الذاتي يمر (الاستثناء الذاتي نمط
+/// D-153) والغير مكرر يقبل فلا يُحبس تعديل مستودع قديم باسمه نفسه.
+Future<void> warehouseRename({
+  required int id,
+  required String name,
+}) async {
+  final err = warehouseNameError(name);
+  if (err != null) throw StateError(err);
+  final trimmed = name.trim();
+  final row = await _warehouseByIdTx(id);
+  if (row == null) throw StateError('لا مستودع بالمعرف $id');
+  final dup = await customSelect(
+    'SELECT id FROM warehouses WHERE name = ? AND is_deleted = 0 '
+    'AND id <> ?',
+    variables: [Variable.withString(trimmed), Variable.withInt(id)],
+  ).get();
+  if (dup.isNotEmpty) {
+    throw StateError('اسم المستودع «$trimmed» مستخدم سلفاً — '
+        'وأسماء المستودعات فريدة');
+  }
+  await customStatement(
+    'UPDATE warehouses SET name = ?, updated_at = ? WHERE id = ?',
+    [trimmed, DateTime.now().millisecondsSinceEpoch, id],
+  );
+}
+
+/// تعطيل/تفعيل مستودع — بلا حذف أبداً (المرجع المحاسبي المرتبط
+/// بحركات لا يُحذف). الحراسة على التعطيل حصراً بنمط الصناديق
+/// (03 §6-3): لا يُعطَّل آخر مستودع نشط (يبقى باب الإدخال مغلقاً
+/// وإلا رحلت كل فاتورة بلا مستودع) ولا مستودع برصيد قائم — يُفرَّغ
+/// أولاً بالتحويل أو تسوية الجرد. الأرصدة باقية مهما فعلت.
+Future<void> warehouseSetActive({
+  required int id,
+  required bool active,
+}) async {
+  final row = await _warehouseByIdTx(id);
+  if (row == null) throw StateError('لا مستودع بالمعرف $id');
+  if (!active && row.isActive) {
+    final activeCount = (await customSelect(
+      'SELECT COUNT(*) AS c FROM warehouses '
+      'WHERE is_active = 1 AND is_deleted = 0',
+    ).getSingle()).data['c'] as int;
+    if (activeCount <= 1) {
+      throw StateError('المستودع «${row.name}» آخر مستودع نشط — '
+          'لا يُعطَّل حتى يُنشأ مستودع آخر');
+    }
+    final bal = await customSelect(
+      'SELECT qty_base FROM stock_balances '
+      'WHERE warehouse_id = ? AND (qty_base <> 0 OR total_value_minor <> 0) '
+      'LIMIT 1',
+      variables: [Variable.withInt(id)],
+    ).get();
+    if (bal.isNotEmpty) {
+      throw StateError('المستودع «${row.name}» برصيد قائم — تعطيله غير '
+          'آمن (نمط 03 §6-3): يُفرَّغ أولاً بالتحويل أو تسوية الجرد');
+    }
+  }
+  await customStatement(
+    'UPDATE warehouses SET is_active = ?, updated_at = ? WHERE id = ?',
+    [active ? 1 : 0, DateTime.now().millisecondsSinceEpoch, id],
+  );
+}
+
+/// التحويل بين مستودعين (س-18/F-045): مستند يُنشأ مرحّلاً بلا مسودة،
+/// وحركتا مخزون متقابلتان بلا قيد محاسبي (05 §6)، والقيمة تنتقل كما
+/// هي بالمتوسط الجاري المتسلسل للمصدر (D-067) فلا فروق تكلفة ولا
+/// غبار تقريب (الخروج بكل الكمية يمتص القيمة كلها)، ورقم من التسلسل
+/// السنوي داخل المعاملة ذاتها (07 §1.9)، وحدث «posted» بلقطة الصف
+/// الكاملة في المعاملة نفسها (07 §2.3). لا فحص فترة: لا قيد بذاك
+/// التاريخ أصلاً وأرصدته حالية دائماً لا تاريخية.
+Future<int> stockTransferPost(StockTransferDraft draft) async {
+  final structural =
+      validateStockTransferStructure(draft);
+  if (structural.isNotEmpty) {
+    throw StockTransferValidationException(structural);
+  }
+  return transaction(() async {
+    final errors = await _collectStockTransferErrors(draft);
+    if (errors.isNotEmpty) {
+      throw StockTransferValidationException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final year = yearOfIsoDate(draft.dateText);
+    final number = formatDocumentNumber(year,
+        await _advanceSequenceWithinTx('stock_transfer', year),
+        counterWidth: await _counterWidth());
+    await customStatement(
+      "INSERT INTO stock_transfers (number, transfer_date, "
+      "from_warehouse_id, to_warehouse_id, narration, state, uuid, "
+      "created_at, updated_at, is_deleted) "
+      "VALUES (?, ?, ?, ?, ?, 'posted', ?, ?, ?, 0)",
+      [
+        number,
+        draft.dateText,
+        draft.fromWarehouseId,
+        draft.toWarehouseId,
+        draft.narration,
+        const Uuid().v4(),
+        now,
+        now,
+      ],
+    );
+    final transferId = (await customSelect(
+      'SELECT last_insert_rowid() AS id',
+    ).getSingle()).data['id'] as int;
+    for (final line in draft.lines) {
+      final (qty, value) =
+          await _stockBalanceTx(line.itemId, draft.fromWarehouseId);
+      final exitValue = wacExitValue(value, qty, line.qtyBase);
+      final unitCost = roundHalfAwayFromZeroRatio(exitValue, line.qtyBase);
+      await customStatement(
+        'INSERT INTO stock_transfer_lines (transfer_id, item_id, '
+        'qty_base, unit_cost_base_minor, value_base_minor, uuid, '
+        'created_at, updated_at, is_deleted) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+        [
+          transferId,
+          line.itemId,
+          line.qtyBase,
+          unitCost,
+          exitValue,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      // حركتا المخزون المتقابلتان — الخروج سالب الإشارة بنمط الفواتير
+      // (05 §117: qty_base موجب/سالب بالاتفاقية) والمرجعية «stock_transfer».
+      for (final entry in [
+        (-line.qtyBase, draft.fromWarehouseId, null),
+        (line.qtyBase, null, draft.toWarehouseId),
+      ]) {
+        await customStatement(
+          'INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, '
+          'to_warehouse_id, value_base_minor, unit_cost_base_minor, '
+          "state, ref_doc_type, ref_doc_id, uuid, created_at, "
+          "updated_at, is_deleted) "
+          "VALUES (?, ?, ?, ?, ?, ?, 'posted', 'stock_transfer', "
+          '?, ?, ?, ?, 0)',
+          [
+            line.itemId,
+            entry.$1,
+            entry.$2,
+            entry.$3,
+            exitValue,
+            unitCost,
+            transferId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+      }
+      // دلتا أرصدة الطرفين — upsert بالنمط القائم (05 §117) والحاجز
+      // يحرس السالب (F-042)؛ القيمة تنتقل كما هي فمجموع 113 ثابت.
+      for (final delta in [
+        (draft.fromWarehouseId, -line.qtyBase, -exitValue),
+        (draft.toWarehouseId, line.qtyBase, exitValue),
+      ]) {
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            line.itemId,
+            delta.$1,
+            delta.$2,
+            delta.$3,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+      }
+    }
+    await _recordDocEventTx(
+      entityType: 'stock_transfer',
+      table: 'stock_transfers',
+      entityId: transferId,
+      action: 'posted',
+    );
+    return transferId;
+  });
+}
+
+/// فحوص التحويل بقاعدة البيانات — س-18: المستودعان موجودان نشطان،
+/// والأصناف موجودة نشطة بضاعة (الخدمة بلا مخزون — س-08)، ورصيد
+/// المصدر يكفي (منع السالب — F-042).
+Future<List<StockTransferValidationError>> _collectStockTransferErrors(
+    StockTransferDraft draft) async {
+  final errors = <StockTransferValidationError>[];
+  final from = await _warehouseByIdTx(draft.fromWarehouseId);
+  if (from == null) {
+    errors.add(StockTransferWarehouseMissing(draft.fromWarehouseId));
+  } else if (!from.isActive) {
+    errors.add(StockTransferWarehouseInactive(from.name));
+  }
+  final to = await _warehouseByIdTx(draft.toWarehouseId);
+  if (to == null) {
+    errors.add(StockTransferWarehouseMissing(draft.toWarehouseId));
+  } else if (!to.isActive) {
+    errors.add(StockTransferWarehouseInactive(to.name));
+  }
+  for (var i = 0; i < draft.lines.length; i++) {
+    final line = draft.lines[i];
+    final item = await _itemByIdTx(line.itemId);
+    if (item == null) {
+      errors.add(StockTransferItemMissing(line.itemId, i));
+      continue;
+    }
+    final label =
+        itemDisplayLabel(item['name'] as String, item['sku'] as String);
+    if ((item['is_active'] as int) != 1) {
+      errors.add(StockTransferItemInactive(label, i));
+      continue;
+    }
+    if ((item['kind'] as String) != 'good') {
+      errors.add(StockTransferItemNotGood(label, i));
+      continue;
+    }
+    final (qty, _) =
+        await _stockBalanceTx(line.itemId, draft.fromWarehouseId);
+    if (line.qtyBase > qty) {
+      errors.add(StockTransferStockInsufficient(
+        itemLabel: label,
+        onHandQty: qty,
+        requestedQty: line.qtyBase,
+        lineIndex: i,
+      ));
+    }
+  }
+  return errors;
+}
+
+/// سجل التحويلات — الرؤوس بأسماء المستودعين وعدد الأسطر ومجاميعها
+/// (قراءة عرض خالصة — التخزين يقرأ لا يحسب).
+Future<List<StockTransferListRow>> stockTransfersOf() async {
+  final rows = await customSelect(
+    'SELECT t.id, t.number, t.transfer_date, t.state, t.narration, '
+    't.from_warehouse_id, t.to_warehouse_id, '
+    'wf.name AS from_name, wt.name AS to_name, '
+    'COUNT(l.id) AS line_count, '
+    'COALESCE(SUM(l.qty_base), 0) AS total_qty, '
+    'COALESCE(SUM(l.value_base_minor), 0) AS total_value '
+    'FROM stock_transfers t '
+    'LEFT JOIN warehouses wf ON wf.id = t.from_warehouse_id '
+    'LEFT JOIN warehouses wt ON wt.id = t.to_warehouse_id '
+    'LEFT JOIN stock_transfer_lines l '
+    'ON l.transfer_id = t.id AND l.is_deleted = 0 '
+    'WHERE t.is_deleted = 0 '
+    'GROUP BY t.id ORDER BY t.id DESC',
+  ).get();
+  return [
+    for (final r in rows)
+      StockTransferListRow(
+        id: r.data['id'] as int,
+        number: r.data['number'] as String,
+        transferDate: r.data['transfer_date'] as String,
+        state: r.data['state'] as String,
+        narration: r.data['narration'] as String?,
+        fromWarehouseId: r.data['from_warehouse_id'] as int,
+        toWarehouseId: r.data['to_warehouse_id'] as int,
+        fromName: r.data['from_name'] as String?,
+        toName: r.data['to_name'] as String?,
+        lineCount: r.data['line_count'] as int,
+        totalQtyBase: r.data['total_qty'] as int,
+        totalValueMinor: r.data['total_value'] as int,
+      ),
+  ];
+}
+
+/// أسطر تحويل قائم — للعرض التفصيلي (اللقطة المخزنة لا حساب جديد).
+Future<List<StockTransferLineRow>> stockTransferLinesOf(
+    int transferId) async {
+  final rows = await customSelect(
+    'SELECT l.item_id, i.name AS item_name, i.sku, l.qty_base, '
+    'l.unit_cost_base_minor, l.value_base_minor '
+    'FROM stock_transfer_lines l '
+    'LEFT JOIN items i ON i.id = l.item_id '
+    'WHERE l.transfer_id = ? AND l.is_deleted = 0 ORDER BY l.id',
+    variables: [Variable.withInt(transferId)],
+  ).get();
+  return [
+    for (final r in rows)
+      StockTransferLineRow(
+        itemId: r.data['item_id'] as int,
+        itemName: r.data['item_name'] as String?,
+        sku: r.data['sku'] as String?,
+        qtyBase: r.data['qty_base'] as int,
+        unitCostBaseMinor: r.data['unit_cost_base_minor'] as int,
+        valueBaseMinor: r.data['value_base_minor'] as int,
+      ),
+  ];
+}
 
 /// العملات المزروعة (F-120/D-070: الأساسية والدولار قبل م3).
 Future<List<CurrencyRow>> currenciesOf() async {
@@ -6776,6 +7180,58 @@ class WarehouseRow {
     required this.id,
     required this.name,
     required this.isActive,
+  });
+}
+
+/// رأس تحويل مخزني بالسجل (الدفعة 24 — س-18): أسماء المستودعين وعدد
+/// الأسطر ومجاميعها لقطة من القاعدة لا حساب جديد.
+class StockTransferListRow {
+  final int id;
+  final String number;
+  final String transferDate;
+  final String state;
+  final String? narration;
+  final int fromWarehouseId;
+  final int toWarehouseId;
+  final String? fromName;
+  final String? toName;
+  final int lineCount;
+  final int totalQtyBase;
+  final int totalValueMinor;
+
+  const StockTransferListRow({
+    required this.id,
+    required this.number,
+    required this.transferDate,
+    required this.state,
+    this.narration,
+    required this.fromWarehouseId,
+    required this.toWarehouseId,
+    this.fromName,
+    this.toName,
+    required this.lineCount,
+    required this.totalQtyBase,
+    required this.totalValueMinor,
+  });
+}
+
+/// سطر تحويل مخزني بلقطته — الصنف والكمية وكلفة الوحدة والقيمة كما
+/// خُزنت لحظة الترحيل (لا حساب جديد — نمط لقطات الحركات F-140).
+class StockTransferLineRow {
+  final int itemId;
+  final String? itemName;
+  final String? sku;
+  final int qtyBase;
+  final int unitCostBaseMinor;
+  final int valueBaseMinor;
+
+  const StockTransferLineRow({
+    required this.itemId,
+    this.itemName,
+    this.sku,
+    required this.qtyBase,
+    required this.unitCostBaseMinor,
+    required this.valueBaseMinor,
   });
 }
 
