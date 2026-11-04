@@ -1051,7 +1051,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   /// الذمم ذاته (منبع س-105/D-106 الواحد — لا حساب موازٍ).
   Future<_CreditWarning?> _creditLimitWarning(InvoiceDraft draft) async {
     if (draft.kind != InvoiceKind.sale) return null;
-    if (draft.partyId == null || draft.boxId != null) return null;
+    if (draft.partyId == null || draft.cashBoxId != null) return null;
     Party? party;
     for (final p in _parties) {
       if (p.id == draft.partyId) party = p;
@@ -1066,16 +1066,19 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
             : -r.amountMinor;
       }
     }
+    // الإجمالي بمحرك المجال النقي ذاته — الرقم المُخزَّن لاحقاً حرفاً
+    // (بالخصم الموزع ومكافئ الأساس) لا تقديرٌ موازٍ له.
+    final totals = computeInvoiceTotals(draft);
     final excess = creditLimitExcessBaseMinor(
       creditLimitBaseMinor: party.creditLimitBaseMinor,
       netDebitBaseMinor: net,
-      invoiceTotalBaseMinor: draft.totalBaseMinor,
+      invoiceTotalBaseMinor: totals.totalBaseMinor,
     );
     if (excess == null) return null;
     return _CreditWarning(
       partyName: party.name,
       limitMinor: party.creditLimitBaseMinor!,
-      netAfterMinor: net + draft.totalBaseMinor,
+      netAfterMinor: net + totals.totalBaseMinor,
       excessMinor: excess,
     );
   }
