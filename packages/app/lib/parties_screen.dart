@@ -265,11 +265,13 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
       if (_isEdit) {
         // س-155/D-153 (دفعة 17): الرقم يعدل بلفظ المالك (س50/1 «تمام»)
         // — والتفرد دُقق أعلاه بالمدقق المستثنياً النفس، والمعاملات
-        // كلها بمعرفه الخفي فلا ينكسر بها شيء.
+        // كلها بمعرفه الخفي فلا ينكسر بها شيء. والحفظ بطبقة النظافة
+        // D-170 ذاتها التي دُقق بها فما يُخزَّن هو المرئي المدقق
+        // (D-174 — الدفعة 20: اتساق الحفظ مع التدقيق).
         await widget.db.updatePartyDetails(
           widget.existing!,
-          number: draft.number.trim(),
-          name: draft.name.trim(),
+          number: sanitizeFreeName(draft.number),
+          name: sanitizeFreeName(draft.name),
           kind: _kind.storageValue,
           phone: draft.phone,
           address: draft.address,
@@ -278,8 +280,8 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
         );
       } else {
         await widget.db.insertParty(
-          number: draft.number.trim(),
-          name: draft.name.trim(),
+          number: sanitizeFreeName(draft.number),
+          name: sanitizeFreeName(draft.name),
           kind: _kind.storageValue,
           phone: draft.phone,
           address: draft.address,
@@ -325,8 +327,10 @@ class _PartyEditScreenState extends State<PartyEditScreen> {
             decoration: InputDecoration(
               labelText: 'رقم الطرف (الأساس)',
               helperText: _isEdit
-                  ? 'الرقم قابل للتعديل — والمعاملات مربوطة بمعرفه الخفي لا بالرقم'
-                  : 'مقترح آلياً — عدّله قبل الحفظ إن شئت (D-063)',
+                  ? 'حروف وأرقام و - _ . فقط (D-174) — والمعاملات مربوطة '
+                      'بمعرفه الخفي لا بالرقم'
+                  : 'مقترح آلياً — عدّله قبل الحفظ إن شئت (D-063) — '
+                      'حروف وأرقام و - _ . فقط (D-174)',
             ),
           ),
           const SizedBox(height: 12),
@@ -420,5 +424,8 @@ String partyErrorText(PartyValidationError error) {
       'حد الائتمان عدد موجب إن أُدخل — والفراغ يعني بلا سقف (س-34)',
     PartyNameControlChars() =>
       'الاسم يحمل محارف تحكم غير مرئية — أعد كتابته بلا لصق خارجي (D-170)',
+    PartyNumberInvalidFormat(:final number) =>
+      'الرقم $number يقبل الحروف والأرقام و - _ . حصراً — بلا مسافات ولا '
+          'رموز أخرى، والكلمات المختصرة تُفصل بالشرطة (D-174)',
   };
 }

@@ -309,4 +309,87 @@ void main() {
     expect(
         () => PartyKind.fromStorage('unknown'), throwsArgumentError);
   });
+
+  group('قائمة بيضاء رقم الطرف (D-174 — الدفعة 20)', () {
+    test('المشروع: حروف بأي لغة وأرقام و - _ . (قائمة D-171 حرفياً)', () {
+      expect(isValidPartyNumber('0053'), isTrue);
+      expect(isValidPartyNumber('A-12'), isTrue);
+      expect(isValidPartyNumber('محمد-53'), isTrue);
+      expect(isValidPartyNumber('K_1.2'), isTrue);
+      // المنبع موحد مع كود الصنف: الدالة المشتركة ذاتها (D-174 حرفياً)
+      expect(isValidPartyNumber('A-12'), isValidItemSku('A-12'));
+    });
+
+    test('المرفوض: فراغ (حسم المالك س64) وفاصل مسار ورموز ومحارف تحكم',
+        () {
+      expect(isValidPartyNumber('A 12'), isFalse,
+          reason: 'لا فراغ — الكلمات المختصرة بالشرطة لا بالفراغ');
+      expect(isValidPartyNumber('A/12'), isFalse);
+      expect(isValidPartyNumber('A,B'), isFalse);
+      expect(isValidPartyNumber('عام#1'), isFalse);
+      expect(isValidPartyNumber('A(12)'), isFalse);
+      expect(isValidPartyNumber('A\x0112'), isFalse);
+    });
+
+    test('المدقق يرفض الرقم الجديد خارج القائمة برسالته', () {
+      final errors = validatePartyDraft(
+        PartyDraft(number: 'B 13', name: 'طرف', kind: PartyKind.customer),
+        existing: PartyUniquenessIndex.build([]),
+      );
+      expect(errors, contains(isA<PartyNumberInvalidFormat>()));
+      final fmt = errors.whereType<PartyNumberInvalidFormat>().single;
+      expect(fmt.number, 'B 13',
+          reason: 'الرسالة تحمل الرقم المرفوض تري صاحبه');
+    });
+
+    test('الاستثناء الذاتي نمط D-153: القائم غير المتغير يمر عند تعديل '
+        'الاسم — وتغييره يخضع للقائمة كاملة', () {
+      final legacy = ExistingParty(
+          id: 7, number: 'A 12', name: 'قديم', isActive: true);
+      final index = PartyUniquenessIndex.build([legacy]);
+
+      // تعديل الاسم وحده: الرقم القائم قبل D-174 يمر كما هو
+      final editSelf = validatePartyDraft(
+        PartyDraft(
+            number: 'A 12', name: 'قديم معدل', kind: PartyKind.customer),
+        existing: index,
+        excludePartyId: 7,
+      );
+      expect(editSelf, isEmpty);
+
+      // نفس الرقم لطرف آخر (غير ذاتي): القائمة تُفرض
+      final other = validatePartyDraft(
+        PartyDraft(number: 'A 12', name: 'طرف آخر', kind: PartyKind.customer),
+        existing: index,
+      );
+      expect(other, contains(isA<PartyNumberInvalidFormat>()));
+
+      // تغيير رقم الطرف القائم نفسه إلى خارج القائمة: يُرفض
+      final changed = validatePartyDraft(
+        PartyDraft(number: 'B 13', name: 'قديم', kind: PartyKind.customer),
+        existing: index,
+        excludePartyId: 7,
+      );
+      expect(changed, contains(isA<PartyNumberInvalidFormat>()));
+    });
+
+    test('النظافة D-170 على حدود حقل الرقم: العلامات غير المرئية تُجرد '
+        'ثم يقيد الباقي المرئي', () {
+      final errors = validatePartyDraft(
+        PartyDraft(
+            number: 'A\u200B12', name: 'نظيف', kind: PartyKind.customer),
+        existing: PartyUniquenessIndex.build([]),
+      );
+      expect(errors, isEmpty,
+          reason: 'العلامة غير المرئية لا يراها المستخدم فتُجرد ولا تُحبس');
+    });
+
+    test('الفراغ بعد التقليم يبقى مرفوضاً كما كان (س-29)', () {
+      final errors = validatePartyDraft(
+        PartyDraft(number: '  ', name: 'بلا رقم', kind: PartyKind.customer),
+        existing: PartyUniquenessIndex.build([]),
+      );
+      expect(errors, contains(isA<PartyNumberRequired>()));
+    });
+  });
 }

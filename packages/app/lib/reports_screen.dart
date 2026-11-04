@@ -181,11 +181,44 @@ Future<void> _printReportDoc(
   }
 }
 
-/// شريط زر الطباعة فوق قائمة التقرير — ظاهر دائماً لا يختفي بالتمرير.
+/// زر التصدير الموحد للتقارير (F-166 — الدفعة 20) — CSV بترميز UTF-8
+/// مع BOM وعربي سليم في Excel، وصورة للعرض الحالي بصفوفه ذاتها التي
+/// تُطبع لا إعادة حساب (الفند الموثق: أرقام الملف تطابق الشاشة حرفاً).
+/// والفشل رسالة لا صمت — نمط الطباعة ذاته.
+Future<void> _exportReportCsv(
+  BuildContext context, {
+  required String title,
+  required List<String> columns,
+  required List<List<String>> rows,
+  List<(String, String)> footer = const [],
+}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    final csv = buildCsvSnapshot(
+      title: title,
+      columns: columns,
+      rows: rows,
+      footer: footer,
+    );
+    if (!context.mounted) return;
+    await shareCsvBytes(csv, '$title.csv');
+  } catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('تعذر توليد التصدير — $e')),
+    );
+  }
+}
+
+/// شريط زر الطباعة والتصدير فوق قائمة التقرير — ظاهر دائماً لا يختفي
+/// بالتمرير.
+///
+/// F-166 (الدفعة 20): زر التصدير مطلوب `onCsv` في كل تقرير — required
+/// هنا يجعل المصرّف يرفض أي شريط بلا تصدير فلا تقرير يبقى بلا زر CSV.
 class _ReportActionsBar extends StatelessWidget {
   final VoidCallback onPrint;
+  final VoidCallback onCsv;
 
-  const _ReportActionsBar({required this.onPrint});
+  const _ReportActionsBar({required this.onPrint, required this.onCsv});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -193,6 +226,12 @@ class _ReportActionsBar extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            OutlinedButton.icon(
+              onPressed: onCsv,
+              icon: const Icon(Icons.table_view_outlined),
+              label: const Text('تصدير CSV'),
+            ),
+            const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: onPrint,
               icon: const Icon(Icons.picture_as_pdf_outlined),
@@ -223,6 +262,28 @@ class _TrialBalanceView extends StatelessWidget {
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
           final report = snapshot.data!;
+          // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة
+          // 20): تجميع واحد فلا انحراف بين ما يُرى وما يُطبع وما يُصدَّر.
+          const docColumns = ['الحساب', 'مدين', 'دائن', 'الرصيد'];
+          final docRows = [
+            for (final row in report.rows)
+              [
+                '${row.account.code} ${row.account.name}',
+                formatMinorAmount(row.debitSumMinor),
+                formatMinorAmount(row.creditSumMinor),
+                formatMinorAmount(row.balanceMinor),
+              ],
+          ];
+          final docFooter = <(String, String)>[
+            ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
+            ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
+            (
+              'الحالة',
+              report.isBalanced
+                  ? 'الميزان متوازن ✓ (F-068)'
+                  : 'الميزان غير متوازن — راجع فوراً!',
+            ),
+          ];
           return Column(
             children: [
               Card(
@@ -259,32 +320,16 @@ class _TrialBalanceView extends StatelessWidget {
                       onPrint: () => _printReportDoc(
                         context,
                         title: 'ميزان المراجعة',
-                        columns: const ['الحساب', 'مدين', 'دائن', 'الرصيد'],
-                        rows: [
-                          for (final row in report.rows)
-                            [
-                              '${row.account.code} ${row.account.name}',
-                              formatMinorAmount(row.debitSumMinor),
-                              formatMinorAmount(row.creditSumMinor),
-                              formatMinorAmount(row.balanceMinor),
-                            ],
-                        ],
-                        footer: [
-                          (
-                            'مجموع المدين',
-                            formatMinorAmount(report.totalDebitMinor),
-                          ),
-                          (
-                            'مجموع الدائن',
-                            formatMinorAmount(report.totalCreditMinor),
-                          ),
-                          (
-                            'الحالة',
-                            report.isBalanced
-                                ? 'الميزان متوازن ✓ (F-068)'
-                                : 'الميزان غير متوازن — راجع فوراً!',
-                          ),
-                        ],
+                        columns: docColumns,
+                        rows: docRows,
+                        footer: docFooter,
+                      ),
+                      onCsv: () => _exportReportCsv(
+                        context,
+                        title: 'ميزان المراجعة',
+                        columns: docColumns,
+                        rows: docRows,
+                        footer: docFooter,
                       ),
                     ),
                     Expanded(
@@ -341,23 +386,34 @@ class _CashBoxesView extends StatelessWidget {
           if (rows.isEmpty) {
             return _reportEmpty('لا صناديق بعد');
           }
+          // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
+          const docColumns = [
+            'الصندوق', 'الحساب', 'العملة', 'الحالة', 'الرصيد'
+          ];
+          final docRows = [
+            for (final box in rows)
+              [
+                box.name,
+                box.accountCode,
+                box.currencyCode,
+                box.isActive ? 'نشط' : 'معطل',
+                formatMinorAmount(box.balanceBaseMinor),
+              ],
+          ];
           return Column(
             children: [
               _ReportActionsBar(
                 onPrint: () => _printReportDoc(
                   context,
                   title: 'تقرير الصناديق',
-                  columns: const ['الصندوق', 'الحساب', 'العملة', 'الحالة', 'الرصيد'],
-                  rows: [
-                    for (final box in rows)
-                      [
-                        box.name,
-                        box.accountCode,
-                        box.currencyCode,
-                        box.isActive ? 'نشط' : 'معطل',
-                        formatMinorAmount(box.balanceBaseMinor),
-                      ],
-                  ],
+                  columns: docColumns,
+                  rows: docRows,
+                ),
+                onCsv: () => _exportReportCsv(
+                  context,
+                  title: 'تقرير الصناديق',
+                  columns: docColumns,
+                  rows: docRows,
                 ),
               ),
               Expanded(
@@ -447,6 +503,19 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
           final kindLabel = _kind == null
               ? 'الذمم المدينة والدائنة'
               : (_kind! ? 'الذمم المدينة (هم يدينون لنا)' : 'الذمم الدائنة (نحن مدينون لهم)');
+          // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة
+          // 20): صفوف الفلتر المعروضة ذاتها لا إعادة قراءة ولا حساب.
+          const docColumns = ['الطرف', 'الاتجاه', 'المبلغ'];
+          final docRows = [
+            for (final row in rows)
+              [
+                row.partyName,
+                row.direction == PartyBalanceDirection.theyOweUs
+                    ? 'هم يدينون لنا'
+                    : 'نحن مدينون لهم',
+                formatMinorAmount(row.amountMinor),
+              ],
+          ];
           return Column(
             children: [
               Padding(
@@ -477,18 +546,14 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
                       onPrint: () => _printReportDoc(
                         context,
                         title: kindLabel,
-                        columns: const ['الطرف', 'الاتجاه', 'المبلغ'],
-                        rows: [
-                          for (final row in rows)
-                            [
-                              row.partyName,
-                              row.direction ==
-                                      PartyBalanceDirection.theyOweUs
-                                  ? 'هم يدينون لنا'
-                                  : 'نحن مدينون لهم',
-                              formatMinorAmount(row.amountMinor),
-                            ],
-                        ],
+                        columns: docColumns,
+                        rows: docRows,
+                      ),
+                      onCsv: () => _exportReportCsv(
+                        context,
+                        title: kindLabel,
+                        columns: docColumns,
+                        rows: docRows,
                       ),
                     ),
                   ],
@@ -603,6 +668,36 @@ class _AgingViewState extends State<_AgingView> {
     return parts.isEmpty ? '—' : parts.join(' · ');
   }
 
+  /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20):
+  /// تجميع واحد لصفوف العرض فما يُصدَّر هو المعروض حرفاً لا إعادة حساب.
+  List<String> _agingColumns(AgingReport report) => [
+        'الطرف',
+        'الاتجاه',
+        ...report.bucketLabels,
+        'الإجمالي',
+      ];
+
+  List<List<String>> _agingRows(AgingReport report) => [
+        for (final party in report.parties)
+          [
+            party.partyName,
+            party.theyOweUs ? 'هم يدينون لنا' : 'نحن مدينون لهم',
+            for (final amount in party.bucketMinor)
+              amount == 0 ? '—' : formatMinorAmount(amount),
+            formatMinorAmount(party.totalMinor),
+          ],
+      ];
+
+  List<(String, String)> _agingFooter(AgingReport report) => [
+        for (var i = 0; i < report.bucketLabels.length; i++)
+          if (report.bucketTotalsMinor[i] > 0)
+            (
+              report.bucketLabels[i],
+              formatMinorAmount(report.bucketTotalsMinor[i]),
+            ),
+        ('الإجمالي', formatMinorAmount(report.totalMinor)),
+      ];
+
   Future<void> _print(AgingReport report) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -611,31 +706,9 @@ class _AgingViewState extends State<_AgingView> {
         headerPairs: [
           ('فترات الأعمار', agingPresetLabel(report.thresholds)),
         ],
-        columns: [
-          'الطرف',
-          'الاتجاه',
-          ...report.bucketLabels,
-          'الإجمالي',
-        ],
-        rows: [
-          for (final party in report.parties)
-            [
-              party.partyName,
-              party.theyOweUs ? 'هم يدينون لنا' : 'نحن مدينون لهم',
-              for (final amount in party.bucketMinor)
-                amount == 0 ? '—' : formatMinorAmount(amount),
-              formatMinorAmount(party.totalMinor),
-            ],
-        ],
-        footerPairs: [
-          for (var i = 0; i < report.bucketLabels.length; i++)
-            if (report.bucketTotalsMinor[i] > 0)
-              (
-                report.bucketLabels[i],
-                formatMinorAmount(report.bucketTotalsMinor[i]),
-              ),
-          ('الإجمالي', formatMinorAmount(report.totalMinor)),
-        ],
+        columns: _agingColumns(report),
+        rows: _agingRows(report),
+        footerPairs: _agingFooter(report),
         format: resolvePageFormat(docKind: 'report'),
       );
       if (!context.mounted) return;
@@ -645,6 +718,21 @@ class _AgingViewState extends State<_AgingView> {
         SnackBar(content: Text('تعذر توليد الطباعة — $e')),
       );
     }
+  }
+
+  /// F-166 (الدفعة 20): تصدير صورة العرض — وفترات الأعمار تُلحق
+  /// التذييل كي لا يضيع سياق القياس عن المستورد.
+  Future<void> _csv(AgingReport report) {
+    return _exportReportCsv(
+      context,
+      title: _kindLabel,
+      columns: _agingColumns(report),
+      rows: _agingRows(report),
+      footer: [
+        ('فترات الأعمار', agingPresetLabel(report.thresholds)),
+        ..._agingFooter(report),
+      ],
+    );
   }
 
   /// س-135/D-135: اسم الطرف مدخل — الورقة تعرض فواتيره المفتوحة
@@ -749,6 +837,7 @@ class _AgingViewState extends State<_AgingView> {
                     const SizedBox(width: 8),
                     _ReportActionsBar(
                       onPrint: () => _print(report),
+                      onCsv: () => _csv(report),
                     ),
                   ],
                 ),
@@ -841,10 +930,18 @@ class _JournalBookViewState extends State<_JournalBookView> {
     });
   }
 
-  Future<void> _print(JournalBookReport report) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final rows = <List<String>>[
+  /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
+  static const _journalColumns = [
+    'التاريخ',
+    'القيد',
+    'الدفتر',
+    'الحساب',
+    'الطرف',
+    'مدين',
+    'دائن',
+  ];
+
+  List<List<String>> _journalRows(JournalBookReport report) => [
         for (final entry in report.entries)
           for (final line in entry.lines)
             [
@@ -857,29 +954,27 @@ class _JournalBookViewState extends State<_JournalBookView> {
               formatMinorAmount(line.creditMinor),
             ],
       ];
+
+  List<(String, String)> _journalFooter(JournalBookReport report) => [
+        ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
+        ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
+        (
+          'الحالة',
+          report.isBalanced
+              ? 'المجموعان متوازنان ✓ (F-068)'
+              : 'غير متوازن — راجع فوراً!',
+        ),
+      ];
+
+  Future<void> _print(JournalBookReport report) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
       final bytes = await buildDocumentPdf(
         title: 'دفتر اليومية',
         headerPairs: const [],
-        columns: const [
-          'التاريخ',
-          'القيد',
-          'الدفتر',
-          'الحساب',
-          'الطرف',
-          'مدين',
-          'دائن',
-        ],
-        rows: rows,
-        footerPairs: [
-          ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
-          ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
-          (
-            'الحالة',
-            report.isBalanced
-                ? 'المجموعان متوازنان ✓ (F-068)'
-                : 'غير متوازن — راجع فوراً!',
-          ),
-        ],
+        columns: _journalColumns,
+        rows: _journalRows(report),
+        footerPairs: _journalFooter(report),
         format: resolvePageFormat(docKind: 'report'),
       );
       if (!context.mounted) return;
@@ -889,6 +984,17 @@ class _JournalBookViewState extends State<_JournalBookView> {
         SnackBar(content: Text('تعذر توليد الطباعة — $e')),
       );
     }
+  }
+
+  /// F-166 (الدفعة 20): تصدير صورة العرض الحالي بصفوف الطباعة ذاتها.
+  Future<void> _csv(JournalBookReport report) {
+    return _exportReportCsv(
+      context,
+      title: 'دفتر اليومية',
+      columns: _journalColumns,
+      rows: _journalRows(report),
+      footer: _journalFooter(report),
+    );
   }
 
   @override
@@ -970,6 +1076,12 @@ class _JournalBookViewState extends State<_JournalBookView> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _csv(report),
+                            icon: const Icon(Icons.table_view_outlined),
+                            label: const Text('تصدير CSV'),
+                          ),
+                          const SizedBox(width: 8),
                           OutlinedButton.icon(
                             onPressed: () => _print(report),
                             icon: const Icon(Icons.picture_as_pdf_outlined),
@@ -1092,6 +1204,22 @@ class _InventoryViewState extends State<InventoryView> {
           if (visibleRows.isEmpty) {
             return _reportEmpty('لا مخزون بعد');
           }
+          // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
+          const docColumns = [
+            'الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'
+          ];
+          final docRows = [
+            for (final row in visibleRows)
+              [
+                '${row.sku} ${row.name}',
+                row.warehouseName ?? 'غير محدد',
+                '${row.qtyBase}',
+                formatMinorAmount(row.totalValueMinor),
+                row.avgCostBaseMinor == null
+                    ? '—'
+                    : formatMinorAmount(row.avgCostBaseMinor!),
+              ],
+          ];
           return Column(
             children: [
               _ReportActionsBar(
@@ -1117,25 +1245,20 @@ class _InventoryViewState extends State<InventoryView> {
                     title: isolated == null
                         ? 'تقرير المخزون'
                         : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون',
-                    columns: const [
-                      'الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'
-                    ],
-                    rows: [
-                      for (final row in visibleRows)
-                        [
-                          '${row.sku} ${row.name}',
-                          row.warehouseName ?? 'غير محدد',
-                          '${row.qtyBase}',
-                          formatMinorAmount(row.totalValueMinor),
-                          row.avgCostBaseMinor == null
-                              ? '—'
-                              : formatMinorAmount(row.avgCostBaseMinor!),
-                        ],
-                    ],
+                    columns: docColumns,
+                    rows: docRows,
                     rowImages: rowImages,
                     rowLetters: rowLetters,
                   );
                 },
+                onCsv: () => _exportReportCsv(
+                  context,
+                  title: isolated == null
+                      ? 'تقرير المخزون'
+                      : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون',
+                  columns: docColumns,
+                  rows: docRows,
+                ),
               ),
               Expanded(
                 child: ListView(
@@ -1222,6 +1345,14 @@ class _MovementViewState extends State<MovementView> {
   final TextEditingController _to = TextEditingController();
   String? _error;
   List<_MovementDisplay>? _rows;
+
+  /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
+  static const _movementColumns = ['الصنف', 'التفصيل', 'الصافي'];
+
+  /// صفوف العرض ذاتها للطباعة والتصدير — تجميع واحد فلا انحراف.
+  List<List<String>> _movementRows() => [
+        for (final row in _rows!) [row.title, row.subtitle, row.trailing],
+      ];
 
   /// خريطة الأصناف لمسارات صورها (س-128) — تُحمّل مع كل عرض.
   Map<int, Item> _itemById = {};
@@ -1380,15 +1511,18 @@ class _MovementViewState extends State<MovementView> {
                       await _printReportDoc(
                         context,
                         title: title,
-                        columns: const ['الصنف', 'التفصيل', 'الصافي'],
-                        rows: [
-                          for (final row in _rows!)
-                            [row.title, row.subtitle, row.trailing],
-                        ],
+                        columns: _movementColumns,
+                        rows: _movementRows(),
                         rowImages: rowImages,
                         rowLetters: rowLetters,
                       );
                     },
+                    onCsv: () => _exportReportCsv(
+                      context,
+                      title: title,
+                      columns: _movementColumns,
+                      rows: _movementRows(),
+                    ),
                   ),
                 if (_error != null)
                   Padding(

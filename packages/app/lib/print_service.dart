@@ -550,6 +550,25 @@ Future<void> sharePdfBytes(
   );
 }
 
+/// مشاركة ملف CSV بنافذة النظام (F-166 — الدفعة 20) — نفس مسار PDF
+/// المعتمد: ملف مؤقت بمجلد التخزين المؤقت واعتمام الاسم بـsafeFileName
+/// حصراً قبل الكتابة (س-154/D-152)، والنوع text/csv. النص الوارد يحمل
+/// BOM ضمنه (من buildCsvSnapshot) فتُكتب البايتات بعربي سليم في Excel.
+Future<void> shareCsvBytes(
+  String csv,
+  String fileName,
+) async {
+  final dir = await getTemporaryDirectory();
+  final safeName = safeFileName(fileName);
+  final file = File(p.join(dir.path, safeName));
+  await file.writeAsString(csv, flush: true);
+  await Share.shareXFiles(
+    [XFile(file.path, mimeType: 'text/csv')],
+    subject: safeName,
+    text: 'مستند من دِقَّة',
+  );
+}
+
 /// الطباعة المباشرة بحوار الطباعة — حيثما لا تدعم المنصة تُغلف بلطف
 /// برسالة عربية (D-101 معروض: التصدير والمشاركة أولًا على كل منصة،
 /// والطباعة المباشرة ميزة المنصة الداعمة).

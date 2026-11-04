@@ -33,6 +33,20 @@ String sanitizeFreeName(String raw) => raw
 bool freeNameHasControlChars(String name) =>
     RegExp(r'[\x00-\x1F\x7F\u0080-\u009F]').hasMatch(name);
 
+/// القائمة البيضاء الموحدة للرموز القابلة للطباعة والبحث — منبع D-171
+/// (كود الصنف) وD-174 (رقم الطرف) معاً: حروف بأي لغة (`\p{L}`) وأرقام
+/// (`\p{N}`) و `- _ .` حصراً — بلا فراغ بحسم المالك (س64) ولا فاصل
+/// مسار (`/` علّته حية موثقة س-154/D-152) ولا محارف عرضية. تعيش هنا
+/// في party.dart لأن item.dart يستوردها أصلاً فلا دورة استيراد —
+/// ووحدة القائمة بين الحقلين مضمونة بتقاسم المنبع لا بمضاعفته.
+bool isValidCodeToken(String raw) =>
+    RegExp(r'^[\p{L}\p{N}_.\-]+$', unicode: true).hasMatch(raw);
+
+/// قائمة بيضاء رقم الطرف (D-174 — الدفعة 20): قائمة D-171 ذاتها حرفياً
+/// بحكم D-174 — والكلمات المختصرة داخل الأكواد تُفصل بالشرطة وما
+/// جاورها («خال-53» لا «خال 53»).
+bool isValidPartyNumber(String raw) => isValidCodeToken(raw);
+
 /// اسم طرف يحمل محارف تحكم خفية (D-170) — مرفوض.
 class PartyNameControlChars extends PartyValidationError {
   const PartyNameControlChars();
@@ -302,6 +316,14 @@ class PartyCurrencyMissing extends PartyValidationError {
   const PartyCurrencyMissing();
 }
 
+/// رقم طرف خارج القائمة البيضاء (D-174 — الدفعة 20) — يحمل الرقم
+/// المرفوض ليُعرض في رسالة الواجهة (نمط ItemSkuInvalidFormat).
+class PartyNumberInvalidFormat extends PartyValidationError {
+  final String number;
+
+  const PartyNumberInvalidFormat(this.number);
+}
+
 /// حد ائتمان مُدخل غير صالح — إن أُدخل فيجب أن يكون موجباً؛ والفراغ
 /// «بلا سقف» مشروع (س-34).
 class PartyCreditLimitInvalid extends PartyValidationError {
@@ -347,7 +369,10 @@ List<PartyValidationError> validatePartyDraft(
 }) {
   final errors = <PartyValidationError>[];
   final name = sanitizeFreeName(draft.name);
-  final number = draft.number.trim();
+  // النظافة D-170 على حدود حقل الرقم أيضاً (D-174): العلامات غير
+  // المرئية تُجرد لأن المستخدم لا يراها أصلاً، ثم يقيد الباقي المرئي
+  // بقائمة البيضاء — طهّر عند الحدود لا حجب عند الباب.
+  final number = sanitizeFreeName(draft.number);
 
   if (name.isEmpty) errors.add(const PartyNameRequired());
   if (name.isNotEmpty && freeNameHasControlChars(name)) {
@@ -362,6 +387,14 @@ List<PartyValidationError> validatePartyDraft(
 
   if (number.isNotEmpty) {
     final holder = existing.byNumberKey(number);
+    // D-174: القائمة البيضاء تُفرض على الرقم الجديد أو المتغير حصراً —
+    // والرقم القائم غير المتغير يمر كما هو (الاستثناء الذاتي نمط D-153)
+    // فلا يُحبس تعديلُ طرف قديم برقمٍ ما قبل D-174؛ وإن غيّره فالرقم
+    // الجديد بقواعد القائمة كاملة.
+    final unchangedSelf = holder != null && holder.id == excludePartyId;
+    if (!unchangedSelf && !isValidPartyNumber(number)) {
+      errors.add(PartyNumberInvalidFormat(number));
+    }
     if (holder != null && holder.id != excludePartyId) {
       errors.add(PartyNumberTaken(partyNumberKey(number), holder.displayLabel));
     }
