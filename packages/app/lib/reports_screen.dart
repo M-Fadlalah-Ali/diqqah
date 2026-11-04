@@ -541,22 +541,24 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
                             setState(() => _kind = value),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    _ReportActionsBar(
-                      onPrint: () => _printReportDoc(
-                        context,
-                        title: kindLabel,
-                        columns: docColumns,
-                        rows: docRows,
-                      ),
-                      onCsv: () => _exportReportCsv(
-                        context,
-                        title: kindLabel,
-                        columns: docColumns,
-                        rows: docRows,
-                      ),
-                    ),
                   ],
+                ),
+              ),
+              // F-166 (الدفعة 20): شريط الأزرار سطرٌ مستقل أسفل الفلاتر —
+              // عرض الزرين لا يضيق القائمة المنسدلة تحت حدّها الأدنى
+              // (درس جولة 182: تجاوز 89px بحشرتها في الصف نفسه).
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(
+                  context,
+                  title: kindLabel,
+                  columns: docColumns,
+                  rows: docRows,
+                ),
+                onCsv: () => _exportReportCsv(
+                  context,
+                  title: kindLabel,
+                  columns: docColumns,
+                  rows: docRows,
                 ),
               ),
               Expanded(
@@ -834,13 +836,15 @@ class _AgingViewState extends State<_AgingView> {
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    _ReportActionsBar(
-                      onPrint: () => _print(report),
-                      onCsv: () => _csv(report),
-                    ),
                   ],
                 ),
+              ),
+              // F-166 (الدفعة 20): شريط الأزرار سطرٌ مستقل أسفل الفلاتر —
+              // عرض الزرين لا يضيق قائمتي الفلتر تحت حدّهما الأدنى
+              // (درس جولة 182: تجاوز 64px بحشرته في الصف نفسه).
+              _ReportActionsBar(
+                onPrint: () => _print(report),
+                onCsv: () => _csv(report),
               ),
               Card(
                 margin: const EdgeInsets.all(12),

@@ -33,17 +33,21 @@ void main() {
       'برسالة عربية — وإلى داخلها يُحفظ', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
-    await db.createManager(name: 'المالك', login: 'owner', passwordHash: 's:h');
-    await db.insertParty(
-        number: 'A 12', name: 'طرف قديم', kind: 'customer', defaultCurrencyId: 1);
+    final id = await db.insertParty(
+        number: 'A 12',
+        name: 'طرف قديم',
+        kind: 'customer',
+        defaultCurrencyId: 1);
+    final party = await (db.select(db.parties)
+          ..where((t) => t.id.equals(id)))
+        .getSingle();
 
-    await tester.pumpWidget(MaterialApp(home: PartiesScreen(db: db)));
+    // الضخ المباشر للبطاقة (نمط batch17 المجرب) — بلا مرور بنقرة القائمة
+    // (درس جولة 182: نقرة بلاط القائمة تُبتلع فوق البطاقة).
+    await tester.pumpWidget(
+        MaterialApp(home: PartyEditScreen(db: db, existing: party)));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-
-    await tester.tap(find.text('طرف قديم (A 12)'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     // ═══ 1) الرقم القائم غير المتغير يمر مع تعديل الاسم ═══
     await tester.enterText(
@@ -51,14 +55,21 @@ void main() {
     await tester.tap(find.text('حفظ'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('يقبل الحروف والأرقام'), findsNothing,
-        reason: 'الاستثناء الذاتي: لا يُحبس تعديل طرف قديم برقم ما قبل D-174');
-    expect(find.text('طرف قديم معدل (A 12)'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 100));
+    final edited = await (db.select(db.parties)
+          ..where((t) => t.id.equals(id)))
+        .getSingle();
+    expect(edited.name, 'طرف قديم معدل');
+    expect(edited.number, 'A 12',
+        reason: 'الاستثناء الذاتي: الرقم القائم قبل D-174 يبقى كما هو');
 
     // ═══ 2) تغيير الرقم إلى خارج القائمة (فراغ) يُرفض برسالته ═══
-    await tester.tap(find.text('طرف قديم معدل (A 12)'));
+    // بطاقة جديدة مضخوخة مباشرة — والرفض أولًا قبل أي إشعار (درس
+    // الجولتين 163/164 الموثق: الإشعار يبتلع نقرات ما بعده).
+    await tester.pumpWidget(
+        MaterialApp(home: PartyEditScreen(db: db, existing: edited)));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.enterText(
         find.widgetWithText(TextFormField, 'رقم الطرف (الأساس)'), 'B 13');
     await tester.tap(find.text('حفظ'));
@@ -66,6 +77,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.textContaining('يقبل الحروف والأرقام'), findsOneWidget,
         reason: 'رسالة D-174 تحمل الرقم المرفوض ولسان القائمة');
+    final rejected = await (db.select(db.parties)
+          ..where((t) => t.id.equals(id)))
+        .getSingle();
+    expect(rejected.number, 'A 12', reason: 'الرفض بلا كتابة');
 
     // ═══ 3) الرقم إلى داخل القائمة فيُحفظ ═══
     await tester.enterText(
@@ -73,7 +88,11 @@ void main() {
     await tester.tap(find.text('حفظ'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('طرف قديم معدل (B-13)'), findsOneWidget);
+    final saved = await (db.select(db.parties)
+          ..where((t) => t.id.equals(id)))
+        .getSingle();
+    expect(saved.number, 'B-13');
+    expect(saved.name, 'طرف قديم معدل');
   });
 
   testWidgets('D-174: الطرف الجديد برقم خارج القائمة يُرفض — '
