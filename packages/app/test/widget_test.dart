@@ -407,10 +407,11 @@ void main() {
     expect(find.text('أُنشئت النسخة الاحتياطية'), findsOneWidget);
     expect(find.text('إخراج النسخة'), findsOneWidget);
     expect(find.text('حسناً'), findsOneWidget);
-    // إغلاق الحوار ثم سحب لإظهار بطاقة الاستعادة (درس دفعة 19 أعلاه)
+    // إغلاق الحوار ثم سحب لإظهار بطاقة الاستعادة (درس دفعة 19 أعلاه —
+    // وبطاقة خيارات العرض F-167 الدفعة 23 أزاحتها أعمق فيكفي سحب أعمق)
     await tester.tap(find.text('حسناً'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.drag(find.byType(ListView), const Offset(0, -750));
     await tester.pumpAndSettle();
     // زر التصفح بجوار حقل المسار (suffixIcon) — لا قنوات منصة في وجوده
     expect(find.byTooltip('اختيار ملف النسخة'), findsOneWidget);
@@ -445,7 +446,8 @@ void main() {
 
     // درس دفعة 19: بطاقة الترقيم أزاحت حقل المسار تحت الطي فيُبنى
     // المتأخر حصراً — سحبة إظهار قبل الكتابة (وفوق سحبة الزر القائمة)
-    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    // — وبطاقة خيارات العرض (F-167/الدفعة 23) أزاحته أعمق فسحب أعمق
+    await tester.drag(find.byType(ListView), const Offset(0, -750));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'مسار ملف النسخة الاحتياطية'),
@@ -453,7 +455,7 @@ void main() {
     );
     // زر الاستعادة تحت الخط المرئي — حقل التشفير وصندوقه أضافا ارتفاعاً
     // فيكفي سحب أعمق (D-050: البطاقة أطول من م0)
-    await tester.drag(find.byType(ListView), const Offset(0, -300));
+    await tester.drag(find.byType(ListView), const Offset(0, -550));
     await tester.pumpAndSettle();
     await tester.tap(find.text('استعادة…'));
     await tester.pumpAndSettle();

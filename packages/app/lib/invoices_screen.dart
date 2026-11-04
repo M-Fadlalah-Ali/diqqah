@@ -16,6 +16,7 @@ import 'drilldown.dart' show showItemSheet;
 import 'tafqit.dart';
 import 'delivery_summary.dart';
 import 'currency_display.dart';
+import 'hijri_display.dart';
 
 /// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
 /// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
@@ -183,7 +184,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   return buildDocumentPdf(
     title: invoiceDisplayLabel(invoice),
     headerPairs: [
-      ('التاريخ', invoice.invoiceDate),
+      ('التاريخ', displayDate(invoice.invoiceDate)),
       // س-156/D-154: لسان المالك — «نحن صنفنا الفواتير نقدية وذمة
       // فلتكتب كذلك» (س50/4): السداد بالتصنيف المعتمد عند الإدخال
       // (النقدي بصندوقه والآجل بطرفه — لا صندوق ولا طرف مرفوضان
@@ -423,7 +424,9 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           [
             row.kindValue.label,
             row.number.isEmpty ? '—' : row.number,
-            row.invoiceDate,
+            // الدفعة 23 (F-167/D-183): الهجري بجانب الميلادي حين يُفعَّل
+            // الخيار — عرض لا إدخال والميلادي أساس التخزين دائماً.
+            displayDate(row.invoiceDate),
             row.counterpartLabel,
             row.stateLabel,
             row.receiptLabel,
@@ -617,7 +620,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       ListTile(
                         title: Text(row.displayLabel),
                         subtitle: Text(
-                            '${row.invoiceDate}'
+                            '${displayDate(row.invoiceDate)}'
                             ' · ${row.counterpartLabel}'
                             ' · ${row.stateLabel}'
                             // الدفعة 21 (F-168): حالة الاستلام بالصف —
@@ -660,6 +663,11 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 /// البطاقة، والسهم السفلي يضيف (س-109).
 class _LineUi {
   int? itemId;
+
+  /// وسم مصدر السعر حين جاء اقتراح «آخر سعر فعلي» (F-146/D-183) —
+  /// يُعرض صغيراً ليصدر الاقتراح من أين جاء، ويصمت حين عدّله الإنسان
+  /// أو جاء من المرجعي كالعادة.
+  String? priceSource;
 
   final TextEditingController qty = TextEditingController();
   final TextEditingController price = TextEditingController();
@@ -735,6 +743,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   final TextEditingController _discount = TextEditingController();
   final TextEditingController _original = TextEditingController();
   final TextEditingController _narration = TextEditingController();
+
+  /// اقتراحات الإدخال (F-146/D-183): الطرف الأكثر تداولاً (يُحمّل مرة
+  /// واحدة عند الفتح من المرحّل) وآخر سعر فعلي لكل صنف مع الطرف المختار
+  /// (يُحمّل عند تعيينه ويُمسح مع تغيّره) — اقتراح بقبول بشري لا قرار.
+  int? _mostActivePartyId;
+  Map<int, LastPriceSuggestion> _lastPrices = {};
 
   final List<_LineUi> _lines = [_LineUi()];
 
@@ -817,6 +831,14 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final avail = wid == null
         ? const <int, int>{}
         : await widget.db.stockQuantitiesByItem(warehouseId: wid);
+    // اقتراح «الأكثر تداولاً» (F-146/D-183): من المرحّل بعائلة الجهة
+    // خلال آخر 90 يوماً — قراءة لا كتابة والقبول بضغطة.
+    final sinceIso = DateTime.now()
+        .subtract(const Duration(days: 90))
+        .toIso8601String()
+        .substring(0, 10);
+    final usage = await widget.db.partyUsageCounts(
+        salesSide: _kind.isSalesSide, sinceIso: sinceIso);
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
@@ -834,6 +856,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       final base =
           _currencies.where((c) => c.isBase).toList();
       _currencyId = base.isEmpty ? 1 : base.first.id;
+      _mostActivePartyId = suggestMostActiveParty(usage);
       _loaded = true;
     });
   }
@@ -845,6 +868,30 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final avail = await widget.db.stockQuantitiesByItem(warehouseId: wid);
     if (!mounted) return;
     setState(() => _stockAvail = avail);
+  }
+
+  /// إعادة تحميل آخر الأسعار الفعلية للطرف المختار (F-146/D-183) —
+  /// تُستدعى عند تعيين الطرف أو مسحه، وبلا طرف تكون الخريطة فارغة في
+  /// يُقترح المرجعي كالعادة. قراءة لا كتابة.
+  Future<void> _reloadLastPrices() async {
+    final pid = _partyId;
+    if (pid == null) {
+      if (mounted) setState(() => _lastPrices = {});
+      return;
+    }
+    final prices = await widget.db.lastPricesForParty(
+        partyId: pid, salesSide: _kind.isSalesSide);
+    if (!mounted) return;
+    setState(() => _lastPrices = prices);
+  }
+
+  /// اسم الطرف من قائمة الجهة — وسم الاقتراح وحده لا منطق.
+  String? _partyName(int? id) {
+    if (id == null) return null;
+    for (final p in _parties) {
+      if (p.id == id) return p.name;
+    }
+    return null;
   }
 
   @override
@@ -886,17 +933,26 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 
   int _parsed(TextEditingController c) => parseGroupedInt(c.text.trim());
 
-  /// السعر الافتراضي من بطاقة الصنف بحسب جهة الفاتورة (س-108/D-107):
-  /// بيع ومردوده ← سعر البيع، شراء ومردوده ← سعر الشراء — و«بلا سعر
-  /// بعد» (الصفر س6) يبقى الحقل فارغاً لا صفراً. وبعد عزل الإدخال
-  /// (س-163/D-161) النوع ثابت من زر الدخول فلا إعادة تعبئة عند تبديل
-  /// جهة — لا تبديل أصلاً — فأُزيل وسم «المعبأ آلياً» وعيدُه معه.
+  /// السعر الافتراضي: آخر سعر فعلي مع الطرف يقدَّم على المرجعي (F-146/
+  /// D-183) بلسان س-108/D-107 ذاته: بيع ومردوده ← اتجاه البيع، شراء
+  /// ومردوده ← اتجاه الشراء — و«بلا سعر بعد» (الصفر س6) يبقى الحقل
+  /// فارغاً لا صفراً. ومصدر الاقتراح يوسم على السطر ليُرى لا يُخفى،
+  /// وبعد تعديل الإنسان يبقى رقمه هو رقمه (قبول بشري دائماً).
   void _fillDefaultPrice(_LineUi line) {
     final item = _itemOf(line.itemId);
     if (item == null) return;
-    final minor =
+    final reference =
         _kind.isSalesSide ? item.salePriceMinor : item.purchasePriceMinor;
+    final last = _lastPrices[line.itemId];
+    final minor = suggestLinePriceMinor(
+        lastActualPriceMinor: last?.priceMinor,
+        referencePriceMinor: reference);
     line.price.text = minor > 0 ? groupDigits(minor) : '';
+    line.priceSource =
+        (last != null && last.priceMinor > 0 && minor == last.priceMinor)
+            ? 'آخر سعر مع ${_partyName(_partyId) ?? 'الطرف'}'
+                ' — من فاتورة ${last.docLabel}'
+            : null;
   }
 
   /// إجمالي السطر الخام — الكمية × السعر − خصم السطر (س-120/D-115)
@@ -1273,7 +1329,29 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
-                ] else
+                ] else ...[
+                  // اقتراح «الأكثر تداولاً» (F-146/D-183): رقاقة قبول
+                  // بضغطة فوق القائمة — والقائمة تبقى يدوية كاملة،
+                  // والاقتراح من المرحّل خلال آخر 90 يوماً لا قرار.
+                  if (_partyId == null && _mostActivePartyId != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: ActionChip(
+                          avatar: const Icon(Icons.tips_and_updates_outlined,
+                              size: 18),
+                          label: Text(
+                              'اقتراح: ${_partyName(_mostActivePartyId!) ?? ''}'
+                              ' (الأكثر تداولاً)'),
+                          onPressed: () {
+                            setState(
+                                () => _partyId = _mostActivePartyId);
+                            _reloadLastPrices();
+                          },
+                        ),
+                      ),
+                    ),
                   DropdownButtonFormField<int>(
                     initialValue: _partyId,
                     decoration: InputDecoration(
@@ -1286,8 +1364,13 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                             value: p.id,
                             child: Text('${p.number} ${p.name}')),
                     ],
-                    onChanged: (value) => setState(() => _partyId = value),
+                    onChanged: (value) {
+                      setState(() => _partyId = value);
+                      // إعادة تحميل آخر الأسعار للطرف الجديد (F-146).
+                      _reloadLastPrices();
+                    },
                   ),
+                ],
                 DropdownButtonFormField<int>(
                   initialValue: _warehouseId,
                   decoration: const InputDecoration(
@@ -1573,8 +1656,18 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       inputFormatters: [
                         ThousandsSeparatorInputFormatter(),
                       ],
-                      decoration: const InputDecoration(
-                          labelText: 'سعر الوحدة بوحدة صغرى'),
+                      decoration: InputDecoration(
+                        labelText: 'سعر الوحدة بوحدة صغرى',
+                        // F-146/D-183: وسم مصدر الاقتراح يُرى لا يُخفى،
+                        // ويصمت بأول تعديل بشري فالرقم بعده رقمه هو.
+                        helperText: line.priceSource,
+                        helperMaxLines: 2,
+                      ),
+                      onChanged: (_) {
+                        if (line.priceSource != null) {
+                          setState(() => line.priceSource = null);
+                        }
+                      },
                       onSubmitted: (_) => FocusScope.of(context)
                           .requestFocus(line.discountFocus),
                     ),

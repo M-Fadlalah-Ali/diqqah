@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'aging_prefs.dart';
+import 'hijri_display.dart';
 import 'first_run_screen.dart';
 import 'home_screen.dart';
 import 'item_images.dart';
@@ -23,6 +24,9 @@ Future<void> main() async {
   // س-151/D-149 (دفعة 15): فوهج أعمار الذمم المخزنة — قراءتها عند
   // الإقلاع بنمط مفاتيح الصور، والفاسد يعيد الافتراضي لا يكسر.
   await loadAgingPrefs();
+  // الدفعة 23 (F-167/D-183): خيار عرض الهجري بجانب الميلادي — قراءته
+  // عند الإقلاع بالنمط ذاته، والافتراض مطفأ فلا شيء يتغير بلا طلب.
+  await loadHijriDisplayPref();
   await preloadAppFonts();
   runApp(const DiqqahApp());
 }

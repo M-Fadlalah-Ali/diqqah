@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:diqqah_storage/diqqah_storage.dart';
 
+import 'hijri_display.dart';
 import 'invoices_screen.dart' show InvoiceDetailScreen;
 import 'items_screen.dart' show ItemEditScreen;
 import 'parties_screen.dart' show PartyEditScreen;
@@ -626,7 +627,9 @@ class _ItemStockMovesScreenState extends State<ItemStockMovesScreen> {
                   rows: [
                     for (final r in rows)
                       [
-                        r.dateText,
+                        // الدفعة 23 (F-167/D-183): الهجري بجانب
+                        // الميلادي حين يُفعَّل الخيار — عرض لا إدخال.
+                        displayDate(r.dateText),
                         r.docLabel ?? '—',
                         r.isIn ? 'دخول' : 'خروج',
                         '${r.qtyBase}',
@@ -645,7 +648,8 @@ class _ItemStockMovesScreenState extends State<ItemStockMovesScreen> {
                             ListTile(
                               dense: true,
                               title: Text(
-                                  '${r.dateText} · ${r.docLabel ?? '—'}'),
+                                  '${displayDate(r.dateText)}'
+                                  ' · ${r.docLabel ?? '—'}'),
                               subtitle: Text(
                                   '${r.isIn ? 'دخول' : 'خروج'} ${r.qtyBase}'
                                   ' · ${r.warehouseName ?? '—'}'),

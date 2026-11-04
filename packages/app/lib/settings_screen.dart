@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import 'hijri_display.dart';
 import 'ui_fonts.dart';
 import 'print_image_prefs.dart';
 
@@ -838,6 +839,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   FilledButton.tonal(
                     onPressed: _busy ? null : _saveCounterWidth,
                     child: const Text('حفظ عدد خانات العدّاد'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── بطاقة خيارات العرض (F-167/D-183 — الدفعة 23): مفتاح
+          // الهجري بجانب الميلادي — عرض لا إدخال، والميلادي أساس
+          // التخزين والإدخال دائماً (D-077/F-175: لا إدخال هجري أبداً).
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'خيارات العرض (F-167)',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'التاريخ الهجري بجانب الميلادي في القوائم والتقارير '
+                    'والمطبوعات — بالتقويم الحسابي المعياري وقد يخالف '
+                    'رؤية المحلّة بيوم أو يومين فهو عرض لا مرجع حكم. '
+                    'الميلادي أساس التخزين والإدخال دائماً — لا إدخال هجري.',
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('التاريخ الهجري بجانب الميلادي'),
+                    subtitle: Text(
+                        'معاينة: ${displayDate(todayIsoDate())}'),
+                    value: hijriDisplayEnabled.value,
+                    onChanged: _busy
+                        ? null
+                        : (v) async {
+                            await setHijriDisplayEnabled(v);
+                            if (mounted) setState(() {});
+                          },
                   ),
                 ],
               ),

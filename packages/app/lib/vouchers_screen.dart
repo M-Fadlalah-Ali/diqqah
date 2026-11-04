@@ -7,6 +7,7 @@ import 'print_service.dart';
 import 'input_formatters.dart';
 import 'reports_screen.dart' show formatMinorAmount;
 import 'currency_display.dart';
+import 'hijri_display.dart';
 
 /// طباعة سند أو تحويل أو تسوية (D-016، دفعة إغلاق النواة س37) — قسيمة
 /// A5 طولية (D-101 معروض) ببيانات الصف المعروضة حصراً، ومشاركتها
@@ -671,7 +672,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
           _AllocationUi(
             invoiceId: c.invoiceId,
             label: '${c.number} — متبقٍ ${formatMinorAmount(c.remainingDocMinor)}'
-                ' (${c.dateText})',
+                ' (${displayDate(c.dateText)})',
             remainingDocMinor: c.remainingDocMinor,
           ),
       ];

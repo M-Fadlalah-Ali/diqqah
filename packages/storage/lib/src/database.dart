@@ -1489,6 +1489,99 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     return rows.isEmpty ? null : rows.first.data['item_id'] as int;
   }
 
+  // ── الدفعة 23 (D-183): F-146 اقتراحات الإدخال وF-165 الترقية
+  // الجماعية — قراءتا اقتراح بنمط customSelect القائم، وكتابة ترقية
+  // معاملة واحدة. بلا أحداث اتفاقاً مع updateItemDetails: تفاصيل
+  // الأصناف بلا أحداث حتى مرحلة المزامنة (08).
+
+  /// عدادات تداول الأطراف لاقتراح «الأكثر تداولاً» (F-146): فواتير
+  /// مرحّلة من عائلة الجهة كاملة (المردود تداول حقيقي) منذ تاريخ ISO
+  /// حصراً، والأطراف وحدها من لها طرف أصلاً.
+  Future<Map<int, int>> partyUsageCounts({
+    required bool salesSide,
+    required String sinceIso,
+  }) async {
+    final kinds = salesSide
+        ? "('sale','sale_return')"
+        : "('purchase','purchase_return')";
+    final rows = await customSelect(
+      'SELECT party_id AS pid, COUNT(*) AS c FROM invoices '
+      // «المرحّل» بلسان batch22 الموثق: ليس مسودة — فالتوزيع يغيّر
+      // الحالة إلى paid/partially_paid (س-156/D-154) وكلها مرحّلة.
+      "WHERE state <> 'draft' AND party_id IS NOT NULL AND is_deleted = 0 "
+      'AND kind IN $kinds AND invoice_date >= ?1 '
+      'GROUP BY party_id',
+      variables: [Variable.withString(sinceIso)],
+    ).get();
+    return {
+      for (final r in rows)
+        if (r.data['pid'] != null) r.data['pid'] as int: r.data['c'] as int,
+    };
+  }
+
+  /// آخر سعر فعلي لكل صنف مع طرف (F-146) — من فواتير عائلة الجهة
+  /// المرحّلة بأسعار موجبة حصراً، والأحدث فوزاً (أول ظهور بعد الترتيب
+  /// التنازلي). قراءة لا كتابة — القبول بشري بالواجهة.
+  Future<Map<int, LastPriceSuggestion>> lastPricesForParty({
+    required int partyId,
+    required bool salesSide,
+  }) async {
+    final kinds = salesSide
+        ? "('sale','sale_return')"
+        : "('purchase','purchase_return')";
+    final rows = await customSelect(
+      'SELECT il.item_id AS item_id, il.unit_price_minor AS price_minor, '
+      'inv.number AS doc_number, inv.invoice_date AS doc_date '
+      'FROM invoice_lines il JOIN invoices inv ON inv.id = il.invoice_id '
+      // «المرحّل» = ليس مسودة (درس البذرة: التوزيع يغيّر الحالة).
+      "WHERE inv.party_id = ?1 AND inv.state <> 'draft' AND inv.kind IN $kinds "
+      'AND il.unit_price_minor > 0 '
+      'AND inv.is_deleted = 0 AND il.is_deleted = 0 '
+      'ORDER BY inv.id DESC, il.id DESC',
+      variables: [Variable.withInt(partyId)],
+    ).get();
+    final out = <int, LastPriceSuggestion>{};
+    for (final r in rows) {
+      final itemId = r.data['item_id'] as int;
+      if (out.containsKey(itemId)) continue;
+      out[itemId] = LastPriceSuggestion(
+        itemId: itemId,
+        priceMinor: r.data['price_minor'] as int,
+        docLabel: '${r.data['doc_number']} بتاريخ ${r.data['doc_date']}',
+      );
+    }
+    return out;
+  }
+
+  /// تنفيذ الترقية الجماعية (F-165) — معاملة واحدة تُحدّث الحقول
+  /// المستهدفة بقيمها المحسوبة سلفاً بالمعاينة. الحساب في المجال
+  /// والكتابة هنا حصراً — التخزين يحفظ ولا يقرر — والحقل غير المستهدف
+  /// بلا Presence فلا يُمس إطلاقاً.
+  Future<void> applyBulkPriceUpdates(
+      List<BulkPriceUpdateRow> updates) async {
+    assert(updates.every((u) =>
+        (u.newSalePriceMinor == null || u.newSalePriceMinor! >= 0) &&
+        (u.newPurchasePriceMinor == null || u.newPurchasePriceMinor! >= 0)),
+        'س6: لا سعر سالب');
+    await batch((b) {
+      for (final u in updates) {
+        b.update(
+          items,
+          ItemsCompanion(
+            salePriceMinor: u.newSalePriceMinor == null
+                ? const Value.absent()
+                : Value(u.newSalePriceMinor!),
+            purchasePriceMinor: u.newPurchasePriceMinor == null
+                ? const Value.absent()
+                : Value(u.newPurchasePriceMinor!),
+            updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+          ),
+          where: ($ItemsTable t) => t.id.equals(u.itemId),
+        );
+      }
+    });
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // قلب الدفتر — دفعة م1 الثالثة (س-42..س-50، D-076..D-078 معروضة):
   // المُشغِّلات الحواجز + البذر + المحرك (مسودة/ترحيل/عكس/حذف مسودة)
@@ -6855,6 +6948,37 @@ class _StockLinePlan {
     required this.qtyBase,
     required this.stockValueMinor,
     required this.counterpartMinor,
+  });
+}
+
+/// اقتراح آخر سعر فعلي لصنف مع طرف (F-146/D-183) — قراءة خالصة.
+class LastPriceSuggestion {
+  final int itemId;
+  final int priceMinor;
+
+  /// لسان المصدر: «2026/000123 بتاريخ 2026-03-15» — يعرض ليبين الاقتراح
+  /// من أين جاء (الصدق أولاً) ويبقى الحقل حراً بعدوه.
+  final String docLabel;
+
+  const LastPriceSuggestion({
+    required this.itemId,
+    required this.priceMinor,
+    required this.docLabel,
+  });
+}
+
+/// صف ترقية جماعية (F-165/D-183) — الحقل غير المستهدف null فلا يُمس
+/// إطلاقاً (Presence absent بالكتابة)، والقيم محسوبة سلفاً بالمعاينة
+/// بمحرك المجال.
+class BulkPriceUpdateRow {
+  final int itemId;
+  final int? newSalePriceMinor;
+  final int? newPurchasePriceMinor;
+
+  const BulkPriceUpdateRow({
+    required this.itemId,
+    this.newSalePriceMinor,
+    this.newPurchasePriceMinor,
   });
 }
 

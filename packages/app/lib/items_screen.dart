@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'input_formatters.dart';
 import 'item_images.dart';
+import 'price_update_screen.dart';
 import 'item_media.dart';
 import 'item_crop_screen.dart';
 import 'reports_screen.dart' show formatMinorAmount;
@@ -64,7 +65,27 @@ class _ItemsScreenState extends State<ItemsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('الأصناف')),
+      appBar: AppBar(
+        title: const Text('الأصناف'),
+        actions: [
+          // الدفعة 23 (F-165/D-183): الترقية الجماعية للأسعار بالتصنيف —
+          // معاينة قبل التنفيذ وفواتير التاريخ بلقطاتها سليمة.
+          IconButton(
+            tooltip: 'رفع أسعار جماعي بالتصنيف',
+            icon: const Icon(Icons.trending_up_outlined),
+            onPressed: () {
+              // القائمة تتغذى من watch() فتتجدد ذاتياً بعد الترقية
+              // بلا إعادة تحميل يدوي (نمط الدفق الموثق أعلاه).
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => PriceUpdateScreen(db: widget.db),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewItem,
         icon: const Icon(Icons.inventory_2_outlined),

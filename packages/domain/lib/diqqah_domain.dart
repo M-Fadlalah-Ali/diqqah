@@ -12,5 +12,8 @@ export 'src/party.dart';
 export 'src/permissions.dart';
 export 'src/periods.dart';
 export 'src/reports.dart';
+export 'src/bulk_price.dart';
+export 'src/hijri.dart';
+export 'src/suggest.dart';
 export 'src/setup.dart';
 export 'src/voucher.dart';
