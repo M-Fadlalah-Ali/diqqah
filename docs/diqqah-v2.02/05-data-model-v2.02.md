@@ -50,8 +50,8 @@
 | `unit` | name, is_base(نعم/لا) | الوحدة الأساسية عاملها 1 |
 | `unit_group` | name | مجموعة تعبئة بمستويات متعددة؛ قوالب مقترحة (قطعة/علبة/كرتونة) أمثلة غير حصرية ويضيف المستخدم ما يشابه ومستويات أعلى (D-026) |
 | `unit_conversion` | unit_id, target_base_unit_id, factor (عدد صحيح لا عائم) | عامل تحويل ثابت (علبة = 12 قطعة)؛ لا يُعدَّل بعد وجود حركات — تُنشأ وحدة جديدة بدلاً منه (س7) |
-| `item` | sku, name, category?(نص اختياري — التصنيف أساس رفع الأسعار الجماعي F-165), kind(`good/service/bundle`), base_unit_id, purchase_price_minor, sale_price_minor, price_currency_id, default_tax_id?(قيمة صفرية)، is_active | الخدمة صنف بلا مخزون؛ البضاعة تخزونية |
-| `bundle_component` | bundle_item_id, component_item_id, qty_base | وصفة التجميع البسيط: بيع التجميعي يسحب مكوناته من المخزون |
+| `item` | sku, name, category?(نص اختياري — التصنيف أساس رفع الأسعار الجماعي F-165), kind(`good/service/bundle`), base_unit_id, purchase_price_minor, sale_price_minor, price_currency_id, default_tax_id?(قيمة صفرية)، is_active, unit_group_id?(م2 — ربط بمجموعة تعبئة F-032), price_mode(`auto/manual` — أسعار التعبئة آلي/يدوي F-208) | الخدمة صنف بلا مخزون؛ البضاعة تخزونية؛ التجميعي مخزوني برصيد جاهز يفتح بالشراء الجاهز أو مستند التجميع (س81) |
+| `bundle_component` | bundle_item_id, component_item_id, qty_base, cost_minor?(تكلفة المكوّن — للخدمة بالخيارين) | وصفة التجميع: بيع التجميعي يسحب من الجاهز أولاً ثم يفكك (F-034)؛ ومكوّن خدمة مسموح بلا مخزون: بلا تكلفة بند بيعي ضمن السعر وبقيمة تدخل مجموع كلف الوصفة (F-212 — س80) |
 | `item_barcode` | item_id, barcode, unit_id | تحضير للمرحلة 5 (باركود) — بنية جاهزة مبكراً |
 
 ### 3.3 المستودعات والصناديق
@@ -86,7 +86,7 @@
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
 | `invoice` | kind(`sale/purchase/sale_return/purchase_return`), number, party_id, warehouse_id, invoice_date, due_date?, currency_id, fx_rate, totals..., discount_rate?, discount_amount_base_minor?, state(`draft/posted/paid/partially_paid`), move_id, original_invoice_id?(للمردود) | إلغاء المرحّلة = مردود لا حذف؛ **حُذفت `cancelled` من التعداد بقرار المالك (م-22/D-043): الإلغاء حذف منطقي للمسودة (F-059) والمرحّل يعالج بمردود أو عكس حصراً (07 §1.3) فلا مسار تشغيلي يصل إليها**؛ خصم الفاتورة: نسبة على المسودة تُترجم مبلغاً ويُقيّد صافياً بلا حساب مستقل ولا يمس كلفة المخزون (س7)؛ وحالتا paid/partially_paid مشتقتان آلياً من (الإجمالي − المطابقات − المردودات) — لا ضبط يدوي (س5)؛ والمجاميع مخزنة على المستند بالصافي بعملتيه (`total_doc_minor`/`total_base_minor`) والسطر بمكافئه التوثيقي `line_total_doc_minor` بجانب الأساسي (F-122/D-082 معروضة) |
-| `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor؛ + أعمدة تنفيذية: `line_total_doc_minor` بجانب الأساسي (F-122/D-082) و`delivered` و`supplier_party_id` (دفعة 12/D-131/D-132 — ترحيلة v13) و`delivery_note` (دفعة 15/D-151 — ترحيلة v14) | للصنف التجميعي: عند الترحيل تُولَّد حركات مخزون لمكوناته من `bundle_component`؛ وعلم التسليم والمورد المسؤول وملاحظة التسليم **علم عمل لا محاسبة**: تُحدَّث على المرحّلة بلا فك إقفال (الحرس يجمّد المال حصراً) ولا يمس القيود والمخزون والذمم |
+| `invoice_line` | invoice_id, item_id, qty, unit_id, factor_at_entry, qty_base, unit_price_minor, discount_minor, tax_rate (0 افتراضياً), line_total_base_minor؛ + أعمدة تنفيذية: `line_total_doc_minor` بجانب الأساسي (F-122/D-082) و`delivered` و`supplier_party_id` (دفعة 12/D-131/D-132 — ترحيلة v13) و`delivery_note` (دفعة 15/D-151 — ترحيلة v14) | للصنف التجميعي: عند الترحيل يسحب من رصيده الجاهز أولاً ويكمل النقص بحركات مكوناته من `bundle_component` (تكلفة السطر مركبة — F-034)؛ وعلم التسليم والمورد المسؤول وملاحظة التسليم **علم عمل لا محاسبة**: تُحدَّث على المرحّلة بلا فك إقفال (الحرس يجمّد المال حصراً) ولا يمس القيود والمخزون والذمم |
 
 ### 4.2 السندات والصناديق
 
@@ -102,7 +102,7 @@
 
 | الجدول | الحقول الجوهرية | ملاحظات |
 |---|---|---|
-| `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد؛ و`value_base_minor` قيمة الحركة الكاملة بجانب لقطة كلفة الوحدة (F-140) — والترصيد بالقيمة الإجمالية (D-067) |
+| `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد، إذن إدخال (F-209)، إذن إخراج (F-210)، مستند تجميع (خروج لكل مكون ودخول للناتج — F-211)؛ و`value_base_minor` قيمة الحركة الكاملة بجانب لقطة كلفة الوحدة (F-140) — والترصيد بالقيمة الإجمالية (D-067) |
 | `stock_transfer` | number, from_wh, to_wh, lines..., state | مستند التحويل بين مستودعات (المرحلة 2) |
 | `stock_count` (الجرد) | warehouse_id, count_date, lines(item, counted_qty_base, system_qty_base, diff), state, adjustment_move_id | تسوية الجرد تولّد حركة تسوية وقيداً |
 
