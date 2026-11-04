@@ -4,6 +4,7 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'reports_screen.dart' show formatMinorAmount;
+import 'stock_counts_screen.dart';
 import 'transfers_screen.dart';
 
 /// شاشة المستودعات — أولى م2 «تعدد المستودعات والتحويل بينها» (دفعة 24
@@ -255,7 +256,8 @@ class _WarehousesScreenState extends State<WarehousesScreen> {
                                   .onErrorContainer)),
                     ),
                   ),
-                // مدخل التحويل ظاهر لا مدفون (درس D-098)
+                // مدخل التحويل ظاهر لا مدفون (درس D-098) — ومدخل الجرد
+                // إلى جانبه (الدفعة 25 س-19/F-046)
                 FilledButton.icon(
                   onPressed: () => Navigator.of(context)
                       .push<void>(MaterialPageRoute<void>(
@@ -264,6 +266,16 @@ class _WarehousesScreenState extends State<WarehousesScreen> {
                     .then((_) => _reload()),
                   icon: const Icon(Icons.swap_horiz),
                   label: const Text('تحويل بين مستودعين'),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context)
+                      .push<void>(MaterialPageRoute<void>(
+                          builder: (_) =>
+                              StockCountsScreen(db: widget.db)))
+                    .then((_) => _reload()),
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: const Text('جرد المخزون'),
                 ),
                 const SizedBox(height: 12),
                 ...[

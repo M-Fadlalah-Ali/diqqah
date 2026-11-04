@@ -266,6 +266,7 @@ const Map<String, String> sequenceKindLabels = {
   'voucher_payment': 'سند دفع',
   'box_transfer': 'تحويل بين صناديق',
   'stock_transfer': 'تحويل بين مستودعات',
+  'stock_count': 'جلسة جرد',
   'cash_adjustment': 'تسوية صندوق',
 };
 

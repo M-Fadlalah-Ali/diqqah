@@ -653,7 +653,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -665,6 +665,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createVoucherTables();
           await _createVoucherTriggers();
           await _createTransferTables();
+          await _createCountTables();
           await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
@@ -829,8 +830,12 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             }
             // 8→9 (ومن إصدار أدنى مباشرة): دفعة (6) حواجز الإقفال حصراً
             // (D-088 معروض) — بلا جداول ولا أعمدة جديدة، والبناة DROP+CREATE
-            // فآمنة التكرار أي كان مسار الوصول.
+            // فآمنة التكرار أي كان مسار الوصول. وجداول الجرد تُبنى قبلها
+            // إلزاماً منذ الدفعة 25 (س-19/D-186): حاجز الفترة صار يشمل
+            // stock_counts فلا حاجز قبل جدوله — والبنية IF NOT EXISTS
+            // فلا مساس بمسارات الترقية الأدنى ولا خطوة v16 بعدها.
             if (version == 9) {
+              await _createCountTables();
               await _createClosingTriggers();
             }
             // 9→10 (ومن إصدار أدنى مباشرة): دفعة إغلاق النواة (س37) —
@@ -951,6 +956,20 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // بv7) فلا أعمدة على جداول قائمة هنا أصلاً.
             if (version == 15) {
               await _createTransferTables();
+            }
+            // 15→16 (ومن إصدار أدنى مباشرة): الدفعة 25 — الجرد وتسوياته
+            // (س-19/F-046، س79/D-186): جدولان جديدان خالصان SQL خاماً
+            // بنمط v7/v8/v15 المجرّب (آمنة التكرار بـIF NOT EXISTS ولا
+            // مساس بجداول قائمة) — رأس جلسة جرد بحالة جارٍ/مرحّل وأسطره
+            // بعدّاتها ولقطة الترحيل، ومُشغّلات تجميد المرحّل نمط F-140
+            // وفهرس تفرد الصنف بالجلسة. وإعادة بناء حواجز الإقفال إلزامية
+            // هنا: الجلسة تُرحّل قيداً محاسبياً فتاريخها تحكمه الفترة،
+            // وحاجز stock_counts الجديد لا يولد إلا بـ_createClosingTriggers
+            // التي لا تستدعى بالترقيات إلا بخطوتها (v9) — والبناء DROP+
+            // CREATE فآمن التكرار أي كان مسار الوصول (درس v9 ذاته).
+            if (version == 16) {
+              await _createCountTables();
+              await _createClosingTriggers();
             }
           }
         },
@@ -4202,6 +4221,664 @@ Future<List<StockTransferLineRow>> stockTransferLinesOf(
   ];
 }
 
+/// جداول الدفعة 25 — الجرد وتسوياته (س-19/F-046 ثاني م2):
+/// جلسة عدّ بحالتين «جارٍ/مرحّل» تُنشأ مفتوحةً تُحفظ عدّاتها متكرراً ثم
+/// تُرحَّل بترحيلة واحدة — لا مسودة قيدية: الجلسة وثيقة عدّ والمحاسبة
+/// لحظة الترحيل حصراً. الرأس بنطاقه (كل الأصناف أو مجموعة تصنيف) وأسطره
+/// مزروعة آلياً من أرصدة المستودع داخل النطاق، والفرق والقيمة لقطة
+/// الترحيل (المحسوبة ضد الأرصدة الآنية لا لقطة عدّ قديم) لا مكتوبة
+/// أثناء العدّ. المُشغِّلات: تجميد المرحّل نمط F-140 (الجلسة المرحّلة
+/// وأسطرها لقطة تاريخية لا تعدل ولا تحذف)، وحاجز الفترة المقفلة من
+/// _createClosingTriggers (الجلسة تُرحّل قيداً محاسبياً فالتاريخ تحكمه
+/// الفترة خلافاً للتحويل بلا قيد).
+Future<void> _createCountTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "stock_counts" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"count_date" TEXT NOT NULL, '
+        '"warehouse_id" INTEGER NOT NULL, '
+        '"scope" TEXT NOT NULL, '
+        '"scope_category" TEXT NULL, '
+        '"narration" TEXT NULL, '
+        '"state" TEXT NOT NULL DEFAULT \'open\', '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "stock_count_lines" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"count_id" INTEGER NOT NULL, '
+        '"item_id" INTEGER NOT NULL, '
+        // العدّة null = لم يُعدّ بعد — والصفر عدّ شرعي «الرف فارغ».
+        '"counted_qty_base" INTEGER NULL, '
+        // لقطة الترحيل: رصيد النظام الآني والفرق واتجاهه وقيمته وتكلفتها.
+        '"system_qty_base" INTEGER NULL, '
+        '"diff_qty_base" INTEGER NULL, '
+        '"direction" TEXT NULL, '
+        '"value_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"unit_cost_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    // الصنف الواحد سطراً واحداً بالجلسة (نمط D-183) — حاجز قاعدة فوق المجال
+    'CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_count_lines_session_item '
+        'ON stock_count_lines (count_id, item_id)',
+    // الحاجز — تجميد الجلسة المرحّلة (نمط trg_stock_transfers_frozen/F-140)
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_counts_frozen_update '
+        'BEFORE UPDATE ON stock_counts FOR EACH ROW '
+        "WHEN OLD.state = 'posted' "
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'جلسة الجرد المرحّلة لقطة تاريخية — لا تعديل "
+        "(نمط F-140)'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_counts_frozen_delete '
+        'BEFORE DELETE ON stock_counts FOR EACH ROW '
+        "WHEN OLD.state = 'posted' "
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'جلسة الجرد المرحّلة لا تحذف — لقطة تاريخية "
+        'وتسويتها بمردود لا بحذف\'); '
+        'END',
+    // أسطر الجلسة تتجمد لحظة ترحيل رأسها — والجارٍ حر العدّ المتكرر
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_count_lines_frozen_update '
+        'BEFORE UPDATE ON stock_count_lines FOR EACH ROW '
+        "WHEN (SELECT state FROM stock_counts WHERE id = NEW.count_id) = "
+        "'posted' "
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر جلسة مرحّلة لقطة تاريخية — لا تعديل'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_stock_count_lines_frozen_delete '
+        'BEFORE DELETE ON stock_count_lines FOR EACH ROW '
+        "WHEN (SELECT state FROM stock_counts WHERE id = OLD.count_id) = "
+        "'posted' "
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر جلسة مرحّلة لا يحذف — لقطة تاريخية'); "
+        'END',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
+/// افتتاح جلسة جرد (س-19): رأس بحالة «جارٍ» وأسطر مزروعة آلياً من
+/// أرصدة المستودع داخل النطاق (الصنف النشط بضاعة برصيد كمية قائم
+/// سطرٌ إلزامي العدّ؛ الأرصدة الأصفارية بلا عدّ بلا معنى ولا سطر —
+/// ما وُجد فعلاً يضاف يدياً «صنف وجدناه»). الرقم من التسلسل السنوي
+/// داخل المعاملة ذاتها (07 §1.9) فرفض الافتتاح لا يحرق رقماً،
+/// وحدث «created» بلقطة (07 §2.3). ومنع الجلستين المتوازيتين على
+/// مستودع واحد (سجل الرسائل: StockCountOpenSessionExists).
+Future<int> stockCountStart(StockCountStartDraft draft) async {
+  final structural = validateStockCountStartStructure(draft);
+  if (structural.isNotEmpty) {
+    throw StockCountValidationException(structural);
+  }
+  return transaction(() async {
+    final errors = <StockCountValidationError>[];
+    final warehouse = await _warehouseByIdTx(draft.warehouseId);
+    if (warehouse == null) {
+      errors.add(StockCountWarehouseMissing(draft.warehouseId));
+    } else if (!warehouse.isActive) {
+      errors.add(StockCountWarehouseInactive(warehouse.name));
+    }
+    final openSession = await customSelect(
+      "SELECT id FROM stock_counts WHERE warehouse_id = ? AND state = "
+      "'open' AND is_deleted = 0 LIMIT 1",
+      variables: [Variable.withInt(draft.warehouseId)],
+    ).get();
+    if (openSession.isNotEmpty && warehouse != null) {
+      errors.add(StockCountOpenSessionExists(warehouse.name));
+    }
+    if (errors.isNotEmpty) {
+      throw StockCountValidationException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final year = yearOfIsoDate(draft.dateText);
+    final number = formatDocumentNumber(
+        year,
+        await _advanceSequenceWithinTx('stock_count', year),
+        counterWidth: await _counterWidth());
+    await customStatement(
+      "INSERT INTO stock_counts (number, count_date, warehouse_id, scope, "
+      "scope_category, narration, state, uuid, created_at, updated_at, "
+      "is_deleted) VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 0)",
+      [
+        number,
+        draft.dateText,
+        draft.warehouseId,
+        draft.scope == StockCountScope.group ? 'group' : 'all',
+        draft.scope == StockCountScope.group
+            ? draft.scopeCategory!.trim()
+            : null,
+        draft.narration,
+        const Uuid().v4(),
+        now,
+        now,
+      ],
+    );
+    final sessionId = (await customSelect(
+      'SELECT last_insert_rowid() AS id',
+    ).getSingle()).data['id'] as int;
+    // بذر الأسطر من أرصدة المستودع داخل النطاق — المجموعة بتصنيفها
+    // والكل بكل بضاعة نشطة برصيد قائم.
+    final categoryFilter =
+        draft.scope == StockCountScope.group ? 'AND i.category = ?' : '';
+    final vars = <Object>[
+      draft.warehouseId,
+      if (draft.scope == StockCountScope.group) draft.scopeCategory!.trim(),
+    ];
+    final seed = await customSelect(
+      'SELECT b.item_id AS item_id FROM stock_balances b '
+      'JOIN items i ON i.id = b.item_id '
+      'WHERE b.warehouse_id = ? AND b.is_deleted = 0 '
+      'AND b.qty_base <> 0 AND i.is_deleted = 0 AND i.is_active = 1 '
+      "AND i.kind = 'good' $categoryFilter",
+      variables: [
+        Variable.withInt(vars[0] as int),
+        if (vars.length > 1) Variable.withString(vars[1] as String),
+      ],
+    ).get();
+    for (final row in seed) {
+      await customStatement(
+        'INSERT INTO stock_count_lines (count_id, item_id, counted_qty_base, '
+        'uuid, created_at, updated_at, is_deleted) '
+        'VALUES (?, ?, NULL, ?, ?, ?, 0)',
+        [
+          sessionId,
+          row.data['item_id'] as int,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+    }
+    await _recordDocEventTx(
+      entityType: 'stock_count',
+      table: 'stock_counts',
+      entityId: sessionId,
+      action: 'created',
+    );
+    return sessionId;
+  });
+}
+
+/// حفظ العدّات المتكرر على جلسة جارٍ — العدّة موجبة أو صفر (الصفر
+/// «الرف فارغ» شرعي)، والمفاتيح أسطر الجلسة بمعرفات أصنافها، وما لا
+/// يُذكر في الخريطة يبقى كما هو. الفروقات لا تُحسب هنا إطلاقاً —
+/// لقطة الترحيل وحدها تحسب ضد الأرصدة الآنية.
+Future<void> stockCountSaveCounts(
+    int sessionId, Map<int, int> countsByItemId) async {
+  final structural = validateStockCountCounts(countsByItemId);
+  if (structural.isNotEmpty) {
+    throw StockCountValidationException(structural);
+  }
+  await transaction(() async {
+    final session = await _stockCountByIdTx(sessionId);
+    if (session == null) {
+      throw StockCountValidationException([StockCountNotFound(sessionId)]);
+    }
+    if (session['state'] == 'posted') {
+      throw StockCountValidationException([const StockCountAlreadyPosted()]);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final entry in countsByItemId.entries) {
+      final updated = await customUpdate(
+        'UPDATE stock_count_lines SET counted_qty_base = ?, updated_at = ? '
+        'WHERE count_id = ? AND item_id = ? AND is_deleted = 0',
+        variables: [
+          Variable.withInt(entry.value),
+          Variable.withInt(now),
+          Variable.withInt(sessionId),
+          Variable.withInt(entry.key),
+        ],
+      );
+      if (updated == 0) {
+        throw StockCountValidationException([
+          StockCountItemMissing(entry.key, countsByItemId.keys
+              .toList()
+              .indexOf(entry.key)),
+        ]);
+      }
+    }
+  });
+}
+
+/// إضافة «صنف وجدناه» لجلسة جارٍ — صنف برصيد صفير وُجد فعلاً على
+/// الرف، داخل النطاق حصراً (المجموعة بتصنيفها) وبضاعة نشطة وعدّته
+/// موجبة (وجوده فعلاً يعني عدّة). رصيد الصفير يعني زيادة من الصفر
+/// وتكلفتها بمرجع التكلفة المتاح لحظة الترحيل (قرار D-186).
+Future<void> stockCountAddFoundItem(
+    int sessionId, StockCountLineDraft line) async {
+  final structural = validateStockCountFoundLine(line);
+  if (structural.isNotEmpty) {
+    throw StockCountValidationException(structural);
+  }
+  await transaction(() async {
+    final session = await _stockCountByIdTx(sessionId);
+    if (session == null) {
+      throw StockCountValidationException([StockCountNotFound(sessionId)]);
+    }
+    if (session['state'] == 'posted') {
+      throw StockCountValidationException([const StockCountAlreadyPosted()]);
+    }
+    final errors = <StockCountValidationError>[];
+    final item = await _itemByIdTx(line.itemId);
+    if (item == null) {
+      throw StockCountValidationException(
+          [StockCountItemMissing(line.itemId, 0)]);
+    }
+    final label = itemDisplayLabel(item['name'] as String, item['sku'] as String);
+    if ((item['is_active'] as int) != 1) {
+      errors.add(StockCountItemInactive(label, 0));
+    } else if ((item['kind'] as String) != 'good') {
+      errors.add(StockCountItemNotGood(label, 0));
+    }
+    final scope = session['scope'] as String;
+    if (scope == 'group') {
+      final category = session['scope_category'] as String?;
+      if ((item['category'] as String?) != category) {
+        errors.add(StockCountItemOutsideScope(
+          itemLabel: label,
+          scopeCategory: category ?? '',
+          lineIndex: 0,
+        ));
+      }
+    }
+    final existing = await customSelect(
+      'SELECT id FROM stock_count_lines WHERE count_id = ? AND item_id = ? '
+      'AND is_deleted = 0',
+      variables: [
+        Variable.withInt(sessionId),
+        Variable.withInt(line.itemId),
+      ],
+    ).get();
+    if (existing.isNotEmpty) {
+      errors.add(const StockCountItemDuplicated(0));
+    }
+    if (errors.isNotEmpty) {
+      throw StockCountValidationException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await customStatement(
+      'INSERT INTO stock_count_lines (count_id, item_id, counted_qty_base, '
+      'uuid, created_at, updated_at, is_deleted) '
+      'VALUES (?, ?, ?, ?, ?, ?, 0)',
+      [
+        sessionId,
+        line.itemId,
+        line.countedQtyBase,
+        const Uuid().v4(),
+        now,
+        now,
+      ],
+    );
+  });
+}
+
+/// ترحيل جلسة الجرد (س-19) — قلب الدفعة: لكل صنف الفرق ضد الرصيد
+/// الآني لحظة الترحيل، عجزاً كان أو زيادة:
+/// - **عجز** (النظام أكثر من المعدود): قيمة الخروج بالامتصاص
+///   (wacExitValue نمط D-067 — العدّ بكامل الكمية يمتص القيمة كلها)
+///   وقيدُه **56 عجز الجرد مدين / 113 دائن** وحركة تسوية نزول.
+/// - **زيادة** (المعدود أكثر من النظام): تكلفتها بالمتوسط المرجح
+///   الحالي للمستودع (F-047: كلفة الوحدة مشتقة من القيمة الإجمالية
+///   D-067) وعند رصيد صفير بلا متوسط تُقيَّم بآخر سعر دخول معروف
+///   (سعر الشراء المسجل بالصنف — قرار D-186)، وقيدُها **113 مدين /
+///   43 إيرادات أخرى دائن** وحركة تسوية صعود. والزيادة بلا مرجع
+///   تكلفة إطلاقاً (رصيد صفير وسعر شراء صفر) تمر قيمتها صفراً —
+///   حركة ورصيد بلا سطر قيد (سطر صفر مرفوض بالمدقق المحاسبي 07 §2.1).
+/// - الفروقات الصفرية لا حركة ولا قيد لها — لا قيمة مالية.
+/// القيد قيدٌ واحد للجلسة «مجمع بمرجعها» (س-19: ref_doc_type=
+/// 'stock_count') بدفتر المخزون بنوعه move_stock، بأسطر لكل صنف
+/// (زوج عجز أو زوج زيادة) كل 113 مربوط بحركته (نمط الفواتير)،
+/// ويرحّل بالمحرك الموحد _postMoveWithinTx ففحص الفترة المقفلة
+/// والتوازن والترقيم المركزي من منظامه (07 §1.5/§1.9/§2.1) —
+/// والحاجز الثالث مُشغِّلات الفترة على الرأس نفسه. أسطر الجلسة
+/// تخزن لقطة الترحيل كاملة (system/diff/direction/value) فالشاشة
+/// بعد الترحيل قراءة لا حساب. حدث «posted» بلقطة الرأس والأسطر.
+Future<void> stockCountPost(int sessionId) async {
+  await transaction(() async {
+    final session = await _stockCountByIdTx(sessionId);
+    if (session == null) {
+      throw StockCountValidationException([StockCountNotFound(sessionId)]);
+    }
+    if (session['state'] == 'posted') {
+      throw StockCountValidationException([const StockCountAlreadyPosted()]);
+    }
+    final warehouseId = session['warehouse_id'] as int;
+    final warehouse = await _warehouseByIdTx(warehouseId);
+    if (warehouse == null) {
+      throw StockCountValidationException(
+          [StockCountWarehouseMissing(warehouseId)]);
+    }
+    if (!warehouse.isActive) {
+      throw StockCountValidationException(
+          [StockCountWarehouseInactive(warehouse.name)]);
+    }
+    final lineRows = await customSelect(
+      'SELECT l.id, l.item_id, l.counted_qty_base, i.name, i.sku, '
+      'i.kind, i.is_active, i.category, i.purchase_price_minor '
+      'FROM stock_count_lines l JOIN items i ON i.id = l.item_id '
+      'WHERE l.count_id = ? AND l.is_deleted = 0 ORDER BY l.id',
+      variables: [Variable.withInt(sessionId)],
+    ).get();
+    if (lineRows.isEmpty) {
+      throw StockCountValidationException([const StockCountNoLines()]);
+    }
+    // لا تسوية جزئية: كل سطر مُعدّ (الصفر شرعي) والصنف نشط بضاعة.
+    final errors = <StockCountValidationError>[];
+    for (var i = 0; i < lineRows.length; i++) {
+      final row = lineRows[i].data;
+      final label =
+          itemDisplayLabel(row['name'] as String, row['sku'] as String);
+      if (row['counted_qty_base'] == null) {
+        errors.add(StockCountLineNotCounted(label, i));
+        continue;
+      }
+      if ((row['is_active'] as int) != 1) {
+        errors.add(StockCountItemInactive(label, i));
+      } else if ((row['kind'] as String) != 'good') {
+        errors.add(StockCountItemNotGood(label, i));
+      }
+    }
+    if (errors.isNotEmpty) {
+      throw StockCountValidationException(errors);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final dateText = session['count_date'] as String;
+    final acc113 = await _accountIdByCodeTx('113');
+    final acc43 = await _accountIdByCodeTx('43');
+    final acc56 = await _accountIdByCodeTx('56');
+    final journalId = await _journalIdByCodeTx('stock');
+    // حركات المخزون أولاً لأخذ معرفاتها لربط أسطر 113 (نمط الفواتير)
+    // ثم القيد المجمع ثم دلتا الأرصدة — كله بالمعاملة ذاتها.
+    final moveLines = <MoveLineDraft>[];
+    for (final row in lineRows) {
+      final d = row.data;
+      final itemId = d['item_id'] as int;
+      final counted = d['counted_qty_base'] as int;
+      final (systemQty, systemValue) =
+          await _stockBalanceTx(itemId, warehouseId);
+      final diff = counted - systemQty;
+      if (diff == 0) {
+        // فرق صفري: لقطة اتجاهها none بلا حركة ولا قيد
+        await customStatement(
+          'UPDATE stock_count_lines SET system_qty_base = ?, '
+          "diff_qty_base = 0, direction = 'none', value_base_minor = 0, "
+          'unit_cost_base_minor = 0, updated_at = ? WHERE id = ?',
+          [systemQty, now, d['id'] as int],
+        );
+        continue;
+      }
+      if (diff < 0) {
+        // عجز — الخروج بالامتصاص (D-067)
+        final qtyOut = -diff;
+        final exitValue = wacExitValue(systemValue, systemQty, qtyOut);
+        await customStatement(
+          "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+          "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+          "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+          "is_deleted) VALUES (?, ?, ?, NULL, ?, ?, 'posted', "
+          "'stock_count', ?, ?, ?, ?, 0)",
+          [
+            itemId,
+            -qtyOut,
+            warehouseId,
+            exitValue,
+            roundHalfAwayFromZeroRatio(exitValue, qtyOut),
+            sessionId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        final moveId = (await customSelect(
+          'SELECT last_insert_rowid() AS id',
+        ).getSingle()).data['id'] as int;
+        if (exitValue > 0) {
+          moveLines.add(MoveLineDraft(
+            accountId: acc56,
+            debitMinor: exitValue,
+            currencyId: 1,
+            amountMinor: exitValue,
+          ));
+          moveLines.add(MoveLineDraft(
+            accountId: acc113,
+            creditMinor: exitValue,
+            currencyId: 1,
+            amountMinor: exitValue,
+            refStockMoveId: moveId,
+          ));
+        }
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            itemId,
+            warehouseId,
+            -qtyOut,
+            -exitValue,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          'UPDATE stock_count_lines SET system_qty_base = ?, '
+          'diff_qty_base = ?, direction = ?, value_base_minor = ?, '
+          'unit_cost_base_minor = ?, updated_at = ? WHERE id = ?',
+          [
+            systemQty,
+            diff,
+            'deficit',
+            exitValue,
+            roundHalfAwayFromZeroRatio(exitValue, qtyOut),
+            now,
+            d['id'] as int,
+          ],
+        );
+      } else {
+        // زيادة — بالمتوسط المرجح الحالي (F-047/D-067) وبلا رصيد
+        // بآخر سعر دخول معروف (D-186) وبلا مرجع تكلفتها صفراً.
+        final qtyIn = diff;
+        final int valueIn;
+        final int unitCost;
+        if (systemQty > 0) {
+          valueIn = roundHalfAwayFromZeroRatio(systemValue * qtyIn, systemQty);
+          unitCost = roundHalfAwayFromZeroRatio(valueIn, qtyIn);
+        } else {
+          final purchase =
+              (d['purchase_price_minor'] as int?) ?? 0;
+          valueIn = purchase * qtyIn;
+          unitCost = purchase;
+        }
+        await customStatement(
+          "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+          "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+          "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+          "is_deleted) VALUES (?, ?, NULL, ?, ?, ?, 'posted', "
+          "'stock_count', ?, ?, ?, ?, 0)",
+          [
+            itemId,
+            qtyIn,
+            warehouseId,
+            valueIn,
+            unitCost,
+            sessionId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        final moveId = (await customSelect(
+          'SELECT last_insert_rowid() AS id',
+        ).getSingle()).data['id'] as int;
+        if (valueIn > 0) {
+          moveLines.add(MoveLineDraft(
+            accountId: acc113,
+            debitMinor: valueIn,
+            currencyId: 1,
+            amountMinor: valueIn,
+            refStockMoveId: moveId,
+          ));
+          moveLines.add(MoveLineDraft(
+            accountId: acc43,
+            creditMinor: valueIn,
+            currencyId: 1,
+            amountMinor: valueIn,
+          ));
+        }
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            itemId,
+            warehouseId,
+            qtyIn,
+            valueIn,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          'UPDATE stock_count_lines SET system_qty_base = ?, '
+          'diff_qty_base = ?, direction = ?, value_base_minor = ?, '
+          'unit_cost_base_minor = ?, updated_at = ? WHERE id = ?',
+          [
+            systemQty,
+            diff,
+            'surplus',
+            valueIn,
+            unitCost,
+            now,
+            d['id'] as int,
+          ],
+        );
+      }
+    }
+    // القيد المجمع بمرجع الجلسة — بأسطر لا يمرر صفراً (الزيادة بلا
+    // تكلفة حركة بلا قيد) فجلسة فروقاتها كلها صفرية القيمة بلا قيد.
+    if (moveLines.isNotEmpty) {
+      final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+        journalId: journalId,
+        dateText: dateText,
+        narration: session['narration'] as String? ??
+            'تسوية جرد المستودع «${warehouse.name}»',
+        refDocType: 'stock_count',
+        refDocId: sessionId,
+        lines: moveLines,
+      ));
+      await _postMoveWithinTx(moveId, sequenceKind: 'move_stock');
+    }
+    await customStatement(
+      "UPDATE stock_counts SET state = 'posted', updated_at = ? "
+      'WHERE id = ?',
+      [now, sessionId],
+    );
+    await _recordDocEventTx(
+      entityType: 'stock_count',
+      table: 'stock_counts',
+      entityId: sessionId,
+      action: 'posted',
+    );
+  });
+}
+
+/// رأس جلسة جرد بالمعرف داخل معاملة قائمة (نمط القلب — الأداة المشتركة).
+Future<Map<String, Object?>?> _stockCountByIdTx(int id) async {
+  final rows = await customSelect(
+    'SELECT id, number, count_date, warehouse_id, scope, scope_category, '
+    "narration, state FROM stock_counts WHERE id = ? AND is_deleted = 0",
+    variables: [Variable.withInt(id)],
+  ).get();
+  return rows.isEmpty ? null : rows.first.data;
+}
+
+/// سجل جلسات الجرد — الرؤوس بأسماء مستودعاتها وعدّاداتها المجمعية
+/// (قراءة عرض خالصة — التخزين يقرأ لا يحسب)، الأحدث أولاً.
+Future<List<StockCountListRow>> stockCountsOf() async {
+  final rows = await customSelect(
+    'SELECT c.id, c.number, c.count_date, c.warehouse_id, c.scope, '
+    'c.scope_category, c.narration, c.state, '
+    'w.name AS warehouse_name, '
+    'COUNT(l.id) AS line_count, '
+    "COUNT(l.counted_qty_base) AS counted_count, "
+    "COALESCE(SUM(CASE WHEN l.direction = 'deficit' THEN 1 ELSE 0 END), 0) "
+    'AS deficit_count, '
+    "COALESCE(SUM(CASE WHEN l.direction = 'surplus' THEN 1 ELSE 0 END), 0) "
+    'AS surplus_count, '
+    "COALESCE(SUM(CASE WHEN l.direction = 'deficit' THEN l.value_base_minor "
+    'ELSE 0 END), 0) AS deficit_value, '
+    "COALESCE(SUM(CASE WHEN l.direction = 'surplus' THEN l.value_base_minor "
+    'ELSE 0 END), 0) AS surplus_value '
+    'FROM stock_counts c '
+    'LEFT JOIN warehouses w ON w.id = c.warehouse_id '
+    'LEFT JOIN stock_count_lines l ON l.count_id = c.id AND l.is_deleted = 0 '
+    'WHERE c.is_deleted = 0 '
+    'GROUP BY c.id ORDER BY c.id DESC',
+  ).get();
+  return [
+    for (final r in rows)
+      StockCountListRow(
+        id: r.data['id'] as int,
+        number: r.data['number'] as String,
+        countDate: r.data['count_date'] as String,
+        warehouseId: r.data['warehouse_id'] as int,
+        warehouseName: r.data['warehouse_name'] as String? ?? '؟',
+        scope: r.data['scope'] as String,
+        scopeCategory: r.data['scope_category'] as String?,
+        narration: r.data['narration'] as String?,
+        state: r.data['state'] as String,
+        lineCount: r.data['line_count'] as int,
+        countedCount: r.data['counted_count'] as int,
+        deficitCount: r.data['deficit_count'] as int,
+        surplusCount: r.data['surplus_count'] as int,
+        deficitValueMinor: r.data['deficit_value'] as int,
+        surplusValueMinor: r.data['surplus_value'] as int,
+      ),
+  ];
+}
+
+/// أسطر جلسة جرد — للعدّ المتكرر قبل الترحيل (بالرصيد الآني ليسحق
+/// الفرق على الشاشة) وللقطة بعد الترحيل (اللقطة المخزنة لا حساب جديد).
+Future<List<StockCountLineRow>> stockCountLinesOf(int sessionId) async {
+  final rows = await customSelect(
+    'SELECT l.item_id, i.name AS item_name, i.sku, i.category, '
+    'l.counted_qty_base, l.system_qty_base, l.diff_qty_base, '
+    'l.direction, l.value_base_minor, l.unit_cost_base_minor '
+    'FROM stock_count_lines l '
+    'LEFT JOIN items i ON i.id = l.item_id '
+    'WHERE l.count_id = ? AND l.is_deleted = 0 ORDER BY l.id',
+    variables: [Variable.withInt(sessionId)],
+  ).get();
+  return [
+    for (final r in rows)
+      StockCountLineRow(
+        itemId: r.data['item_id'] as int,
+        itemName: r.data['item_name'] as String?,
+        sku: r.data['sku'] as String?,
+        itemCategory: r.data['category'] as String?,
+        countedQtyBase: r.data['counted_qty_base'] as int?,
+        systemQtyBase: r.data['system_qty_base'] as int?,
+        diffQtyBase: r.data['diff_qty_base'] as int?,
+        direction: r.data['direction'] as String?,
+        valueBaseMinor: r.data['value_base_minor'] as int,
+        unitCostBaseMinor: r.data['unit_cost_base_minor'] as int,
+      ),
+  ];
+}
+
 /// العملات المزروعة (F-120/D-070: الأساسية والدولار قبل م3).
 Future<List<CurrencyRow>> currenciesOf() async {
   final rows = await customSelect(
@@ -6730,7 +7407,8 @@ Future<void> _createClosingTriggers() async {
   // والقاعدة تحبط أي إدراج أو ترحيل خام في فترة مقفلة — الحاجز الثالث
   // على نمط D-067 (07 §2.2). DROP+CREATE فإعادة التعريف موثقة آمنة
   // التكرار (نمط توسعة حاجز سالب الصندوق س33). والمستندات القيدية
-  // الخمسة بأعمدة تواريخها، والفواتير بحالتَيها المحسومتين posted/paid
+  // الستة بأعمدة تواريخها (الجلسة سادستها منذ الدفعة 25 — س-19/D-186)،
+  // والفواتير بحالتَيها المحسومتين posted/paid
   // (النقدية غير المردودة «paid» فوراً — دفعة 4).
   const docTables = <(String, String, String)>[
     ('moves', 'date_text', "'posted'"),
@@ -6738,6 +7416,10 @@ Future<void> _createClosingTriggers() async {
     ('vouchers', 'voucher_date', "'posted'"),
     ('box_transfers', 'transfer_date', "'posted'"),
     ('cash_adjustments', 'adjustment_date', "'posted'"),
+    // الدفعة 25 (س-19/D-186): جلسة الجرد تُرحّل قيداً محاسبياً فتاريخها
+    // تحكمه الفترة خلافاً للتحويل بلا قيد — الإدراج المرحّل مباشرة
+    // والانتقال جارٍ→مرحّل كلاهما محجوبان بفترة مقفلة.
+    ('stock_counts', 'count_date', "'posted'"),
   ];
   for (final (table, dateColumn, committedStates) in docTables) {
     final periodClosed = '(SELECT p.state FROM periods p '
@@ -7232,6 +7914,72 @@ class StockTransferLineRow {
     required this.qtyBase,
     required this.unitCostBaseMinor,
     required this.valueBaseMinor,
+  });
+}
+
+/// جلسة جرد قائمة للقراءة — الرأس بأسمائه المحسوبة وعدّاداته المجمعية
+/// (نمط قراءة التحويل).
+class StockCountListRow {
+  final int id;
+  final String number;
+  final String countDate;
+  final int warehouseId;
+  final String warehouseName;
+  final String scope;
+  final String? scopeCategory;
+  final String? narration;
+  final String state;
+  final int lineCount;
+  final int countedCount;
+  final int deficitCount;
+  final int surplusCount;
+  final int deficitValueMinor;
+  final int surplusValueMinor;
+
+  const StockCountListRow({
+    required this.id,
+    required this.number,
+    required this.countDate,
+    required this.warehouseId,
+    required this.warehouseName,
+    required this.scope,
+    required this.scopeCategory,
+    required this.narration,
+    required this.state,
+    required this.lineCount,
+    required this.countedCount,
+    required this.deficitCount,
+    required this.surplusCount,
+    required this.deficitValueMinor,
+    required this.surplusValueMinor,
+  });
+}
+
+/// سطر جلسة جرد للعرض — ما قبل الترحيل: العدّة ورصيد النظام الآني
+/// للشاشة؛ وما بعده: لقطة الترحيل المخزنة حصراً.
+class StockCountLineRow {
+  final int itemId;
+  final String? itemName;
+  final String? sku;
+  final String? itemCategory;
+  final int? countedQtyBase;
+  final int? systemQtyBase;
+  final int? diffQtyBase;
+  final String? direction;
+  final int valueBaseMinor;
+  final int unitCostBaseMinor;
+
+  const StockCountLineRow({
+    required this.itemId,
+    this.itemName,
+    this.sku,
+    required this.itemCategory,
+    required this.countedQtyBase,
+    required this.systemQtyBase,
+    required this.diffQtyBase,
+    required this.direction,
+    required this.valueBaseMinor,
+    required this.unitCostBaseMinor,
   });
 }
 
