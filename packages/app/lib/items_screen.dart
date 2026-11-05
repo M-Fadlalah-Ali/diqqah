@@ -6,6 +6,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'input_formatters.dart';
 import 'item_images.dart';
 import 'price_update_screen.dart';
+import 'unit_groups_screen.dart';
 import 'item_media.dart';
 import 'item_crop_screen.dart';
 import 'reports_screen.dart' show formatMinorAmount;
@@ -68,6 +69,20 @@ class _ItemsScreenState extends State<ItemsScreen> {
       appBar: AppBar(
         title: const Text('الأصناف'),
         actions: [
+          // الدفعة 27 (F-032/D-026): إدارة مجموعات التعبئة — قوالب
+          // غير حصرية والمستخدم يعرّف وحداته ومستوياته الأعلى.
+          IconButton(
+            tooltip: 'مجموعات التعبئة',
+            icon: const Icon(Icons.layers_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => UnitGroupsScreen(db: widget.db),
+                ),
+              );
+            },
+          ),
           // الدفعة 23 (F-165/D-183): الترقية الجماعية للأسعار بالتصنيف —
           // معاينة قبل التنفيذ وفواتير التاريخ بلقطاتها سليمة.
           IconButton(
@@ -215,6 +230,19 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   int? _unitId;
   List<Unit> _units = const [];
 
+  // ── مجموعات التعبئة وأسعارها آلي (F-032/F-208، D-026/D-187) ──
+  List<UnitGroup> _groups = const [];
+  int? _unitGroupId;
+
+  /// مربع «آلي» — افتراضه مفعّل (D-187): الوحدة الصغرى للكتابة
+  /// والمستويات للقراءة تُشتق، وتعطيله يتاح كل الخانات.
+  bool _priceAuto = true;
+  List<UnitGroupLevel> _levels = const [];
+
+  /// معرّف المستوى ← متحكما (بيع، شراء) — خانة مستقلة لكل مستوى.
+  final Map<int, (TextEditingController, TextEditingController)>
+      _levelPriceCtrls = {};
+
   /// العملة الأساسية حصراً حتى تُبنى جدول العملات (D-017/D-066 الاصطلاح).
   static const int _baseCurrencyId = 1;
 
@@ -257,10 +285,13 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           item.salePriceMinor > 0 ? groupDigits(item.salePriceMinor) : '';
       _kind = ItemKind.fromStorage(item.kind);
       _unitId = item.baseUnitId;
+      _unitGroupId = item.unitGroupId;
+      _priceAuto = item.priceAuto;
     } else {
       _kind = ItemKind.good;
     }
     _loadUnits();
+    _loadUnitGroups();
     if (_isEdit) {
       _loadBarcodes();
     }
@@ -282,6 +313,10 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     _purchase.dispose();
     _sale.dispose();
     _barcodeController.dispose();
+    for (final ctrls in _levelPriceCtrls.values) {
+      ctrls.$1.dispose();
+      ctrls.$2.dispose();
+    }
     super.dispose();
   }
 
@@ -321,6 +356,101 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         await widget.db.select(widget.db.units).get();
     if (!mounted) return;
     setState(() => _units = rows);
+  }
+
+  // ── مجموعات التعبئة وأسعارها آلي (F-032/F-208، D-026/D-187) ──
+
+  Future<void> _loadUnitGroups() async {
+    final groups = await widget.db.allUnitGroups();
+    if (!mounted) return;
+    setState(() => _groups = groups);
+    if (_unitGroupId != null) {
+      await _reloadLevels();
+    }
+  }
+
+  /// مستويات المجموعة المختارة وأسعارها المخزنة — الوضع الجديد يبدأ
+  /// بلا أسعار مخزنة فالآلي يشتق من الأساس فوراً.
+  Future<void> _reloadLevels() async {
+    final gid = _unitGroupId;
+    for (final ctrls in _levelPriceCtrls.values) {
+      ctrls.$1.dispose();
+      ctrls.$2.dispose();
+    }
+    _levelPriceCtrls.clear();
+    if (gid == null) {
+      _levels = const [];
+      if (mounted) setState(() {});
+      return;
+    }
+    final levels = await widget.db.levelsOfGroup(gid);
+    final stored = _isEdit
+        ? await widget.db.itemLevelPriceMap(widget.existing!.id)
+        : const <int, (int, int)>{};
+    if (!mounted) return;
+    setState(() {
+      _levels = levels;
+      for (final level in levels) {
+        final saved = stored[level.id];
+        _levelPriceCtrls[level.id] = (
+          TextEditingController(
+              text: (saved?.$1 ?? 0) > 0 ? groupDigits(saved!.$1) : ''),
+          TextEditingController(
+              text: (saved?.$2 ?? 0) > 0 ? groupDigits(saved!.$2) : ''),
+        );
+      }
+    });
+    if (_priceAuto) _syncDerivedControllers();
+  }
+
+  void _switchGroup(int? groupId) {
+    setState(() => _unitGroupId = groupId);
+    _reloadLevels();
+  }
+
+  /// الاشتقاق اللحظي (D-187): الآلي يترك الوحدة الصغرى للكتابة
+  /// والمستويات للقراءة تُشتق من الأساس بالعامل — يُعاد الحساب لحظة
+  /// كل كتابة بالأساس (الفرق الحي بonChanged — درس س79) وبتعطيل
+  /// الآلي تتاح الخانات كما كُتبت.
+  void _syncDerivedControllers() {
+    if (!_priceAuto) return;
+    final sale = _parsePrice(_sale);
+    final purchase = _parsePrice(_purchase);
+    for (final level in _levels) {
+      final ctrls = _levelPriceCtrls[level.id];
+      if (ctrls == null) continue;
+      final s = derivedLevelPriceMinor(
+          basePriceMinor: sale < 0 ? 0 : sale, factor: level.factor);
+      final p = derivedLevelPriceMinor(
+          basePriceMinor: purchase < 0 ? 0 : purchase, factor: level.factor);
+      ctrls.$1.text = s > 0 ? groupDigits(s) : '';
+      ctrls.$2.text = p > 0 ? groupDigits(p) : '';
+    }
+  }
+
+  void _togglePriceAuto(bool value) {
+    setState(() {
+      _priceAuto = value;
+      if (value) {
+        // أثر معلن (D-187): إعادة التفعيل بعد تسعير يدوي تعيد
+        // الاشتقاق وتستبدل قيم المستويات الأعلى.
+        _syncDerivedControllers();
+      }
+    });
+    if (value) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+            content: Text(
+                'الآلي مفعّل — قيم المستويات تُشتق من الأساس وتُستبدل '
+                'عند الحفظ (D-187)')));
+    }
+  }
+
+  /// سعر مستوى يدوي يصل الحفظ — السالب حُرس قبل الحفظ فاستيفاء أمان.
+  int _levelPriceSaved(TextEditingController c) {
+    final v = _parsePrice(c);
+    return v < 0 ? 0 : v;
   }
 
   /// قراءة سعر: الفراغ صفر مشروع «بلا سعر بعد» (س-36)، وإدخال شاذ
@@ -500,6 +630,23 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           );
         return;
       }
+      // س6: سعر المستوى اليدوي لا يصل سالباً — والفراغ صفر مشروع.
+      if (!_priceAuto) {
+        for (final level in _levels) {
+          final ctrls = _levelPriceCtrls[level.id]!;
+          if (_parsePrice(ctrls.$1) < 0 || _parsePrice(ctrls.$2) < 0) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(const SnackBar(
+                content: Text('سعر مستوى التعبئة عدد موجب إن أُدخل — '
+                    'والفراغ يعني بلا سعر بعد (س6)'),
+                duration: Duration(seconds: 4),
+              ));
+            return;
+          }
+        }
+      }
       int? savedItemId;
       if (_isEdit) {
         savedItemId = widget.existing!.id;
@@ -516,6 +663,10 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           purchasePriceMinor: draft.purchasePriceMinor,
           salePriceMinor: draft.salePriceMinor,
           priceCurrencyId: _baseCurrencyId,
+          // المجموعة والمربع الآلي يُكتبان صريحين — الإلغاء يمسح
+          // الربط بقيمة null الصريحة لا بالمرور (نمط _keepCurrent).
+          unitGroupId: _unitGroupId,
+          priceAuto: _priceAuto,
         );
       } else {
         savedItemId = await widget.db.insertItem(
@@ -527,12 +678,40 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           purchasePriceMinor: draft.purchasePriceMinor,
           salePriceMinor: draft.salePriceMinor,
           priceCurrencyId: _baseCurrencyId,
+          unitGroupId: _unitGroupId,
+          priceAuto: _priceAuto,
         );
         // س-131: رموز الصنف الجديد تُدرج بعد نجاح الإدراج حصراً.
         for (final code in _pendingBarcodes) {
           await widget.db
               .insertItemBarcode(itemId: savedItemId, barcode: code);
         }
+      }
+      // أسعار المستويات (F-208/D-187): الآلي يكتب الاشتقاق المحسوب
+      // بمحرك المجال — فإعادة التفعيل بعد يدوي تستبدل القيم فعلاً —
+      // واليدوي يكتب ما كتبه المالك.
+      if (_unitGroupId != null && _levels.isNotEmpty) {
+        final saleBase = _parsePrice(_sale);
+        final purchaseBase = _parsePrice(_purchase);
+        await widget.db.saveItemLevelPrices(
+          savedItemId,
+          [
+            for (final level in _levels)
+              (
+                levelId: level.id,
+                salePriceMinor: _priceAuto
+                    ? derivedLevelPriceMinor(
+                        basePriceMinor: saleBase < 0 ? 0 : saleBase,
+                        factor: level.factor)
+                    : _levelPriceSaved(_levelPriceCtrls[level.id]!.$1),
+                purchasePriceMinor: _priceAuto
+                    ? derivedLevelPriceMinor(
+                        basePriceMinor: purchaseBase < 0 ? 0 : purchaseBase,
+                        factor: level.factor)
+                    : _levelPriceSaved(_levelPriceCtrls[level.id]!.$2),
+              ),
+          ],
+        );
       }
       // س-123/س-124: ملفات الصورة بعد نجاح الصف — الاستبدال يحذف
       // الملفين القديمين ويحفظ الجديدين (لا ملفات يتيمة)، والحذف
@@ -734,7 +913,10 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
             controller: _purchase,
             keyboardType: TextInputType.number,
             inputFormatters: [ThousandsSeparatorInputFormatter()],
-            onChanged: (_) => setState(() {}), // المعاينة اللحظية (D-102)
+            onChanged: (_) {
+              _syncDerivedControllers(); // اشتقاق المستويات آلياً (D-187)
+              setState(() {}); // المعاينة اللحظية (D-102)
+            },
             decoration: InputDecoration(
               labelText: 'سعر الشراء',
               helperText: 'عدد صحيح بالوحدة الصغرى للعملة (س7) — '
@@ -752,7 +934,10 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
             controller: _sale,
             keyboardType: TextInputType.number,
             inputFormatters: [ThousandsSeparatorInputFormatter()],
-            onChanged: (_) => setState(() {}), // المعاينة اللحظية (D-102)
+            onChanged: (_) {
+              _syncDerivedControllers(); // اشتقاق المستويات آلياً (D-187)
+              setState(() {}); // المعاينة اللحظية (D-102)
+            },
             decoration: InputDecoration(
               labelText: 'سعر البيع',
               helperText: 'الافتراضي في بنود الفواتير (س-108) — قابل للتعديل '
@@ -762,6 +947,81 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                   : null,
             ),
           ),
+          const SizedBox(height: 16),
+          // ── مجموعة التعبئة وأسعارها آلي (F-032/F-208، D-026/D-187) ──
+          DropdownButtonFormField<int?>(
+            initialValue: _unitGroupId,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'مجموعة التعبئة (اختياري)',
+              helperText: 'وحدات التعبئة أعلى الأساسية بعوامل ثابتة '
+                  '(F-032/D-026) — تُدار من زر «مجموعات التعبئة» بشاشة '
+                  'الأصناف',
+            ),
+            items: [
+              const DropdownMenuItem<int?>(
+                  value: null, child: Text('بلا مجموعة تعبئة')),
+              for (final g in _groups)
+                DropdownMenuItem<int?>(value: g.id, child: Text(g.name)),
+            ],
+            onChanged: _saving ? null : _switchGroup,
+          ),
+          if (_levels.isNotEmpty) ...[
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('آلي'),
+              subtitle: Text(_priceAuto
+                  ? 'الوحدة الصغرى للكتابة والمستويات للقراءة تُشتق '
+                      'بالأساس × العامل (D-187)'
+                  : 'كل خانات الأسعار للكتابة — خانة مستقلة لكل مستوى'),
+              value: _priceAuto,
+              onChanged: _saving ? null : _togglePriceAuto,
+            ),
+            for (final level in _levels)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: Text(
+                        '${level.name} ×${level.factor}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _levelPriceCtrls[level.id]!.$1,
+                        enabled: !_priceAuto && !_saving,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          ThousandsSeparatorInputFormatter(),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'بيع',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _levelPriceCtrls[level.id]!.$2,
+                        enabled: !_priceAuto && !_saving,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          ThousandsSeparatorInputFormatter(),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'شراء',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           TextFormField(
             enabled: false,

@@ -16,6 +16,24 @@ class DiqqahNewerSchemaException implements Exception {
   String toString() => 'القاعدة أحدث مخططاً من التطبيق — حدّث التطبيق';
 }
 
+/// F-033: محاولة تعديل عامل تحويل بعد وجود حركات على أصناف المجموعة —
+/// مرفوضة، والمسار الوحيد إنشاء وحدة جديدة (D-026). الواجهة تفحص
+/// التجمد سلفاً فتعطّل الخانة — وهذا الاستثناء حرس ثانوي للمسار
+/// المباشر.
+class UnitGroupFactorFrozenException implements Exception {
+  const UnitGroupFactorFrozenException();
+
+  @override
+  String toString() =>
+      'عامل التحويل يتجمد بعد وجود حركات على أصناف المجموعة (F-033) — '
+      'والمسار الوحيد إنشاء وحدة جديدة';
+}
+
+/// علامة «لا مساس» لمعامل الاختياري في updateItemDetails — الواجهة
+/// التي لا تعرف المجموعة أصلاً لا تمسحها بالمرور (Presence absent
+/// بنمط F-165).
+const Object _keepCurrent = Object();
+
 /// جدول الأصناف — انعكاس مباشر لصف `item` في نموذج البيانات (05 §3.2)
 /// بقرارات بطاقة الأصناف (D-073/D-074) والسيناريوهات (س-36..س-41):
 ///
@@ -67,6 +85,17 @@ class Items extends Table {
   /// المشتق المصغر لسطور الفواتير حصراً (س-126) — لا الأصل.
   TextColumn get imageThumb => text().nullable().named('image_thumb')();
 
+  /// مجموعة تعبئة الصنف — F-032/D-026 (الدفعة 27): null يعني صنفاً
+  /// بلا مجموعة تعبئة فلا مستويات ولا اشتقاق.
+  IntColumn get unitGroupId =>
+      integer().nullable().named('unit_group_id')();
+
+  /// مربع «آلي» — F-208 (اللفظ النهائي س84/D-187): افتراضه مفعل،
+  /// مفعّلاً الوحدة الصغرى للكتابة والمستويات للقراءة تُشتق، وتعطيله
+  /// يتاح كل الخانات، وإعادة تفعيله تستبدل المستويات بالاشتقاق.
+  BoolColumn get priceAuto =>
+      boolean().named('price_auto').withDefault(const Constant(true))();
+
   BoolColumn get isActive => boolean().named('is_active')();
 
   /// اصطلاح «كل جدول» (D-055) — uuid إلزامي عند كل إدراج.
@@ -100,6 +129,98 @@ class Units extends Table {
   /// بنية لم2 — ثابتة true في م1 (D-075).
   BoolColumn get isBase =>
       boolean().named('is_base').withDefault(const Constant(true))();
+
+  /// اصطلاح «كل جدول» (D-055).
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// مجموعة تعبئة — F-032/D-026 (الدفعة 27): قوالب مقترحة غير حصرية
+/// (قطعة/علبة/كرتونة) ويضيف المستخدم ما يشابه ومستوياته الأعلى.
+/// الاسم فريد حرفياً (D-074، قيد UNIQUE حرس ثانوي) — إضافة وتسمية
+/// حصراً: لا حذف ولا تعطيل فالصنف قد يحيل بها (نمط المراجع 03 §6-3).
+class UnitGroups extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  TextColumn get name => text().unique()();
+
+  /// اصطلاح «كل جدول» (D-055).
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// مستوى مجموعة تعبئة — عامل تحويل صحيح ثابت نحو الوحدة الأساسية
+/// (≥2: الأساسية عاملها 1 بذاتها ولا تُخزن مستوى — 05). تفرد الاسم
+/// داخل المجموعة قيدُ UNIQUE داخل DDL الجدول ذاته (uniqueKeys — درس
+/// آمنة التكرار: فهرس @TableIndex مستقل تبنيه createAll بلا IF NOT
+/// EXISTS فينكسر مع نداءات createAll المتعددة عبر خطوات الترقية،
+/// والقيد داخل الجدول يولد مرة واحدة معه)، والعامل يتجمد بعد
+/// الحركات (F-033) بحراسة المسار `updateUnitGroupLevel` لا بقاعدة
+/// — القاعدة لا تعرف الحركات، والمسار الوحيد حينها وحدة جديدة.
+class UnitGroupLevels extends Table {
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {groupId, name},
+      ];
+
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get groupId => integer().named('group_id')();
+
+  TextColumn get name => text()();
+
+  IntColumn get factor => integer()();
+
+  /// اصطلاح «كل جدول» (D-055).
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
+/// سعر مستوى تعبئة لصنف — «خانة مستقلة لكل مستوى» (F-208/D-187):
+/// الآلي يكتب الاشتقاق عند كل حفظ واليدوي يحفظ ما كتبه المالك،
+/// ولقطة السعر في سطر المستند كما هي بلا مساس (D-187). وتفرد
+/// (الصنف، المستوى) قيدُ UNIQUE داخل DDL الجدول ذاته (uniqueKeys —
+/// درس آمنة التكرار أعلاه).
+class ItemLevelPrices extends Table {
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {itemId, levelId},
+      ];
+
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get itemId => integer().named('item_id')();
+
+  IntColumn get levelId => integer().named('level_id')();
+
+  IntColumn get salePriceMinor => integer().named('sale_price_minor')();
+
+  IntColumn get purchasePriceMinor =>
+      integer().named('purchase_price_minor')();
 
   /// اصطلاح «كل جدول» (D-055).
   TextColumn get uuid => text()();
@@ -611,6 +732,9 @@ class AppMeta extends Table {
   AppMeta,
   Parties,
   Units,
+  UnitGroups,
+  UnitGroupLevels,
+  ItemLevelPrices,
   ItemBarcodes,
   Accounts,
   Journals,
@@ -653,7 +777,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -991,6 +1115,30 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             if (version == 17) {
               await _createMovementDocTables();
               await _createClosingTriggers();
+            }
+            // 17→18 (ومن إصدار أدنى مباشرة): الدفعة 27 — مجموعات
+            // التعبئة وأسعارها آلي (F-032/F-033/F-208، D-026/D-187):
+            // ثلاثة جداول جديدة خالصة (المجموعات ومستوياتها وأسعار
+            // الأصناف بالمستوى) يبنيها createAll بـIF NOT EXISTS ولا
+            // مساس بجداول قائمة، وعمودا items الجديدان بحرس pragma
+            // (درس v3 — آمن التكرار أي مسار وصول): unit_group_id NULL
+            // وprice_auto NOT NULL DEFAULT 1 — فالقائمة القائمة تولد
+            // آلياً مفعلاً (افتراض D-187) وبلا مجموعة.
+            if (version == 18) {
+              await m.createAll();
+              final itemCols18 = (await customSelect(
+                      "SELECT name FROM pragma_table_info('items')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!itemCols18.contains('unit_group_id')) {
+                await customStatement(
+                    'ALTER TABLE items ADD COLUMN unit_group_id INTEGER NULL');
+              }
+              if (!itemCols18.contains('price_auto')) {
+                await customStatement(
+                    'ALTER TABLE items ADD COLUMN price_auto INTEGER NOT NULL DEFAULT 1');
+              }
             }
           }
         },
@@ -1352,6 +1500,8 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     required int purchasePriceMinor,
     required int salePriceMinor,
     required int priceCurrencyId,
+    int? unitGroupId,
+    bool priceAuto = true,
   }) async {
     assert(baseUnitId > 0, 'F-031: الوحدة الأساسية إلزامية');
     assert(priceCurrencyId > 0, 'D-066: عملة السعر لا تصل فارغة أبداً');
@@ -1368,6 +1518,8 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         purchasePriceMinor: purchasePriceMinor,
         salePriceMinor: salePriceMinor,
         priceCurrencyId: priceCurrencyId,
+        unitGroupId: Value(unitGroupId),
+        priceAuto: Value(priceAuto),
         isActive: true,
         uuid: const Uuid().v4(),
         createdAt: Value(now),
@@ -1390,6 +1542,8 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     required int purchasePriceMinor,
     required int salePriceMinor,
     required int priceCurrencyId,
+    Object? unitGroupId = _keepCurrent,
+    bool? priceAuto,
   }) async {
     assert(baseUnitId > 0, 'F-031: الوحدة الأساسية إلزامية');
     assert(priceCurrencyId > 0, 'D-066: عملة السعر لا تصل فارغة أبداً');
@@ -1405,6 +1559,11 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         purchasePriceMinor: Value(purchasePriceMinor),
         salePriceMinor: Value(salePriceMinor),
         priceCurrencyId: Value(priceCurrencyId),
+        unitGroupId: unitGroupId == _keepCurrent
+            ? const Value.absent()
+            : Value(unitGroupId as int?),
+        priceAuto:
+            priceAuto == null ? const Value.absent() : Value(priceAuto),
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
@@ -1420,6 +1579,224 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // مجموعات التعبئة وأسعارها آلي — الدفعة 27 (F-032/F-033/F-208،
+  // D-026/D-187). المرجع يُضاف ويُسمّى ولا يُحذف ولا يُعطّل (نمط
+  // المراجع 03 §6-3 — الصنف قد يحيل)، والعامل يتجمد بعد الحركات
+  // (F-033) والمسار الوحيد وحدة جديدة، والآلي يُشتق واليدوي يُكتب
+  // (D-187) — والتخزين يحفظ ولا يحسب (الاشتقاق بمحرك المجال حصراً).
+  // ─────────────────────────────────────────────────────────────────
+
+  /// إدراج مجموعة تعبئة بمستوياتها الأولية — الاسم مقلم فريد حرفياً
+  /// (D-074، قيد UNIQUE حرس ثانوي) والمستويات بفهرس التفرد (المجموعة،
+  /// الاسم). العوامل الصحيحة من مدقق المجال (parseUnitGroupFactor)
+  /// وحرساً ثانوياً هنا.
+  Future<int> insertUnitGroup({
+    required String name,
+    List<({String name, int factor})> levels = const [],
+  }) async {
+    final clean = name.trim();
+    assert(clean.isNotEmpty, 'اسم مجموعة التعبئة إلزامي (F-032)');
+    assert(
+        levels.every((l) => l.name.trim().isNotEmpty && l.factor >= 2),
+        'F-032: المستوى باسمه وعامله ≥2');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return transaction(() async {
+      final id = await into(unitGroups).insert(
+        UnitGroupsCompanion.insert(
+          name: clean,
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+      for (final level in levels) {
+        await _insertUnitGroupLevelRow(
+            groupId: id, name: level.name, factor: level.factor, now: now);
+      }
+      return id;
+    });
+  }
+
+  Future<int> _insertUnitGroupLevelRow({
+    required int groupId,
+    required String name,
+    required int factor,
+    required int now,
+  }) {
+    return into(unitGroupLevels).insert(
+      UnitGroupLevelsCompanion.insert(
+        groupId: groupId,
+        name: name.trim(),
+        factor: factor,
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+  }
+
+  /// إعادة تسمية مجموعة — التفرد الحرفي بالمدقق قبل الاستدعاء وقيد
+  /// UNIQUE حرساً ثانوياً. التسمية لا تمس التاريخ فلا تجميد لها.
+  Future<void> renameUnitGroup(int groupId, {required String name}) async {
+    final clean = name.trim();
+    assert(clean.isNotEmpty, 'الاسم إلزامي (F-032)');
+    await (update(unitGroups)..where((t) => t.id.equals(groupId))).write(
+      UnitGroupsCompanion(
+        name: Value(clean),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// المجموعات مرتبة معجمياً بالاسم (D-074 نمط القوائم).
+  Future<List<UnitGroup>> allUnitGroups() async {
+    final rows = await select(unitGroups).get();
+    return [...rows]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  /// مستويات مجموعة مرتبة بالعامل تصاعدياً — ترتيب العرض الطبيعي.
+  Future<List<UnitGroupLevel>> levelsOfGroup(int groupId) async {
+    return (select(unitGroupLevels)
+          ..where((t) => t.groupId.equals(groupId))
+          ..orderBy([(t) => OrderingTerm.asc(t.factor)]))
+        .get();
+  }
+
+  /// مستويات كل المجموعات دفعةً — خريطة شاشات الأصناف والترقية.
+  Future<Map<int, List<UnitGroupLevel>>> allUnitGroupLevels() async {
+    final rows = await (select(unitGroupLevels)
+          ..orderBy([(t) => OrderingTerm.asc(t.factor)]))
+        .get();
+    final map = <int, List<UnitGroupLevel>>{};
+    for (final r in rows) {
+      (map[r.groupId] ??= []).add(r);
+    }
+    return map;
+  }
+
+  /// F-033 المسار الوحيد: وحدة جديدة تُضاف لمجموعة قائمة — في أي وقت
+  /// (الإضافة لا تمس التاريخ فلا تجميد لها).
+  Future<int> insertUnitGroupLevel({
+    required int groupId,
+    required String name,
+    required int factor,
+  }) async {
+    assert(name.trim().isNotEmpty, 'اسم المستوى إلزامي');
+    assert(factor >= 2, 'العامل ≥2 (الأساسية 1 بذاتها)');
+    return _insertUnitGroupLevelRow(
+        groupId: groupId,
+        name: name,
+        factor: factor,
+        now: DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// F-033: هل توجد حركات على أصناف المجموعة؟ الحركة حقيقية لا مسودة:
+  /// حركة مخزون أو سطر فاتورة مرحّل — والمسودات لا تجمد، وجلسة العد
+  /// الجارية بلا أثر لا تجمد (ترحيلها يصنع حركة تجمّد).
+  Future<bool> unitGroupHasMovements(int groupId) async {
+    final row = await customSelect(
+      "SELECT ("
+      "EXISTS(SELECT 1 FROM stock_moves sm "
+      "JOIN items i ON i.id = sm.item_id WHERE i.unit_group_id = ?) "
+      "OR EXISTS(SELECT 1 FROM invoice_lines il "
+      "JOIN invoices inv ON inv.id = il.invoice_id "
+      "JOIN items i ON i.id = il.item_id "
+      "WHERE i.unit_group_id = ? AND inv.state = 'posted')"
+      ") AS frozen",
+      variables: [Variable.withInt(groupId), Variable.withInt(groupId)],
+    ).getSingle();
+    return (row.data['frozen'] as int) == 1;
+  }
+
+  /// تعديل مستوى قائم — التسمية حرة، والعامل بالحرس الوحيد (F-033):
+  /// تجميد بعد الحركات برمي [UnitGroupFactorFrozenException] والمسار
+  /// الوحيد وحدة جديدة. الواجهة تفحص التجمد سلفاً فتعطّل الخانة —
+  /// والاستثناء حرس ثانوي للمسار المباشر.
+  Future<void> updateUnitGroupLevel(
+    int levelId, {
+    String? name,
+    int? factor,
+  }) async {
+    assert(name != null || factor != null, 'لا تعديل بلا تغيير');
+    if (factor != null) {
+      final row = await (select(unitGroupLevels)
+            ..where((t) => t.id.equals(levelId)))
+          .getSingle();
+      if (factor != row.factor && await unitGroupHasMovements(row.groupId)) {
+        throw const UnitGroupFactorFrozenException();
+      }
+    }
+    await (update(unitGroupLevels)..where((t) => t.id.equals(levelId)))
+        .write(
+      UnitGroupLevelsCompanion(
+        name: name == null ? const Value.absent() : Value(name.trim()),
+        factor: factor == null ? const Value.absent() : Value(factor),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
+  }
+
+  /// أسعار مستويات صنف — خريطة (معرّف المستوى) ← (بيع، شراء).
+  /// (الاسم مُبعَّد عن getter الجدول المولد `itemLevelPrices` — درس
+  /// تصادم الأسماء المولدة، نمط س78).
+  Future<Map<int, (int, int)>> itemLevelPriceMap(int itemId) async {
+    final rows = await (select(itemLevelPrices)
+          ..where((t) => t.itemId.equals(itemId)))
+        .get();
+    return {
+      for (final r in rows)
+        r.levelId: (r.salePriceMinor, r.purchasePriceMinor),
+    };
+  }
+
+  /// أسعار مستويات أصناف متعددة دفعةً — معاينة الرفع الجماعي (F-165).
+  Future<Map<int, Map<int, (int, int)>>> itemLevelPricesForItems(
+      List<int> itemIds) async {
+    if (itemIds.isEmpty) return {};
+    final rows = await (select(itemLevelPrices)
+          ..where((t) => t.itemId.isIn(itemIds)))
+        .get();
+    final map = <int, Map<int, (int, int)>>{};
+    for (final r in rows) {
+      (map[r.itemId] ??= {})[r.levelId] =
+          (r.salePriceMinor, r.purchasePriceMinor);
+    }
+    return map;
+  }
+
+  /// حفظ أسعار مستويات صنف — استبدال كامل بمعاملة واحدة (نمط اللقطة
+  /// الموثق): الآلي يكتب الاشتقاقَ المحسوبَ بمحرك المجال، واليدوي يكتب
+  /// المُدخل — ولقطة السعر في سطر المستند كما هي بلا مساس (D-187).
+  Future<void> saveItemLevelPrices(
+    int itemId,
+    List<({int levelId, int salePriceMinor, int purchasePriceMinor})> rows,
+  ) async {
+    assert(
+        rows.every((r) =>
+            r.salePriceMinor >= 0 && r.purchasePriceMinor >= 0),
+        'س6: لا سعر سالب — والصفر مشروع');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      await (delete(itemLevelPrices)
+            ..where((t) => t.itemId.equals(itemId)))
+          .go();
+      for (final r in rows) {
+        await into(itemLevelPrices).insert(
+          ItemLevelPricesCompanion.insert(
+            itemId: itemId,
+            levelId: r.levelId,
+            salePriceMinor: r.salePriceMinor,
+            purchasePriceMinor: r.purchasePriceMinor,
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1609,28 +1986,69 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// تنفيذ الترقية الجماعية (F-165) — معاملة واحدة تُحدّث الحقول
   /// المستهدفة بقيمها المحسوبة سلفاً بالمعاينة. الحساب في المجال
   /// والكتابة هنا حصراً — التخزين يحفظ ولا يقرر — والحقل غير المستهدف
-  /// بلا Presence فلا يُمس إطلاقاً.
+  /// بلا Presence فلا يُمس إطلاقاً. ومستويات التعبئة (تقاطع
+  /// F-165/D-187) تُكتب بقيمها المحسوبة ذاتها مع صيانة الحقل غير
+  /// المستهدف لكل مستوى من صفه القائم فلا يضيع يدويٌّ محفوظ.
   Future<void> applyBulkPriceUpdates(
       List<BulkPriceUpdateRow> updates) async {
     assert(updates.every((u) =>
         (u.newSalePriceMinor == null || u.newSalePriceMinor! >= 0) &&
         (u.newPurchasePriceMinor == null || u.newPurchasePriceMinor! >= 0)),
         'س6: لا سعر سالب');
-    await batch((b) {
+    assert(
+        updates.every((u) => u.levels.every((l) =>
+            (l.newSalePriceMinor == null || l.newSalePriceMinor! >= 0) &&
+            (l.newPurchasePriceMinor == null ||
+                l.newPurchasePriceMinor! >= 0))),
+        'س6: لا سعر سالب بالمستويات');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      await batch((b) {
+        for (final u in updates) {
+          b.update(
+            items,
+            ItemsCompanion(
+              salePriceMinor: u.newSalePriceMinor == null
+                  ? const Value.absent()
+                  : Value(u.newSalePriceMinor!),
+              purchasePriceMinor: u.newPurchasePriceMinor == null
+                  ? const Value.absent()
+                  : Value(u.newPurchasePriceMinor!),
+              updatedAt: Value(now),
+            ),
+            where: ($ItemsTable t) => t.id.equals(u.itemId),
+          );
+        }
+      });
+      // مستويات التعبئة — استبدال الصفوف المستهدفة حصراً، والحقل غير
+      // المستهدف لكل مستوى يُحفظ من صفه القائم فلا قيمة يدوية تضيع.
       for (final u in updates) {
-        b.update(
-          items,
-          ItemsCompanion(
-            salePriceMinor: u.newSalePriceMinor == null
-                ? const Value.absent()
-                : Value(u.newSalePriceMinor!),
-            purchasePriceMinor: u.newPurchasePriceMinor == null
-                ? const Value.absent()
-                : Value(u.newPurchasePriceMinor!),
-            updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
-          ),
-          where: ($ItemsTable t) => t.id.equals(u.itemId),
-        );
+        for (final l in u.levels) {
+          final existing = await (select(itemLevelPrices)
+                ..where((t) =>
+                    t.itemId.equals(u.itemId) & t.levelId.equals(l.levelId)))
+              .getSingleOrNull();
+          final sale = l.newSalePriceMinor ??
+              existing?.salePriceMinor ??
+              0;
+          final purchase = l.newPurchasePriceMinor ??
+              existing?.purchasePriceMinor ??
+              0;
+          await (delete(itemLevelPrices)..where((t) =>
+                  t.itemId.equals(u.itemId) & t.levelId.equals(l.levelId)))
+              .go();
+          await into(itemLevelPrices).insert(
+            ItemLevelPricesCompanion.insert(
+              itemId: u.itemId,
+              levelId: l.levelId,
+              salePriceMinor: sale,
+              purchasePriceMinor: purchase,
+              uuid: const Uuid().v4(),
+              createdAt: Value(now),
+              updatedAt: Value(now),
+            ),
+          );
+        }
       }
     });
   }
@@ -8804,6 +9222,20 @@ class LastPriceSuggestion {
   });
 }
 
+/// صف ترقية مستوى تعبئة داخل ترقية صنف — القيم المستهدفة فقط تُكتب
+/// (null = لا مساس) بنمط الحقل غير المستهدف (F-165).
+class BulkLevelPriceUpdateRow {
+  final int levelId;
+  final int? newSalePriceMinor;
+  final int? newPurchasePriceMinor;
+
+  const BulkLevelPriceUpdateRow({
+    required this.levelId,
+    this.newSalePriceMinor,
+    this.newPurchasePriceMinor,
+  });
+}
+
 /// صف ترقية جماعية (F-165/D-183) — الحقل غير المستهدف null فلا يُمس
 /// إطلاقاً (Presence absent بالكتابة)، والقيم محسوبة سلفاً بالمعاينة
 /// بمحرك المجال.
@@ -8812,10 +9244,16 @@ class BulkPriceUpdateRow {
   final int? newSalePriceMinor;
   final int? newPurchasePriceMinor;
 
+  /// مستويات التعبئة للصنف — تقاطع F-165/D-187: الآلي بقيمه المشتقة
+  /// من الأساس الجديد واليدوي مضروباً بالنسبة نفسها — الحساب بمحرك
+  /// المجال حصراً وهنا الكتابة فقط.
+  final List<BulkLevelPriceUpdateRow> levels;
+
   const BulkPriceUpdateRow({
     required this.itemId,
     this.newSalePriceMinor,
     this.newPurchasePriceMinor,
+    this.levels = const [],
   });
 }
 

@@ -40,6 +40,11 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
   List<Item> _activeItems = const [];
   bool _loaded = false;
 
+  /// مستويات المجموعات وأسعارها المخزنة — تقاطع F-165/D-187 (الدفعة 27):
+  /// الآلي يُعاد اشتقاقه واليدوي يُضرب بالنسبة نفسها.
+  Map<int, List<UnitGroupLevel>> _levelsByGroup = const {};
+  Map<int, Map<int, (int, int)>> _levelPricesByItem = const {};
+
   /// صفوف المعاينة بعد آخر ضغطة «معاينة» — والتنفيذ منها حصراً.
   List<_PreviewRow> _preview = const [];
 
@@ -58,9 +63,16 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
   Future<void> _loadItems() async {
     final rows = await widget.db.select(widget.db.items).get();
     if (!mounted) return;
+    final active = rows.where((r) => r.isActive).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    final levels = await widget.db.allUnitGroupLevels();
+    final levelPrices = await widget.db
+        .itemLevelPricesForItems(active.map((i) => i.id).toList());
+    if (!mounted) return;
     setState(() {
-      _activeItems = rows.where((r) => r.isActive).toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+      _activeItems = active;
+      _levelsByGroup = levels;
+      _levelPricesByItem = levelPrices;
       _loaded = true;
     });
   }
@@ -88,7 +100,9 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
   }
 
   /// بناء المعاينة — الحساب بمحرك المجال حصراً وصفوفه تُحفظ كما هي
-  /// للتنفيذ فلا انحراف بين المعروض والمكتوب.
+  /// للتنفيذ فلا انحراف بين المعروض والمكتوب. ومستويات التعبئة
+  /// (تقاطع F-165/D-187): الآلي يُعاد اشتقاقه من الأساس الجديد
+  /// بخطوة واحدة، واليدوي يُضرب بالنسبة نفسها، والانكسار علم يُعرض.
   void _buildPreview() {
     final bps = parsePercentToBps(_percent.text);
     if (_category == null || bps == null || bps == 0) return;
@@ -102,6 +116,53 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
               percentBps: bps,
               target: _target,
             );
+            final groupLevels = item.unitGroupId == null
+                ? const <UnitGroupLevel>[]
+                : (_levelsByGroup[item.unitGroupId] ??
+                    const <UnitGroupLevel>[]);
+            final stored = _levelPricesByItem[item.id] ?? const {};
+            final wantsSale = _target != BulkPriceTarget.purchase;
+            final wantsPurchase = _target != BulkPriceTarget.sale;
+            final levels = <_PreviewLevelRow>[
+              for (final level in groupLevels)
+                () {
+                  final oldSale = stored[level.id]?.$1 ?? 0;
+                  final oldPurchase = stored[level.id]?.$2 ?? 0;
+                  final saleOut = wantsSale
+                      ? bulkLevelPriceOutcome(
+                          oldBasePriceMinor: item.salePriceMinor,
+                          newBasePriceMinor: out.newSalePriceMinor,
+                          factor: level.factor,
+                          priceAuto: item.priceAuto,
+                          oldLevelPriceMinor: oldSale,
+                          percentBps: bps,
+                        )
+                      : null;
+                  final purchaseOut = wantsPurchase
+                      ? bulkLevelPriceOutcome(
+                          oldBasePriceMinor: item.purchasePriceMinor,
+                          newBasePriceMinor: out.newPurchasePriceMinor,
+                          factor: level.factor,
+                          priceAuto: item.priceAuto,
+                          oldLevelPriceMinor: oldPurchase,
+                          percentBps: bps,
+                        )
+                      : null;
+                  return _PreviewLevelRow(
+                    levelId: level.id,
+                    name: level.name,
+                    factor: level.factor,
+                    oldSalePriceMinor: oldSale,
+                    newSalePriceMinor:
+                        saleOut?.newLevelPriceMinor ?? oldSale,
+                    saleBroken: saleOut?.relationBroken ?? false,
+                    oldPurchasePriceMinor: oldPurchase,
+                    newPurchasePriceMinor:
+                        purchaseOut?.newLevelPriceMinor ?? oldPurchase,
+                    purchaseBroken: purchaseOut?.relationBroken ?? false,
+                  );
+                }(),
+            ];
             return _PreviewRow(
               itemId: item.id,
               name: item.name,
@@ -110,6 +171,7 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
               oldPurchasePriceMinor: item.purchasePriceMinor,
               newSalePriceMinor: out.newSalePriceMinor,
               newPurchasePriceMinor: out.newPurchasePriceMinor,
+              levels: levels,
             );
           }(),
       ];
@@ -135,7 +197,8 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
             'سيتم تعديل أسعار $count صنفاً من تصنيف «$_category» '
             'على $_targetLabel — المعاينة المعروضة هي ما سيُكتب حرفاً. '
             'فواتير التاريخ بلقطات أسعارها لا تُمس، ولا تراجع إلا بترقية '
-            'معاكسة.'),
+            'معاكسة. ومستويات التعبئة: المشتق يُعاد اشتقاقه آلياً '
+            'واليدوي يُضرب بالنسبة نفسها (D-187).'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -161,6 +224,23 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
                     _target == BulkPriceTarget.both)
                 ? r.newPurchasePriceMinor
                 : null,
+            // مستويات التعبئة بقيمها المحسوبة ذاتها — والحقل غير
+            // المستهدف لكل مستوى يُصان من صفه القائم بالتخزين.
+            levels: [
+              for (final l in r.levels)
+                BulkLevelPriceUpdateRow(
+                  levelId: l.levelId,
+                  newSalePriceMinor: (_target == BulkPriceTarget.sale ||
+                          _target == BulkPriceTarget.both)
+                      ? l.newSalePriceMinor
+                      : null,
+                  newPurchasePriceMinor: (_target ==
+                              BulkPriceTarget.purchase ||
+                          _target == BulkPriceTarget.both)
+                      ? l.newPurchasePriceMinor
+                      : null,
+                ),
+            ],
           ),
     ];
     await widget.db.applyBulkPriceUpdates(updates);
@@ -302,7 +382,7 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
                                     style: TextStyle(
                                         fontWeight: FontWeight.bold))),
                           ]),
-                          for (final r in _preview)
+                          for (final r in _preview) ...[
                             TableRow(children: [
                               Padding(
                                   padding: const EdgeInsets.all(6),
@@ -319,6 +399,35 @@ class _PriceUpdateScreenState extends State<PriceUpdateScreen> {
                                           r.newSalePriceMinor,
                                           r.newPurchasePriceMinor))),
                             ]),
+                            // مستويات التعبئة أسفل صنفها — والانكسار
+                            // سطر تحذير بالمعاينة (المتطلب حرفاً).
+                            for (final l in r.levels)
+                              TableRow(children: [
+                                Padding(
+                                    padding: const EdgeInsets.all(6),
+                                    child: Text(
+                                      '— ${l.name} ×${l.factor}'
+                                      '${l.brokenLabel(_target)}',
+                                      style: const TextStyle(fontSize: 12),
+                                    )),
+                                Padding(
+                                    padding: const EdgeInsets.all(6),
+                                    child: Text(
+                                        _targetPricesLabel(
+                                            l.oldSalePriceMinor,
+                                            l.oldPurchasePriceMinor),
+                                        style: const TextStyle(
+                                            fontSize: 12))),
+                                Padding(
+                                    padding: const EdgeInsets.all(6),
+                                    child: Text(
+                                        _targetPricesLabel(
+                                            l.newSalePriceMinor,
+                                            l.newPurchasePriceMinor),
+                                        style: const TextStyle(
+                                            fontSize: 12))),
+                              ]),
+                          ],
                         ],
                       ),
                     ),
@@ -357,6 +466,9 @@ class _PreviewRow {
   final int newSalePriceMinor;
   final int newPurchasePriceMinor;
 
+  /// مستويات التعبئة للصنف — تقاطع F-165/D-187.
+  final List<_PreviewLevelRow> levels;
+
   const _PreviewRow({
     required this.itemId,
     required this.name,
@@ -365,7 +477,45 @@ class _PreviewRow {
     required this.oldPurchasePriceMinor,
     required this.newSalePriceMinor,
     required this.newPurchasePriceMinor,
+    this.levels = const [],
   });
+}
+
+/// صف معاينة مستوى تعبئة — القيم القديمة والجديدة وعلمان الانكسار
+/// لكل حقل كما حسبها محرك المجال لحظة المعاينة.
+class _PreviewLevelRow {
+  final int levelId;
+  final String name;
+  final int factor;
+  final int oldSalePriceMinor;
+  final int newSalePriceMinor;
+  final bool saleBroken;
+  final int oldPurchasePriceMinor;
+  final int newPurchasePriceMinor;
+  final bool purchaseBroken;
+
+  const _PreviewLevelRow({
+    required this.levelId,
+    required this.name,
+    required this.factor,
+    required this.oldSalePriceMinor,
+    required this.newSalePriceMinor,
+    required this.saleBroken,
+    required this.oldPurchasePriceMinor,
+    required this.newPurchasePriceMinor,
+    required this.purchaseBroken,
+  });
+
+  /// سطر التحذير (المتطلب حرفاً): انكسار علاقة السعر بالكمية للحقل
+  /// المستهدف حصراً.
+  String brokenLabel(BulkPriceTarget target) {
+    final broken = switch (target) {
+      BulkPriceTarget.sale => saleBroken,
+      BulkPriceTarget.purchase => purchaseBroken,
+      BulkPriceTarget.both => saleBroken || purchaseBroken,
+    };
+    return broken ? ' — ⚠ انكسار علاقة السعر بالكمية' : '';
+  }
 }
 
 /// مدقق حرف النسبة — إشارة وأرقام ونقطة عشرية بخانتين حصراً (ما عداه
