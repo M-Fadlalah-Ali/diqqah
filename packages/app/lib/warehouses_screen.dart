@@ -4,6 +4,7 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'reports_screen.dart' show formatMinorAmount;
+import 'assembly_screen.dart';
 import 'stock_counts_screen.dart';
 import 'stock_docs_screen.dart';
 import 'transfers_screen.dart';
@@ -260,8 +261,8 @@ class _WarehousesScreenState extends State<WarehousesScreen> {
                 // مدخل التحويل ظاهر لا مدفون (درس D-098) — ومدخل الجرد
                 // إلى جانبه (الدفعة 25 س-19/F-046) — وإذنا المخزون
                 // الدفعة 26 (F-209/F-210): بطاقة المخزون أزرارها
-                // إدخال وإخراج ونقل وجرد — والتجميع خامساً في دفعته
-                // (F-211 آخر م2).
+                // إدخال وإخراج ونقل وجرد — والتجميع خامساً الدفعة 29
+                // (F-211 آخر م2 — س88).
                 FilledButton.icon(
                   onPressed: () => Navigator.of(context)
                       .push<void>(MaterialPageRoute<void>(
@@ -302,6 +303,15 @@ class _WarehousesScreenState extends State<WarehousesScreen> {
                     .then((_) => _reload()),
                   icon: const Icon(Icons.fact_check_outlined),
                   label: const Text('جرد المخزون'),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context)
+                      .push<void>(MaterialPageRoute<void>(
+                          builder: (_) => AssemblyScreen(db: widget.db)))
+                    .then((_) => _reload()),
+                  icon: const Icon(Icons.precision_manufacturing_outlined),
+                  label: const Text('تجميع'),
                 ),
                 const SizedBox(height: 12),
                 ...[

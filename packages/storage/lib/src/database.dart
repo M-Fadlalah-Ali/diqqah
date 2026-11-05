@@ -816,7 +816,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 19;
+  int get schemaVersion => 20;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -830,6 +830,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createTransferTables();
           await _createCountTables();
           await _createMovementDocTables();
+          await _createAssemblyTables();
           await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
@@ -1197,6 +1198,19 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                 await customStatement(
                     'ALTER TABLE stock_moves ADD COLUMN move_detail TEXT NULL');
               }
+            }
+            // 19→20 (من إصدار أدنى مباشرة): الدفعة 29 — مستند التجميع
+            // (F-211، س88): جدولان جديدان خالصان SQL خاماً بنمط
+            // v15/v16/v17 المجرّب (آمنة التكرار بـIF NOT EXISTS ولا مساس
+            // بجداول قائمة) — رأس تجميع مرحّل فوراً (بلا مسودة — نمط
+            // س-18) بكمية الناتج وقيمتها الإجمالية، وأسطر مكوناته بلقطة
+            // الكلفة، ومُشغّلات تجميد المرحّل نمط F-140. وبلا حاجز فترة
+            // جديد إطلاقاً: التجميع بلا قيد محاسبي (F-211) فأرصدته حالية
+            // لا تاريخية — عين قرار التحويل الموثق D-185 (س78) — فلا
+            // إعادة بناء حواجز ولا بذر بخطوة v9 (درس v16 لا يُستدعى إلا
+            // لحاجزٍ جديد).
+            if (version == 20) {
+              await _createAssemblyTables();
             }
           }
         },
@@ -5153,6 +5167,70 @@ Future<void> _createMovementDocTables() async {
   }
 }
 
+/// جداول الدفعة 29 — مستند التجميع (F-211، س88): رأس تجميع مرحّل فوراً
+/// (بلا مسودة — نمط س-18: الرفض قبل الكتابة حصراً) بكمية الناتج
+/// وقيمتها الإجمالية (مجموع كلف المكونات المسحوبة حصراً — F-211)،
+/// وأسطر مكوناته بلقطة الكلفة المخزنية، ومُشغّلات تجميد المرحّل نمط
+/// F-140 (لا تعديل ولا حذف — لقطة تاريخية والعكس بمستند عكسي إن حاج
+/// المالك إليه مستقبلاً). وبلا حاجز فترة: التجميع بلا قيد محاسبي
+/// فأرصدته حالية لا تاريخية — عين قرار التحويل الموثق D-185 (س78).
+Future<void> _createAssemblyTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "assemblies" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"number" TEXT NOT NULL DEFAULT \'\', '
+        '"assembly_date" TEXT NOT NULL, '
+        '"warehouse_id" INTEGER NOT NULL, '
+        '"bundle_item_id" INTEGER NOT NULL, '
+        '"qty_base" INTEGER NOT NULL, '
+        '"total_value_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"state" TEXT NOT NULL DEFAULT \'posted\', '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    'CREATE TABLE IF NOT EXISTS "assembly_lines" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"assembly_id" INTEGER NOT NULL, '
+        '"item_id" INTEGER NOT NULL, '
+        '"qty_base" INTEGER NOT NULL, '
+        '"unit_cost_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"value_base_minor" INTEGER NOT NULL DEFAULT 0, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    // الحاجز — تجميد المرحّل (نمط trg_stock_transfers_frozen/F-140):
+    // لا تعديل ولا حذف أبداً — التجميع حدث تاريخي، وعلاج أي خطأ
+    // بمستند عكسي لا بالمساس بالتاريخ.
+    'CREATE TRIGGER IF NOT EXISTS trg_assemblies_frozen_update '
+        'BEFORE UPDATE ON assemblies FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'مستند التجميع لقطة تاريخية — لا تعديل "
+        "(نمط F-140)'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_assemblies_frozen_delete '
+        'BEFORE DELETE ON assemblies FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'مستند التجميع لا يُحذف — لقطة تاريخية "
+        'والعلاج بمستند عكسي حصراً\'); '
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_assembly_lines_frozen_update '
+        'BEFORE UPDATE ON assembly_lines FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر التجميع لقطة تاريخية — لا تعديل'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_assembly_lines_frozen_delete '
+        'BEFORE DELETE ON assembly_lines FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سطر التجميع لا يُحذف — لقطة تاريخية'); "
+        'END',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
 /// افتتاح جلسة جرد (س-19): رأس بحالة «جارٍ» وأسطر مزروعة آلياً من
 /// أرصدة المستودع داخل النطاق (الصنف النشط بضاعة برصيد كمية قائم
 /// سطرٌ إلزامي العدّ؛ الأرصدة الأصفارية بلا عدّ بلا معنى ولا سطر —
@@ -6231,6 +6309,414 @@ Future<List<CurrencyRow>> currenciesOf() async {
   /// أسطر إذن إخراج بالمعرف.
   Future<List<StockDocLineRow>> stockIssueLinesOf(int docId) =>
       _stockDocLinesOf(linesTable: 'stock_issue_lines', docId: docId);
+
+  // ═══ الدفعة 29 — مستند التجميع (F-211، س88) ═══
+  // المحرك على نمط التحويل والجرد: المدقق البنيوي في المجال والفحوص
+  // المحركية هنا على ما خُزّن لا على ما قيل، والحاجز الثاني مُشغِّلات
+  // القاعدة (تجميد المرحّل نمط F-140)، وكل ترحيل معاملة واحدة أي رفض
+  // يتراجع كله بما فيه العدّاد فلا رقم يُحرق بترحيل مرفوض (07 §1.9).
+  // والتجميع **بلا قيد محاسبي** (F-211): نقل قيمة بين أصناف داخل 113
+  // — قيمة الناتج الداخل مجموع قيم المكونات الخارجة حصراً فيثبت
+  // الثابت F-178 حرفاً — بروح النقل بين المستودعات (بلا حاجز فترة:
+  // الأرصدة حالية لا تاريخية — D-185/س78).
+
+  /// معاينة مستند تجميع — قراءة خالصة لا كتابة (نمط المعاينة هي
+  /// التنفيذ D-183 والفرق الحي D-106): أسطر المكونات المطلوبة بالوصفة
+  /// × العدد ومتاحها وقيمتها التقديرية بالمتوسط الحاكم لحظة النداء،
+  /// وأخطاء الصلاحية والاكتفاء كاملةً فما يُرى هو ما سينفذ حرفاً.
+  Future<AssemblyPreviewResult> assemblyPreview({
+    required String dateText,
+    required int warehouseId,
+    required int bundleItemId,
+    required int qtyBundles,
+  }) async {
+    final structural =
+        validateAssemblyStructure(AssemblyDraft(
+      dateText: dateText,
+      warehouseId: warehouseId,
+      bundleItemId: bundleItemId,
+      qtyBundles: qtyBundles,
+    ));
+    if (structural.isNotEmpty) {
+      return AssemblyPreviewResult(
+        bundleLabel: null,
+        totalValueMinor: 0,
+        lines: const [],
+        errors: structural,
+      );
+    }
+    final errors = <AssemblyValidationError>[];
+    final lines = <AssemblyPreviewLine>[];
+    String? bundleLabel;
+    var totalValue = 0;
+    final warehouse = await _warehouseByIdTx(warehouseId);
+    if (warehouse == null) {
+      errors.add(AssemblyWarehouseMissing(warehouseId));
+    } else if (!warehouse.isActive) {
+      errors.add(AssemblyWarehouseInactive(warehouse.name));
+    }
+    final bundle = await _itemByIdTx(bundleItemId);
+    if (bundle == null) {
+      errors.add(AssemblyBundleItemMissing(bundleItemId));
+    } else {
+      bundleLabel =
+          itemDisplayLabel(bundle['name'] as String, bundle['sku'] as String);
+      if ((bundle['is_active'] as int) == 0) {
+        errors.add(AssemblyBundleItemInactive(bundleLabel));
+      } else if ((bundle['kind'] as String) != 'bundle') {
+        errors.add(AssemblyBundleItemNotBundle(bundleLabel));
+      }
+    }
+    if (errors.isEmpty) {
+      final recipe = await _bundleRecipeTx(bundleItemId);
+      if (recipe.isEmpty) {
+        errors.add(const AssemblyRecipeRequired());
+      }
+      for (var i = 0; i < recipe.length; i++) {
+        final r = recipe[i];
+        final compId = r['component_item_id'] as int;
+        final kind = r['kind'] as String;
+        final label =
+            itemDisplayLabel(r['name'] as String, r['sku'] as String);
+        if ((r['is_active'] as int) == 0) {
+          errors.add(AssemblyComponentInactive(i, label));
+          continue;
+        }
+        if (kind == 'bundle') {
+          errors.add(AssemblyComponentIsBundle(i, label));
+          continue;
+        }
+        if (kind == 'service') {
+          // F-212/F-211 — الحد الصادق: المكوّن الخدمي لا يُسحب في
+          // التجميع (لا مخزون له ولا قيمة داخل 113 — قيمته من صميم
+          // البيع لا البناء) فيظهر بالمعاينة عِلمَه بلا قيمة ولا طلب.
+          lines.add(AssemblyPreviewLine(
+            itemId: compId,
+            label: label,
+            isService: true,
+            qtyNeeded: 0,
+            qtyAvailable: 0,
+            valueMinor: 0,
+          ));
+          continue;
+        }
+        final needed = (r['qty_base'] as int) * qtyBundles;
+        final (qty, value) = await _stockBalanceTx(compId, warehouseId);
+        final estimate = wacExitValue(value, qty, needed);
+        lines.add(AssemblyPreviewLine(
+          itemId: compId,
+          label: label,
+          isService: false,
+          qtyNeeded: needed,
+          qtyAvailable: qty,
+          valueMinor: estimate,
+        ));
+        totalValue += estimate;
+        if (needed > qty) {
+          errors.add(AssemblyComponentInsufficient(
+            index: i,
+            componentLabel: label,
+            neededQty: needed,
+            onHandQty: qty,
+          ));
+        }
+      }
+    }
+    return AssemblyPreviewResult(
+      bundleLabel: bundleLabel,
+      totalValueMinor: totalValue,
+      lines: lines,
+      errors: errors,
+    );
+  }
+
+  /// ترحيل مستند التجميع (F-211) — بلا مسودة (نمط س-18): المكونات
+  /// تُسحب من رصيد المستودع بكميات الوصفة × العدد بالمتوسط الحاكم
+  /// بالامتصاص (F-047/D-067) بحماية السالب (F-042)، والناتج يدخل
+  /// جاهزاً بقيمة مكوناته المسحوبة حصراً — **بلا قيد محاسبي** فمجموع
+  /// قيمة 113 ثابت قبل وبعد (الثابت F-178، بروح النقل D-185)، والرقم
+  /// من التسلسل السنوي المستقل داخل المعاملة ذاتها (07 §1.9).
+  Future<int> assemblyPost(AssemblyDraft draft) async {
+    final structural = validateAssemblyStructure(draft);
+    if (structural.isNotEmpty) {
+      throw AssemblyValidationException(structural);
+    }
+    return transaction(() async {
+      final errors = await _collectAssemblyErrors(draft);
+      if (errors.isNotEmpty) {
+        throw AssemblyValidationException(errors);
+      }
+      final recipe = await _bundleRecipeTx(draft.bundleItemId);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      // خطة الخروج أولاً بقراءات الآنية — قيمة الناتج مجموع الخارج
+      // حصراً فالرأس يُزرع بقيَمته النهائية (الرأس مجمّد لا يُحدَّث —
+      // نمط F-140) والمكوّن الواحد سطراً واحداً بتفرد الوصفة.
+      final exits = <(int, int, int)>[]; // (componentItemId, needed, exit)
+      var totalValue = 0;
+      for (final r in recipe) {
+        if ((r['kind'] as String) == 'service') {
+          // F-212/F-211 — الحد الصادق: الخدمة بلا مخزون ولا قيمة
+          // بنائية (عِلمَها بالمعاينة) — لا سطر ولا حركة ولا قيمة.
+          continue;
+        }
+        final compId = r['component_item_id'] as int;
+        final needed = (r['qty_base'] as int) * draft.qtyBundles;
+        final (qty, value) =
+            await _stockBalanceTx(compId, draft.warehouseId);
+        final exit = wacExitValue(value, qty, needed);
+        exits.add((compId, needed, exit));
+        totalValue += exit;
+      }
+      final year = yearOfIsoDate(draft.dateText);
+      final number = formatDocumentNumber(
+          year,
+          await _advanceSequenceWithinTx('assembly', year),
+          counterWidth: await _counterWidth());
+      await customStatement(
+        "INSERT INTO assemblies (number, assembly_date, warehouse_id, "
+        "bundle_item_id, qty_base, total_value_minor, state, uuid, "
+        "created_at, updated_at, is_deleted) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'posted', ?, ?, ?, 0)",
+        [
+          number,
+          draft.dateText,
+          draft.warehouseId,
+          draft.bundleItemId,
+          draft.qtyBundles,
+          totalValue,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      final docId = (await customSelect(
+        'SELECT last_insert_rowid() AS id',
+      ).getSingle()).data['id'] as int;
+      for (final (compId, needed, exit) in exits) {
+        final unitCost =
+            needed > 0 ? roundHalfAwayFromZeroRatio(exit, needed) : 0;
+        await customStatement(
+          'INSERT INTO assembly_lines (assembly_id, item_id, qty_base, '
+          'unit_cost_base_minor, value_base_minor, uuid, created_at, '
+          'updated_at, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+          [
+            docId,
+            compId,
+            needed,
+            unitCost,
+            exit,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+          "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+          "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+          "is_deleted) VALUES (?, ?, ?, NULL, ?, ?, 'posted', "
+          "'assembly', ?, ?, ?, ?, 0)",
+          [
+            compId,
+            -needed,
+            draft.warehouseId,
+            -exit,
+            unitCost,
+            docId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            compId,
+            draft.warehouseId,
+            -needed,
+            -exit,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+      }
+      // الناتج يدخل جاهزاً بقيمة مكوناته المسحوبة حصراً — حتى بقيمة
+      // صفرية (مكونات بلا مرجع تكلفة روح D-186) فالكمية تدخل ولا
+      // القيمة، وفي الحالتين يثبت مجموع 113 (F-178).
+      final bundleUnitCost = draft.qtyBundles > 0
+          ? roundHalfAwayFromZeroRatio(totalValue, draft.qtyBundles)
+          : 0;
+      await customStatement(
+        "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+        "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+        "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+        "is_deleted) VALUES (?, ?, NULL, ?, ?, ?, 'posted', "
+        "'assembly', ?, ?, ?, ?, 0)",
+        [
+          draft.bundleItemId,
+          draft.qtyBundles,
+          draft.warehouseId,
+          totalValue,
+          bundleUnitCost,
+          docId,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      await customStatement(
+        'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+        'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+        'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+        'qty_base = qty_base + excluded.qty_base, '
+        'total_value_minor = total_value_minor + excluded.total_value_minor, '
+        'updated_at = excluded.updated_at',
+        [
+          draft.bundleItemId,
+          draft.warehouseId,
+          draft.qtyBundles,
+          totalValue,
+          const Uuid().v4(),
+          now,
+          now,
+        ],
+      );
+      await _recordDocEventTx(
+        entityType: 'assembly',
+        table: 'assemblies',
+        entityId: docId,
+        action: 'posted',
+      );
+      return docId;
+    });
+  }
+
+  /// فحوص التجميع بقاعدة البيانات — المستودع موجود نشط، والصنف
+  /// التجميعي موجود نشطاً تجميعياً صاحب وصفة، ومكونات الوصفة صالحة
+  /// (نشطة بضاعة أو خدمة — لا تداخل تجميعي)، ومكونات البضاعة كافية
+  /// (منع السالب F-042) على ما خُزّن لا على ما قيل.
+  Future<List<AssemblyValidationError>> _collectAssemblyErrors(
+      AssemblyDraft draft) async {
+    final errors = <AssemblyValidationError>[];
+    final warehouse = await _warehouseByIdTx(draft.warehouseId);
+    if (warehouse == null) {
+      errors.add(AssemblyWarehouseMissing(draft.warehouseId));
+    } else if (!warehouse.isActive) {
+      errors.add(AssemblyWarehouseInactive(warehouse.name));
+    }
+    final bundle = await _itemByIdTx(draft.bundleItemId);
+    if (bundle == null) {
+      errors.add(AssemblyBundleItemMissing(draft.bundleItemId));
+      return errors;
+    }
+    final bundleLabel =
+        itemDisplayLabel(bundle['name'] as String, bundle['sku'] as String);
+    if ((bundle['is_active'] as int) == 0) {
+      errors.add(AssemblyBundleItemInactive(bundleLabel));
+      return errors;
+    }
+    if ((bundle['kind'] as String) != 'bundle') {
+      errors.add(AssemblyBundleItemNotBundle(bundleLabel));
+      return errors;
+    }
+    final recipe = await _bundleRecipeTx(draft.bundleItemId);
+    if (recipe.isEmpty) {
+      errors.add(const AssemblyRecipeRequired());
+      return errors;
+    }
+    for (var i = 0; i < recipe.length; i++) {
+      final r = recipe[i];
+      final kind = r['kind'] as String;
+      final label =
+          itemDisplayLabel(r['name'] as String, r['sku'] as String);
+      if ((r['is_active'] as int) == 0) {
+        errors.add(AssemblyComponentInactive(i, label));
+        continue;
+      }
+      if (kind == 'bundle') {
+        errors.add(AssemblyComponentIsBundle(i, label));
+        continue;
+      }
+      if (kind == 'service') continue; // F-212 — بلا مخزون ولا قيمة
+      final needed = (r['qty_base'] as int) * draft.qtyBundles;
+      final (qty, _) = await _stockBalanceTx(
+          r['component_item_id'] as int, draft.warehouseId);
+      if (needed > qty) {
+        errors.add(AssemblyComponentInsufficient(
+          index: i,
+          componentLabel: label,
+          neededQty: needed,
+          onHandQty: qty,
+        ));
+      }
+    }
+    return errors;
+  }
+
+  /// سجل التجميعات — الأحدث أولاً برأسه بأسمائه المحسوبة ومجاميعه
+  /// (قراءة عرض خالصة — التخزين يقرأ لا يحسب، نمط قراءة الإذنين).
+  Future<List<AssemblyListRow>> assembliesOf() async {
+    final rows = await customSelect(
+      'SELECT a.id, a.number, a.assembly_date, a.state, a.qty_base, '
+      'a.total_value_minor, a.warehouse_id, w.name AS warehouse_name, '
+      'a.bundle_item_id, i.name AS bundle_name, i.sku AS bundle_sku, '
+      'COUNT(l.id) AS line_count '
+      'FROM assemblies a '
+      'LEFT JOIN warehouses w ON w.id = a.warehouse_id '
+      'LEFT JOIN items i ON i.id = a.bundle_item_id '
+      'LEFT JOIN assembly_lines l ON l.assembly_id = a.id '
+      'AND l.is_deleted = 0 '
+      'WHERE a.is_deleted = 0 '
+      'GROUP BY a.id ORDER BY a.id DESC',
+    ).get();
+    return [
+      for (final r in rows)
+        AssemblyListRow(
+          id: r.data['id'] as int,
+          number: r.data['number'] as String,
+          assemblyDate: r.data['assembly_date'] as String,
+          state: r.data['state'] as String,
+          qtyBase: r.data['qty_base'] as int,
+          totalValueMinor: r.data['total_value_minor'] as int,
+          warehouseId: r.data['warehouse_id'] as int,
+          warehouseName: r.data['warehouse_name'] as String?,
+          bundleItemId: r.data['bundle_item_id'] as int,
+          bundleName: r.data['bundle_name'] as String?,
+          bundleSku: r.data['bundle_sku'] as String?,
+          lineCount: r.data['line_count'] as int,
+        ),
+    ];
+  }
+
+  /// أسطر تجميع معين — لقطة الكلفة المخزنة (F-140) قراءة خالصة.
+  Future<List<AssemblyLineRow>> assemblyLinesOf(int assemblyId) async {
+    final rows = await customSelect(
+      'SELECT l.item_id, l.qty_base, l.unit_cost_base_minor, '
+      'l.value_base_minor, i.name, i.sku '
+      'FROM assembly_lines l JOIN items i ON i.id = l.item_id '
+      'WHERE l.assembly_id = ? AND l.is_deleted = 0 ORDER BY l.id',
+      variables: [Variable.withInt(assemblyId)],
+    ).get();
+    return [
+      for (final r in rows)
+        AssemblyLineRow(
+          itemId: r.data['item_id'] as int,
+          itemName: r.data['name'] as String?,
+          sku: r.data['sku'] as String?,
+          qtyBase: r.data['qty_base'] as int,
+          unitCostBaseMinor: r.data['unit_cost_base_minor'] as int,
+          valueBaseMinor: r.data['value_base_minor'] as int,
+        ),
+    ];
+  }
 
   // ═══ دفعة السندات والصندوق (5) — س-61..س-70 / D-083..D-087 معروضة ═══
   // المحرك على نمط دفعة الفواتير: المدقق البنيوي في المجال والفحوص
@@ -9371,6 +9857,99 @@ class StockDocLineRow {
     required this.qtyBase,
     required this.unitCostBaseMinor,
     required this.valueBaseMinor,
+  });
+}
+
+/// تجميع قائم بالسجل (الدفعة 29 — F-211): الرأس بأسمائه المحسوبة
+/// وكمية الناتج وقيمته الإجمالية وعدد أسطره — لقطة من القاعدة لا حساب
+/// جديد (نمط قراءة الإذنين).
+class AssemblyListRow {
+  final int id;
+  final String number;
+  final String assemblyDate;
+  final String state;
+
+  /// عدد الوحدات المنتجة من الصنف التجميعي.
+  final int qtyBase;
+  final int totalValueMinor;
+  final int warehouseId;
+  final String? warehouseName;
+  final int bundleItemId;
+  final String? bundleName;
+  final String? bundleSku;
+  final int lineCount;
+
+  const AssemblyListRow({
+    required this.id,
+    required this.number,
+    required this.assemblyDate,
+    required this.state,
+    required this.qtyBase,
+    required this.totalValueMinor,
+    required this.warehouseId,
+    this.warehouseName,
+    required this.bundleItemId,
+    this.bundleName,
+    this.bundleSku,
+    required this.lineCount,
+  });
+}
+
+/// سطر تجميع — لقطة كلفة المكوّن المسحوب (نمط F-140) قراءة خالصة.
+class AssemblyLineRow {
+  final int itemId;
+  final String? itemName;
+  final String? sku;
+
+  /// الكمية المسحوبة من المكوّن (الوصفة × عدد الوحدات المنتجة).
+  final int qtyBase;
+  final int unitCostBaseMinor;
+  final int valueBaseMinor;
+
+  const AssemblyLineRow({
+    required this.itemId,
+    this.itemName,
+    this.sku,
+    required this.qtyBase,
+    required this.unitCostBaseMinor,
+    required this.valueBaseMinor,
+  });
+}
+
+/// سطر معاينة تجميع — المطلوب والمتاح والقيمة التقديرية بالمتوسط
+/// الحاكم لحظة النداء (نمط المعاينة هي التنفيذ D-183)، والمكوّن
+/// الخدمي ظاهر بعِلمه بلا طلب ولا قيمة (F-212/F-211 — حد صادق).
+class AssemblyPreviewLine {
+  final int itemId;
+  final String label;
+  final bool isService;
+  final int qtyNeeded;
+  final int qtyAvailable;
+  final int valueMinor;
+
+  const AssemblyPreviewLine({
+    required this.itemId,
+    required this.label,
+    required this.isService,
+    required this.qtyNeeded,
+    required this.qtyAvailable,
+    required this.valueMinor,
+  });
+}
+
+/// حصيلة المعاينة — الأسطر والقيمة التقديرية والأخطاء معاً (نمط
+/// المدققين: القائمة فارغة = الترحيل سيمر بهذه القيمَ عينَها).
+class AssemblyPreviewResult {
+  final String? bundleLabel;
+  final int totalValueMinor;
+  final List<AssemblyPreviewLine> lines;
+  final List<AssemblyValidationError> errors;
+
+  const AssemblyPreviewResult({
+    required this.bundleLabel,
+    required this.totalValueMinor,
+    required this.lines,
+    required this.errors,
   });
 }
 

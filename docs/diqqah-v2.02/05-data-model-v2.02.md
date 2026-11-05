@@ -107,6 +107,7 @@
 | `stock_move` | item_id, qty_base (موجب/سالب بالاتفاقية), from_warehouse_id?, to_warehouse_id?, unit_cost_base_minor, ref_doc_type, ref_doc_id, state | المصادر: فاتورة شراء، بيع، مردود، تحويل، تسوية جرد، إذن إدخال (F-209)، إذن إخراج (F-210)، مستند تجميع (خروج لكل مكون ودخول للناتج — F-211)؛ و`value_base_minor` قيمة الحركة الكاملة بجانب لقطة كلفة الوحدة (F-140) — والترصيد بالقيمة الإجمالية (D-067) |
 | `stock_transfer` | number, from_wh, to_wh, lines..., state | مستند التحويل بين مستودعات (المرحلة 2) |
 | `stock_count` (الجرد) | warehouse_id, count_date, lines(item, counted_qty_base, system_qty_base, diff), state, adjustment_move_id | تسوية الجرد تولّد حركة تسوية وقيداً |
+| `assembly` | number, assembly_date, warehouse_id, bundle_item_id, qty_base, total_value_minor, state, lines(item, qty_base, unit_cost_base_minor, value_base_minor) | مستند التجميع (المرحلة 2 — F-211، س88): **بلا قيد** — نقل قيمة بين أصناف داخل 113؛ وأسطره لقطة كلفة المكونات المسحوبة مجمّدة نمط F-140، والمكوّن الخدمي بلا سطر ولا حركة (F-212) |
 
 **نطاق التقييم عند تعدد المستودعات (م-23/D-044)**: المتوسط المرجح **موحد على مستوى الشركة** في كل المستودعات — لقطة التكلفة قيمة الشركة الواحدة للصنف، ولا خلاف تكلفة بين المستودعات. وإتاحة تكلفة مستقلة لكل مستودع بند نقاش مستقبلي ضمن خيارات المدير (قائمة انتظار 09).
 
