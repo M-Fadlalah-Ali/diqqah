@@ -5,6 +5,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'reports_screen.dart' show formatMinorAmount;
 import 'stock_counts_screen.dart';
+import 'stock_docs_screen.dart';
 import 'transfers_screen.dart';
 
 /// شاشة المستودعات — أولى م2 «تعدد المستودعات والتحويل بينها» (دفعة 24
@@ -257,7 +258,32 @@ class _WarehousesScreenState extends State<WarehousesScreen> {
                     ),
                   ),
                 // مدخل التحويل ظاهر لا مدفون (درس D-098) — ومدخل الجرد
-                // إلى جانبه (الدفعة 25 س-19/F-046)
+                // إلى جانبه (الدفعة 25 س-19/F-046) — وإذنا المخزون
+                // الدفعة 26 (F-209/F-210): بطاقة المخزون أزرارها
+                // إدخال وإخراج ونقل وجرد — والتجميع خامساً في دفعته
+                // (F-211 آخر م2).
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context)
+                      .push<void>(MaterialPageRoute<void>(
+                          builder: (_) => StockDocScreen(
+                              db: widget.db,
+                              direction: StockDocDirection.receipt)))
+                    .then((_) => _reload()),
+                  icon: const Icon(Icons.archive_outlined),
+                  label: const Text('إذن إدخال مخزون'),
+                ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context)
+                      .push<void>(MaterialPageRoute<void>(
+                          builder: (_) => StockDocScreen(
+                              db: widget.db,
+                              direction: StockDocDirection.issue)))
+                    .then((_) => _reload()),
+                  icon: const Icon(Icons.unarchive_outlined),
+                  label: const Text('إذن إخراج مخزون'),
+                ),
+                const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: () => Navigator.of(context)
                       .push<void>(MaterialPageRoute<void>(

@@ -16,6 +16,7 @@ export 'src/bulk_price.dart';
 export 'src/hijri.dart';
 export 'src/suggest.dart';
 export 'src/stock_count.dart';
+export 'src/stock_doc.dart';
 export 'src/stock_transfer.dart';
 export 'src/warehouses.dart';
 export 'src/setup.dart';

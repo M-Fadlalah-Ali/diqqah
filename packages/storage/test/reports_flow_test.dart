@@ -474,7 +474,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 16);
+    expect(migrated.schemaVersion, 17);
 
     // والإقفال يعمل فوق المهدَّر: إقفال مارس فإدراج خام يُحبط بحاجز v9
     final marchId = await periodIdByMonth(migrated, 3);

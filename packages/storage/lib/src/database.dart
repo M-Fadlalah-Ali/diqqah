@@ -653,7 +653,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -666,6 +666,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createVoucherTriggers();
           await _createTransferTables();
           await _createCountTables();
+          await _createMovementDocTables();
           await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
@@ -835,7 +836,12 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // stock_counts فلا حاجز قبل جدوله — والبنية IF NOT EXISTS
             // فلا مساس بمسارات الترقية الأدنى ولا خطوة v16 بعدها.
             if (version == 9) {
+              // الدفعة 26 (F-209/F-210): جدولا الإذنين يُبنيان هنا أيضاً
+              // قبل الحواجز — درس الجرد الموثق (س-19/D-186): حاجز
+              // المستند القيدي لا يسبق جدوله، والبنية IF NOT EXISTS
+              // فلا مساس بمسارات أعلى ولا تكرار ضار.
               await _createCountTables();
+              await _createMovementDocTables();
               await _createClosingTriggers();
             }
             // 9→10 (ومن إصدار أدنى مباشرة): دفعة إغلاق النواة (س37) —
@@ -969,6 +975,21 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // CREATE فآمن التكرار أي كان مسار الوصول (درس v9 ذاته).
             if (version == 16) {
               await _createCountTables();
+              await _createClosingTriggers();
+            }
+            // 16→17 (من إصدار أدنى مباشرة): الدفعة 26 — إذنا المخزون
+            // (F-209/F-210، س85/D-189): أربعة جداول جديدة خالصة SQL
+            // خاماً بنمط v15/v16 المجرّب (آمنة التكرار بـIF NOT EXISTS
+            // ولا مساس بجداول قائمة) — رأس إذن إدخال وإذن إخراج بحالة
+            // مرحّل فوراً (بلا مسودة — نمط س-18) وسبب نصي إلزامي وحساب
+            // مقابل قابل للتغيير، وأسطرهما، ومُشغّلات تجميد المرحّل
+            // نمط F-140. وإعادة بناء حواجز الإقفال إلزامية هنا: الإذن
+            // يُرحّل قيداً محاسبياً فتاريخه تحكمه الفترة، وحاجزا
+            // stock_receipts/stock_issues الجديدان لا يولدان إلا
+            // بـ_createClosingTriggers — والبناء DROP+CREATE فآمن
+            // التكرار أي كان مسار الوصول (درس v9 ذاته).
+            if (version == 17) {
+              await _createMovementDocTables();
               await _createClosingTriggers();
             }
           }
@@ -2693,7 +2714,8 @@ Future<void> _createTransferTables() async {
 
 Future<Map<String, Object?>?> _itemByIdTx(int id) async {
   final rows = await customSelect(
-    'SELECT id, sku, name, kind, base_unit_id, is_active FROM items '
+    'SELECT id, sku, name, kind, base_unit_id, is_active, '
+    'purchase_price_minor FROM items '
     'WHERE id = ? AND is_deleted = 0',
     variables: [Variable.withInt(id)],
   ).get();
@@ -4301,6 +4323,78 @@ Future<void> _createCountTables() async {
   }
 }
 
+/// جدولا إذني المخزون وأسطرهما (F-209/F-210 — الدفعة 26 س85/D-189):
+/// أربعة جداول خالصة بنمط v15/v16 (آمنة التكرار بـIF NOT EXISTS) —
+/// الرأس مرحّل فوراً (state 'posted' ثابت — بلا مسودة نمط س-18:
+/// الإذن فعل آني والرفض قبل الكتابة حصراً) بسببه النصي الإلزامي
+/// وحساب المقابل القابل للتغيير (43/596 افتراضاً — 03 §4) ومُشغّلات
+/// تجميد المرحّل نمط F-140 (لقطة تاريخية لا تعدل ولا تحذف — والعكس
+/// بمردود لا بحذف). الإذنان سابع وثامن المستندات القيدية (حاجزا
+/// الفترة ب_createClosingTriggers).
+Future<void> _createMovementDocTables() async {
+  // (الجدول، عمود التاريخ، جدول الأسطر) — عرف أسطر المستندات: مفرد
+  // الجذع كـ stock_transfer_lines وstock_count_lines (05 §117).
+  const docTables = <(String, String, String)>[
+    ('stock_receipts', 'receipt_date', 'stock_receipt_lines'),
+    ('stock_issues', 'issue_date', 'stock_issue_lines'),
+  ];
+  final statements = <String>[
+    for (final (table, dateColumn, linesTable) in docTables) ...[
+      'CREATE TABLE IF NOT EXISTS "$table" ('
+          '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+          '"number" TEXT NOT NULL DEFAULT \'\', '
+          '"$dateColumn" TEXT NOT NULL, '
+          '"warehouse_id" INTEGER NOT NULL, '
+          '"reason" TEXT NOT NULL, '
+          '"counter_account_id" INTEGER NOT NULL, '
+          '"narration" TEXT NULL, '
+          '"state" TEXT NOT NULL DEFAULT \'posted\', '
+          '"uuid" TEXT NOT NULL, '
+          '"created_at" INTEGER NOT NULL DEFAULT 0, '
+          '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+          '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+      'CREATE TABLE IF NOT EXISTS "$linesTable" ('
+          '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+          '"doc_id" INTEGER NOT NULL, '
+          '"item_id" INTEGER NOT NULL, '
+          '"qty_base" INTEGER NOT NULL, '
+          '"unit_cost_base_minor" INTEGER NOT NULL DEFAULT 0, '
+          '"value_base_minor" INTEGER NOT NULL DEFAULT 0, '
+          '"uuid" TEXT NOT NULL, '
+          '"created_at" INTEGER NOT NULL DEFAULT 0, '
+          '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+          '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+      // الحاجز — تجميد الرأس المرحّل (نمط F-140؛ الرأس مرحّل دائماً
+      // فالحاجز بلا شرط حالة)
+      'CREATE TRIGGER IF NOT EXISTS trg_${table}_frozen_update '
+          'BEFORE UPDATE ON $table FOR EACH ROW '
+          'BEGIN '
+          "SELECT RAISE(ABORT, 'إذن المخزون المرحّل لقطة تاريخية — لا تعديل "
+          "(نمط F-140)'); "
+          'END',
+      'CREATE TRIGGER IF NOT EXISTS trg_${table}_frozen_delete '
+          'BEFORE DELETE ON $table FOR EACH ROW '
+          'BEGIN '
+          "SELECT RAISE(ABORT, 'إذن المخزون المرحّل لا يُحذف — لقطة "
+          'تاريخية والعكس بمردود لا بحذف\'); '
+          'END',
+      'CREATE TRIGGER IF NOT EXISTS trg_${linesTable}_frozen_update '
+          'BEFORE UPDATE ON $linesTable FOR EACH ROW '
+          'BEGIN '
+          "SELECT RAISE(ABORT, 'سطر إذن المخزون لقطة تاريخية — لا تعديل'); "
+          'END',
+      'CREATE TRIGGER IF NOT EXISTS trg_${linesTable}_frozen_delete '
+          'BEFORE DELETE ON $linesTable FOR EACH ROW '
+          'BEGIN '
+          "SELECT RAISE(ABORT, 'سطر إذن المخزون لا يُحذف — لقطة تاريخية'); "
+          'END',
+    ],
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
 /// افتتاح جلسة جرد (س-19): رأس بحالة «جارٍ» وأسطر مزروعة آلياً من
 /// أرصدة المستودع داخل النطاق (الصنف النشط بضاعة برصيد كمية قائم
 /// سطرٌ إلزامي العدّ؛ الأرصدة الأصفارية بلا عدّ بلا معنى ولا سطر —
@@ -4896,6 +4990,489 @@ Future<List<CurrencyRow>> currenciesOf() async {
       ),
   ];
 }
+
+  // ═══ الدفعة 26 — إذنا المخزون (F-209/F-210، س85/D-189) ═══
+  // المحرك على نمط التحويل والجرد: المدقق البنيوي في المجال والفحوص
+  // المحركية هنا على ما خُزّن لا على ما قيل، والحاجز الثاني مُشغِّلات
+  // القاعدة (التجميد نمط F-140 وحاجزا الفترة — سابع وثامن المستندات
+  // القيدية)، وكل ترحيل معاملة واحدة أي رفض يتراجع كله بما فيه
+  // العدّاد فلا رقم يُحرق بترحيل مرفوض (07 §1.9).
+
+  /// ترحيل إذن إدخال المخزون (F-209) — بلا مسودة (نمط س-18: الرفض قبل
+  /// الكتابة حصراً). الزيادة بتقييم زيادة الجرد المقرر (D-186): المتوسط
+  /// الحالي عند رصيد موجب فلا يمس المتوسط، وسعر الشراء المسجل عند رصيد
+  /// صفير، وصفر بلا مرجعين فلا سطر قيد لها (حركة بقيمة صفر). المقابل
+  /// افتراضه 43 من الواجهة وقابل التغيير من الحسابات المفعلة حصراً.
+  Future<int> stockReceiptPost(StockReceiptDraft draft) async {
+    final structural = validateStockReceiptStructure(draft);
+    if (structural.isNotEmpty) {
+      throw StockDocValidationException(structural);
+    }
+    return transaction(() async {
+      final errors = await _collectStockDocErrors(
+        dateText: draft.dateText,
+        warehouseId: draft.warehouseId,
+        reason: draft.reason,
+        counterAccountId: draft.counterAccountId,
+        lines: draft.lines,
+        direction: 'receipt',
+      );
+      if (errors.isNotEmpty) {
+        throw StockDocValidationException(errors);
+      }
+      final docId = await _insertStockDocHeadWithinTx(
+        table: 'stock_receipts',
+        dateColumn: 'receipt_date',
+        sequenceKind: 'stock_receipt',
+        dateText: draft.dateText,
+        warehouseId: draft.warehouseId,
+        reason: draft.reason,
+        counterAccountId: draft.counterAccountId,
+        narration: draft.narration,
+      );
+      final acc113 = await _accountIdByCodeTx('113');
+      final moveLines = <MoveLineDraft>[];
+      var totalValue = 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final line in draft.lines) {
+        // تقييم الزيادة بروح D-186 — المتوسط الحاكم لا يتغير بإضافة
+        // كمية بتكلفته (05: الترصيد بالقيمة الإجمالية D-067).
+        final (systemQty, systemValue) =
+            await _stockBalanceTx(line.itemId, draft.warehouseId);
+        final item = await _itemByIdTx(line.itemId);
+        final int valueIn;
+        final int unitCost;
+        if (systemQty > 0) {
+          valueIn = roundHalfAwayFromZeroRatio(
+              systemValue * line.qtyBase, systemQty);
+          unitCost = roundHalfAwayFromZeroRatio(valueIn, line.qtyBase);
+        } else {
+          final purchase =
+              (item?['purchase_price_minor'] as int?) ?? 0;
+          valueIn = purchase * line.qtyBase;
+          unitCost = purchase;
+        }
+        await customStatement(
+          'INSERT INTO stock_receipt_lines (doc_id, item_id, qty_base, '
+          'unit_cost_base_minor, value_base_minor, uuid, created_at, '
+          'updated_at, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+          [
+            docId,
+            line.itemId,
+            line.qtyBase,
+            unitCost,
+            valueIn,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+          "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+          "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+          "is_deleted) VALUES (?, ?, NULL, ?, ?, ?, 'posted', "
+          "'stock_receipt', ?, ?, ?, ?, 0)",
+          [
+            line.itemId,
+            line.qtyBase,
+            draft.warehouseId,
+            valueIn,
+            unitCost,
+            docId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        final moveId = (await customSelect(
+          'SELECT last_insert_rowid() AS id',
+        ).getSingle()).data['id'] as int;
+        if (valueIn > 0) {
+          moveLines.add(MoveLineDraft(
+            accountId: acc113,
+            debitMinor: valueIn,
+            currencyId: 1,
+            amountMinor: valueIn,
+            refStockMoveId: moveId,
+          ));
+        }
+        totalValue += valueIn;
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            line.itemId,
+            draft.warehouseId,
+            line.qtyBase,
+            valueIn,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        // لقطة التكلفة على سطر المستند — لقطة تاريخية مجمدة بمُشغّل
+        // الجدول (نمط F-140) فلا تحديث لاحق عليها.
+      }
+      // القيد — 113 مدين بحركاته / المقابل دائن بمجموع القيم — والزيادة
+      // بلا مرجع تكلفة كلها بلا قيد (D-186: قيمة صفر بلا سطر قيد).
+      if (totalValue > 0) {
+        moveLines.add(MoveLineDraft(
+          accountId: draft.counterAccountId,
+          creditMinor: totalValue,
+          currencyId: 1,
+          amountMinor: totalValue,
+        ));
+        final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+          journalId: await _journalIdByCodeTx('stock'),
+          dateText: draft.dateText,
+          narration: draft.narration ?? 'إذن إدخال مخزون (${draft.reason})',
+          refDocType: 'stock_receipt',
+          refDocId: docId,
+          lines: moveLines,
+        ));
+        await _postMoveWithinTx(moveId, sequenceKind: 'move_stock');
+      }
+      await _recordDocEventTx(
+        entityType: 'stock_receipt',
+        table: 'stock_receipts',
+        entityId: docId,
+        action: 'posted',
+      );
+      return docId;
+    });
+  }
+
+  /// ترحيل إذن إخراج المخزون (F-210) — بلا مسودة، والخروج بتكلفة
+  /// المتوسط الحاكم بالامتصاص (F-047/D-067) وبحماية السالب (F-042):
+  /// الفحص على ما خُزّن قبل الكتابة والحاجز في القاعدة احتياطاً.
+  /// المقابل افتراضه 596 من الواجهة وقابل التغيير من الحسابات المفعلة.
+  Future<int> stockIssuePost(StockIssueDraft draft) async {
+    final structural = validateStockIssueStructure(draft);
+    if (structural.isNotEmpty) {
+      throw StockDocValidationException(structural);
+    }
+    return transaction(() async {
+      final errors = await _collectStockDocErrors(
+        dateText: draft.dateText,
+        warehouseId: draft.warehouseId,
+        reason: draft.reason,
+        counterAccountId: draft.counterAccountId,
+        lines: draft.lines,
+        direction: 'issue',
+      );
+      if (errors.isNotEmpty) {
+        throw StockDocValidationException(errors);
+      }
+      final docId = await _insertStockDocHeadWithinTx(
+        table: 'stock_issues',
+        dateColumn: 'issue_date',
+        sequenceKind: 'stock_issue',
+        dateText: draft.dateText,
+        warehouseId: draft.warehouseId,
+        reason: draft.reason,
+        counterAccountId: draft.counterAccountId,
+        narration: draft.narration,
+      );
+      final acc113 = await _accountIdByCodeTx('113');
+      final moveLines = <MoveLineDraft>[];
+      var totalValue = 0;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      for (final line in draft.lines) {
+        final (systemQty, systemValue) =
+            await _stockBalanceTx(line.itemId, draft.warehouseId);
+        // الخروج بالامتصاص (D-067) — ما خرج يحمل قيمته كاملة
+        // والباقي بمتوسطه السابق بلا غبار تقريب.
+        final exitValue =
+            wacExitValue(systemValue, systemQty, line.qtyBase);
+        final unitCost =
+            roundHalfAwayFromZeroRatio(exitValue, line.qtyBase);
+        await customStatement(
+          'INSERT INTO stock_issue_lines (doc_id, item_id, qty_base, '
+          'unit_cost_base_minor, value_base_minor, uuid, created_at, '
+          'updated_at, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+          [
+            docId,
+            line.itemId,
+            line.qtyBase,
+            unitCost,
+            exitValue,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        await customStatement(
+          "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
+          "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
+          "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, "
+          "is_deleted) VALUES (?, ?, ?, NULL, ?, ?, 'posted', "
+          "'stock_issue', ?, ?, ?, ?, 0)",
+          [
+            line.itemId,
+            -line.qtyBase,
+            draft.warehouseId,
+            exitValue,
+            unitCost,
+            docId,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        final moveId = (await customSelect(
+          'SELECT last_insert_rowid() AS id',
+        ).getSingle()).data['id'] as int;
+        if (exitValue > 0) {
+          moveLines.add(MoveLineDraft(
+            accountId: acc113,
+            creditMinor: exitValue,
+            currencyId: 1,
+            amountMinor: exitValue,
+            refStockMoveId: moveId,
+          ));
+        }
+        totalValue += exitValue;
+        await customStatement(
+          'INSERT INTO stock_balances (item_id, warehouse_id, qty_base, '
+          'total_value_minor, uuid, created_at, updated_at, is_deleted) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, 0) '
+          'ON CONFLICT(item_id, warehouse_id) DO UPDATE SET '
+          'qty_base = qty_base + excluded.qty_base, '
+          'total_value_minor = total_value_minor + excluded.total_value_minor, '
+          'updated_at = excluded.updated_at',
+          [
+            line.itemId,
+            draft.warehouseId,
+            -line.qtyBase,
+            -exitValue,
+            const Uuid().v4(),
+            now,
+            now,
+          ],
+        );
+        // لقطة التكلفة على سطر المستند — لقطة تاريخية مجمدة بمُشغّل
+        // الجدول (نمط F-140) فلا تحديث لاحق عليها.
+      }
+      // القيد — المقابل مدين بمجموع القيم / 113 دائن بحركاته — والخروج
+      // بلا قيمة (رصيد صفيري القيمة) بلا قيد.
+      if (totalValue > 0) {
+        moveLines.add(MoveLineDraft(
+          accountId: draft.counterAccountId,
+          debitMinor: totalValue,
+          currencyId: 1,
+          amountMinor: totalValue,
+        ));
+        final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+          journalId: await _journalIdByCodeTx('stock'),
+          dateText: draft.dateText,
+          narration: draft.narration ?? 'إذن إخراج مخزون (${draft.reason})',
+          refDocType: 'stock_issue',
+          refDocId: docId,
+          lines: moveLines,
+        ));
+        await _postMoveWithinTx(moveId, sequenceKind: 'move_stock');
+      }
+      await _recordDocEventTx(
+        entityType: 'stock_issue',
+        table: 'stock_issues',
+        entityId: docId,
+        action: 'posted',
+      );
+      return docId;
+    });
+  }
+
+  /// رأس الإذن — إدراج مرحّل برقمه من التسلسل السنوي داخل المعاملة
+  /// ذاتها (07 §1.9: لا رقم بلا ترحيل ناجح) بكل شطرَي الإذنين.
+  Future<int> _insertStockDocHeadWithinTx({
+    required String table,
+    required String dateColumn,
+    required String sequenceKind,
+    required String dateText,
+    required int warehouseId,
+    required String reason,
+    required int counterAccountId,
+    required String? narration,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final year = yearOfIsoDate(dateText);
+    final number = formatDocumentNumber(year,
+        await _advanceSequenceWithinTx(sequenceKind, year),
+        counterWidth: await _counterWidth());
+    await customStatement(
+      'INSERT INTO $table (number, $dateColumn, warehouse_id, reason, '
+      "counter_account_id, narration, state, uuid, created_at, updated_at, "
+      "is_deleted) VALUES (?, ?, ?, ?, ?, ?, 'posted', ?, ?, ?, 0)",
+      [
+        number,
+        dateText,
+        warehouseId,
+        reason.trim(),
+        counterAccountId,
+        narration,
+        const Uuid().v4(),
+        now,
+        now,
+      ],
+    );
+    return (await customSelect('SELECT last_insert_rowid() AS id')
+            .getSingle())
+        .data['id'] as int;
+  }
+
+  /// فحوص الإذنين بقاعدة البيانات — المستودع موجود نشط، والحساب المقابل
+  /// موجود مفعّل (F-209/F-210: من الحسابات المفعلة حصراً)، والأصناف
+  /// موجودة نشطة بضاعة (س-08)، والإخراج بحماية السالب (F-042) على ما
+  /// خُزّن لا على ما قيل.
+  Future<List<StockDocValidationError>> _collectStockDocErrors({
+    required String dateText,
+    required int warehouseId,
+    required String reason,
+    required int counterAccountId,
+    required List<StockDocLineDraft> lines,
+    required String direction,
+  }) async {
+    final errors = <StockDocValidationError>[];
+    final warehouse = await _warehouseByIdTx(warehouseId);
+    if (warehouse == null) {
+      errors.add(StockDocWarehouseMissing(warehouseId, direction: direction));
+    } else if (!warehouse.isActive) {
+      errors.add(StockDocWarehouseInactive(warehouse.name,
+          direction: direction));
+    }
+    final accRows = await customSelect(
+      'SELECT code, name, is_active FROM accounts '
+      'WHERE id = ? AND is_deleted = 0',
+      variables: [Variable.withInt(counterAccountId)],
+    ).get();
+    if (accRows.isEmpty) {
+      errors.add(StockDocCounterAccountMissing(counterAccountId,
+          direction: direction));
+    } else if ((accRows.first.data['is_active'] as int) != 1) {
+      final label = '${accRows.first.data['name']} '
+          '(${accRows.first.data['code']})';
+      errors.add(StockDocCounterAccountInactive(label, direction: direction));
+    }
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final item = await _itemByIdTx(line.itemId);
+      if (item == null) {
+        errors.add(StockDocItemMissing(line.itemId, i, direction: direction));
+        continue;
+      }
+      final label =
+          itemDisplayLabel(item['name'] as String, item['sku'] as String);
+      if ((item['is_active'] as int) != 1) {
+        errors.add(StockDocItemInactive(label, i, direction: direction));
+        continue;
+      }
+      if ((item['kind'] as String) != 'good') {
+        errors.add(StockDocItemNotGood(label, i, direction: direction));
+        continue;
+      }
+      if (direction == 'issue') {
+        final (qty, _) = await _stockBalanceTx(line.itemId, warehouseId);
+        if (line.qtyBase > qty) {
+          errors.add(StockDocStockInsufficient(
+            itemLabel: label,
+            onHandQty: qty,
+            requestedQty: line.qtyBase,
+            lineIndex: i,
+            direction: direction,
+          ));
+        }
+      }
+    }
+    return errors;
+  }
+
+  /// سجل إذن — الرؤوس باسم مستودعه وعدد أسطره ومجاميعه وسببه (قراءة
+  /// عرض خالصة — التخزين يقرأ لا يحسب) باتجاه واحد لكل نداء.
+  Future<List<StockDocListRow>> _stockDocsOf({
+    required String table,
+    required String linesTable,
+    required String dateColumn,
+  }) async {
+    final rows = await customSelect(
+      'SELECT d.id, d.number, d.$dateColumn AS doc_date, d.state, '
+      'd.reason, d.narration, d.warehouse_id, w.name AS warehouse_name, '
+      'COUNT(l.id) AS line_count, '
+      'COALESCE(SUM(l.qty_base), 0) AS total_qty, '
+      'COALESCE(SUM(l.value_base_minor), 0) AS total_value '
+      'FROM $table d '
+      'LEFT JOIN warehouses w ON w.id = d.warehouse_id '
+      'LEFT JOIN $linesTable l ON l.doc_id = d.id AND l.is_deleted = 0 '
+      'WHERE d.is_deleted = 0 '
+      'GROUP BY d.id ORDER BY d.id DESC',
+    ).get();
+    return [
+      for (final r in rows)
+        StockDocListRow(
+          id: r.data['id'] as int,
+          number: r.data['number'] as String,
+          dateText: r.data['doc_date'] as String,
+          state: r.data['state'] as String,
+          reason: r.data['reason'] as String,
+          narration: r.data['narration'] as String?,
+          warehouseId: r.data['warehouse_id'] as int,
+          warehouseName: r.data['warehouse_name'] as String?,
+          lineCount: r.data['line_count'] as int,
+          totalQtyBase: r.data['total_qty'] as int,
+          totalValueMinor: r.data['total_value'] as int,
+        ),
+    ];
+  }
+
+  /// سجل إذون الإدخال — الأحدث أولاً.
+  Future<List<StockDocListRow>> stockReceiptsOf() => _stockDocsOf(
+      table: 'stock_receipts',
+      linesTable: 'stock_receipt_lines',
+      dateColumn: 'receipt_date');
+
+  /// سجل إذون الإخراج — الأحدث أولاً.
+  Future<List<StockDocListRow>> stockIssuesOf() => _stockDocsOf(
+      table: 'stock_issues',
+      linesTable: 'stock_issue_lines',
+      dateColumn: 'issue_date');
+
+  /// أسطر إذن معين بتفصيله — للسجل والتفصيل (قراءة خالصة).
+  Future<List<StockDocLineRow>> _stockDocLinesOf({
+    required String linesTable,
+    required int docId,
+  }) async {
+    final rows = await customSelect(
+      'SELECT l.item_id, l.qty_base, l.unit_cost_base_minor, '
+      'l.value_base_minor, i.name, i.sku '
+      'FROM $linesTable l JOIN items i ON i.id = l.item_id '
+      'WHERE l.doc_id = ? AND l.is_deleted = 0 ORDER BY l.id',
+      variables: [Variable.withInt(docId)],
+    ).get();
+    return [
+      for (final r in rows)
+        StockDocLineRow(
+          itemId: r.data['item_id'] as int,
+          itemName: r.data['name'] as String?,
+          sku: r.data['sku'] as String?,
+          qtyBase: r.data['qty_base'] as int,
+          unitCostBaseMinor: r.data['unit_cost_base_minor'] as int,
+          valueBaseMinor: r.data['value_base_minor'] as int,
+        ),
+    ];
+  }
+
+  /// أسطر إذن إدخال بالمعرف.
+  Future<List<StockDocLineRow>> stockReceiptLinesOf(int docId) =>
+      _stockDocLinesOf(linesTable: 'stock_receipt_lines', docId: docId);
+
+  /// أسطر إذن إخراج بالمعرف.
+  Future<List<StockDocLineRow>> stockIssueLinesOf(int docId) =>
+      _stockDocLinesOf(linesTable: 'stock_issue_lines', docId: docId);
 
   // ═══ دفعة السندات والصندوق (5) — س-61..س-70 / D-083..D-087 معروضة ═══
   // المحرك على نمط دفعة الفواتير: المدقق البنيوي في المجال والفحوص
@@ -7420,6 +7997,11 @@ Future<void> _createClosingTriggers() async {
     // تحكمه الفترة خلافاً للتحويل بلا قيد — الإدراج المرحّل مباشرة
     // والانتقال جارٍ→مرحّل كلاهما محجوبان بفترة مقفلة.
     ('stock_counts', 'count_date', "'posted'"),
+    // الدفعة 26 (F-209/F-210 س85/D-189): الإذنان سابع وثامن المستندات
+    // القيدية — يُنشآن مرحّلين مباشرة (بلا مسودة) فالحاجز على الإدراج
+    // وحده، والانتقال state→posted محجوب احتياطاً كالجلسة.
+    ('stock_receipts', 'receipt_date', "'posted'"),
+    ('stock_issues', 'issue_date', "'posted'"),
   ];
   for (final (table, dateColumn, committedStates) in docTables) {
     final periodClosed = '(SELECT p.state FROM periods p '
@@ -7980,6 +8562,57 @@ class StockCountLineRow {
     required this.direction,
     required this.valueBaseMinor,
     required this.unitCostBaseMinor,
+  });
+}
+
+/// صف سجل إذن مخزون (إدخال أو إخراج — الدفعة 26) — الشكل واحد
+/// والاتجاه يحدده جدول المنبع، والسبب النصي الإلزامي بجانب الرقم.
+class StockDocListRow {
+  final int id;
+  final String number;
+  final String dateText;
+  final String state;
+
+  /// السبب النصي الإلزامي (F-209/F-210).
+  final String reason;
+  final String? narration;
+  final int warehouseId;
+  final String? warehouseName;
+  final int lineCount;
+  final int totalQtyBase;
+  final int totalValueMinor;
+
+  const StockDocListRow({
+    required this.id,
+    required this.number,
+    required this.dateText,
+    required this.state,
+    required this.reason,
+    this.narration,
+    required this.warehouseId,
+    this.warehouseName,
+    required this.lineCount,
+    required this.totalQtyBase,
+    required this.totalValueMinor,
+  });
+}
+
+/// سطر إذن مخزون بتفصيله — الكمية ولقطة كلفة الوحدة وقيمتها (نمط F-140).
+class StockDocLineRow {
+  final int itemId;
+  final String? itemName;
+  final String? sku;
+  final int qtyBase;
+  final int unitCostBaseMinor;
+  final int valueBaseMinor;
+
+  const StockDocLineRow({
+    required this.itemId,
+    this.itemName,
+    this.sku,
+    required this.qtyBase,
+    required this.unitCostBaseMinor,
+    required this.valueBaseMinor,
   });
 }
 

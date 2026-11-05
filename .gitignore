@@ -16,3 +16,6 @@ build/
 # مولّدات محلية لا تُلزم — CI يولّدها بنفسه (درس س71) واستكمالاً لعلاج ضجيج الشجرة (س69)
 packages/*/pubspec.lock
 packages/storage/lib/src/database.g.dart
+
+# مولدات منصة ويندوز المحلية — CI يولدها بنفسه (درس س71/س73، س85)
+packages/app/windows/flutter/
