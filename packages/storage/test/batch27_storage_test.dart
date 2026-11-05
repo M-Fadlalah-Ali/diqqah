@@ -100,7 +100,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 21);
+    expect(migrated.schemaVersion, 22);
     final tables = await migrated.customSelect(
       "SELECT name FROM sqlite_master WHERE type = 'table' "
       "AND name IN ('unit_groups', 'unit_group_levels', 'item_level_prices')",

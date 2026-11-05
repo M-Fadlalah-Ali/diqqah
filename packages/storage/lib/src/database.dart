@@ -816,7 +816,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1236,6 +1236,15 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               await customStatement(
                   'DROP TRIGGER IF EXISTS trg_invoice_lines_frozen_update');
               await _createInvoiceTriggers();
+            }
+            // 21→22 (ومن إصدار أدنى مباشرة): الدفعة 32 — الإقفال السنوي
+            // (س-21/F-077/D-068) بلا جداول ولا أعمدة جديدة: إعادة بناء
+            // حواجز الإقفال DROP+CREATE بإعفاء قيود fiscal_year على
+            // moves حصراً (نمط إعادة التعريف الموثق آمنة التكرار —
+            // درس v9/v21). وCREATE IF NOT EXISTS لا يستبدل القائم
+            // (درس v9 الموثق) فالـDROP إلزامي قبله.
+            if (version == 22) {
+              await _createClosingTriggers();
             }
           }
         },
@@ -2569,9 +2578,17 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// الشطر الداخلي للترحيل — داخل معاملة قائمة حصراً (المرجع نفسه):
   /// [sequenceKind] نوع التسلسل المركزي (قيود يدوية move_general وقيود
   /// المستندات من دفتر جهتها — D-080 معروض).
+  ///
+  /// [bypassClosedPeriod] استثناءٌ محركي موثق حصراً لقيود الإقفال
+  /// السنوي الثلاثة (الدفعة 32/س-21): تُرحَّل بتاريخ ذي الحجة داخل
+  /// فترتها المقفلة لأنها جزء من عملية الإقفال ذاتها — فلا مسار موازٍ
+  /// ولا قيد يُكتب خارج المحرك، والحاجز الباقي كاملٌ: الفترة يجب أن
+  /// توجد أصلاً (MoveNoPeriod باقٍ) والتوازن والترقيم والتجميد
+  /// والمُشغِّلات كما هي. القيود العادية لا تلمسه أبداً.
   Future<int> _postMoveWithinTx(
     int moveId, {
     required String sequenceKind,
+    bool bypassClosedPeriod = false,
   }) async {
       final moveRow = await (select(moves)
             ..where((t) => t.id.equals(moveId)))
@@ -2608,11 +2625,16 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       // (MoveClosedPeriod) عن تاريخ بلا فترة (MoveNoPeriod): رسالة
       // المالك الصادقة تختلف بين الحالتين (07 §1.5).
       final periodInfos = await ledgerPeriods();
-      final errors = validateMoveForPosting(
+      var errors = validateMoveForPosting(
         draft,
         index: index,
         periods: periodInfos,
       );
+      if (bypassClosedPeriod) {
+        // الاستثناء الموثق (الدفعة 32/س-21): رفض الفترة المقفلة فقط
+        // يسقط — وكل الأخطاء الأخرى باقية حرفاً.
+        errors = errors.where((e) => e is! MoveClosedPeriod).toList();
+      }
       if (errors.isNotEmpty) {
         throw LedgerValidationException(errors);
       }
@@ -8407,6 +8429,339 @@ Future<void> openPeriod(int periodId, {required String reason}) {
   });
 }
 
+// ═══ الدفعة 32 (تاسعة م2): الإقفال السنوي (س-21/F-077/D-068) ═══
+// ثلاثة قيود إغلاق ثم افتتاحية السنة الجديدة — كلها عبر المحرك الموحد
+// حصراً (07 §1.1) بترقيم move_general من دفتر القيد العام، وقيودُ
+// الإغلاق الثلاثة وحدها تُرحَّل بتاريخ ذي الحجة داخل فترتها المقفلة
+// (استثناء محركي موثق على _postMoveWithinTx — جزء من عملية الإقفال
+// ذاتها). السنة تُقفل «مقفلة» ولا ترحيل فيها أبداً والافتتاحية بسنة
+// جديدة شطرها الشهري مفتوح. حاضنتا المعاينة والنتيجة (YearClosePreview/
+// YearCloseResult) بالمجال النقي — التخزين يملؤها من قراءاته.
+
+/// قراءة أرصدة الحسابات الورقية حتى تاريخ ما (مجمّعةً من المرحّل) —
+/// مصدر الخطة النقية، والصياغة بالمجال لا هنا (نمط س-50).
+Future<List<YearCloseAccountBalance>> _yearCloseBalancesUntil(
+    String endDateText) async {
+  final rows = await customSelect(
+    'SELECT a.id AS id, a.code AS code, a.name AS name, a.type AS type, '
+    'a.normal_side AS normal_side, a.is_leaf AS is_leaf, '
+    'COALESCE(SUM(l.debit_minor), 0) AS debit_minor, '
+    'COALESCE(SUM(l.credit_minor), 0) AS credit_minor '
+    'FROM accounts a '
+    'LEFT JOIN move_lines l ON l.account_id = a.id '
+    'LEFT JOIN moves m ON m.id = l.move_id AND m.state = \'posted\' '
+    'AND m.date_text <= ?1 '
+    'GROUP BY a.id ORDER BY a.code',
+    variables: [Variable.withString(endDateText)],
+  ).get();
+  return [
+    for (final r in rows)
+      YearCloseAccountBalance(
+        accountId: r.data['id'] as int,
+        code: r.data['code'] as String,
+        name: r.data['name'] as String,
+        type: AccountType.values.byName(r.data['type'] as String),
+        normalSide: NormalSide.values.byName(r.data['normal_side'] as String),
+        isLeaf: (r.data['is_leaf'] as int) != 0,
+        debitMinor: r.data['debit_minor'] as int,
+        creditMinor: r.data['credit_minor'] as int,
+      ),
+  ];
+}
+
+/// جمع أخطاء الإقفال السنوي — مشترك بين المعاينة والتنفيذ فلا يُرى
+/// ما لا يُنفذ ولا يُنفذ ما لم يُرَ (نمط المعاينة D-183).
+Future<(List<YearCloseValidationError>, FiscalYear, List<Period>)>
+    _collectYearCloseErrors(int fiscalYearId) async {
+  final yearRows = await (select(fiscalYears)
+        ..where((t) => t.id.equals(fiscalYearId)))
+      .get();
+  if (yearRows.isEmpty) {
+    throw StateError('لا سنة مالية بالمعرف $fiscalYearId');
+  }
+  final year = yearRows.single;
+  final yearPeriods = await (select(periods)
+        ..where((t) => t.fiscalYearId.equals(fiscalYearId))
+        ..orderBy([(t) => OrderingTerm.asc(t.startDateText)]))
+      .get();
+  final errors = <YearCloseValidationError>[];
+  if (year.state == 'closed') {
+    errors.add(FiscalYearAlreadyClosed(year.name));
+  }
+  final openCount = yearPeriods.where((p) => p.state == 'open').length;
+  if (openCount > 0) {
+    errors.add(YearHasOpenPeriods(year.name, openCount));
+  }
+  final nextName =
+      (int.parse(year.name) + 1).toString();
+  final nextRows = await (select(fiscalYears)
+        ..where((t) => t.name.equals(nextName)))
+      .get();
+  if (nextRows.isNotEmpty) {
+    errors.add(NextFiscalYearExists(nextName));
+  }
+  final index = LedgerAccountIndex.build(await allLedgerAccounts());
+  if (index.byCode('332') == null) {
+    errors.add(const YearCloseAccountMissing('332'));
+  }
+  if (index.byCode('331') == null) {
+    errors.add(const YearCloseAccountMissing('331'));
+  }
+  return (errors, year, yearPeriods);
+}
+
+/// معاينة الإقفال السنوي — قراءة خالصة: الحالة والفترات والميزان
+/// والخطة الكاملة (س-21: «مراجعة ميزان المراجعة والنتيجة قبلية») —
+/// والخطة تُحسب دائماً ولو كانت الفترات مفتوحة فالمراجعة قبلية أول
+/// خطوة، أما الجاهزية فأخطاء الرفض هي التي تحكمها ([YearClosePreview.isReady]).
+Future<YearClosePreview> fiscalYearClosePreview(int fiscalYearId) async {
+  final (errors, year, yearPeriods) =
+      await _collectYearCloseErrors(fiscalYearId);
+  final balances = await _yearCloseBalancesUntil(year.endDateText);
+  final index = LedgerAccountIndex.build(await allLedgerAccounts());
+  final plan = buildYearClosePlan(
+    balances: balances,
+    resultAccountId: index.byCode('332')!.id,
+    retainedAccountId: index.byCode('331')!.id,
+  );
+  return YearClosePreview(
+    yearName: year.name,
+    startDateText: year.startDateText,
+    endDateText: year.endDateText,
+    yearClosed: year.state == 'closed',
+    periodsCount: yearPeriods.length,
+    openPeriodsCount: yearPeriods.where((p) => p.state == 'open').length,
+    trialTotals: await trialBalanceTotalsOf(),
+    plan: plan,
+  );
+}
+
+/// تنفيذ الإقفال السنوي (س-21/F-077) — معاملة ذرية واحدة:
+/// (1) قيد إغلاق الإيرادات: كل إيرادٍ يُصفَّر بالجانب المعاكس لرصيده /
+/// 332 يقابله. (2) قيد إغلاق المصروفات: 332 مدين / كل مصروفٍ يُصفَّر.
+/// (3) قيد الصافي: ربح 332 مدين / 331 دائن (خسارة بالعكس، صفر بلا
+/// قيد). (4) بذر السنة التالية بفتراتها الشهرية المفتوحة. (5) قيد
+/// الافتتاحية عليها بأرصدة الحسابات الميزانية — والنتيجة قدمت إلى
+/// 331 فدخلت ضمنها. (6) السنة «مقفلة» وحدث سجل موثق باللقطة الكاملة.
+Future<YearCloseResult> fiscalYearClose(int fiscalYearId) {
+  return transaction(() async {
+    final (errors, year, yearPeriods) =
+        await _collectYearCloseErrors(fiscalYearId);
+    if (errors.isNotEmpty) {
+      throw YearCloseException(errors);
+    }
+    final index = LedgerAccountIndex.build(await allLedgerAccounts());
+    final resultAccount = index.byCode('332')!;
+    final retainedAccount = index.byCode('331')!;
+    final plan = buildYearClosePlan(
+      balances: await _yearCloseBalancesUntil(year.endDateText),
+      resultAccountId: resultAccount.id,
+      retainedAccountId: retainedAccount.id,
+    );
+    final generalRows = await (select(journals)
+          ..where((t) => t.code.equals('general')))
+        .get();
+    if (generalRows.isEmpty) {
+      throw StateError('دفتر القيد العام غائب عن البذر');
+    }
+    final generalJournalId = generalRows.single.id;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    Future<int> postEngineMove({
+      required String dateText,
+      required String narration,
+      required List<YearCloseLine> accountLines,
+      required YearCloseLine? resultLine,
+      bool bypass = false,
+      String refType = 'fiscal_year',
+    }) async {
+      final lines = <MoveLineDraft>[
+        for (final l in accountLines)
+          MoveLineDraft(
+            accountId: l.accountId,
+            debitMinor: l.debitMinor,
+            creditMinor: l.creditMinor,
+          ),
+        if (resultLine != null)
+          MoveLineDraft(
+            accountId: resultLine.accountId,
+            debitMinor: resultLine.debitMinor,
+            creditMinor: resultLine.creditMinor,
+          ),
+      ];
+      final moveId = await _insertMoveDraftWithinTx(MoveDraft(
+        journalId: generalJournalId,
+        dateText: dateText,
+        narration: narration,
+        refDocType: refType,
+        refDocId: fiscalYearId,
+        lines: lines,
+      ));
+      return _postMoveWithinTx(
+        moveId,
+        sequenceKind: ledgerMoveSequenceKind,
+        bypassClosedPeriod: bypass,
+      );
+    }
+
+    // (1) إغلاق الإيرادات — 332 يستقبل صافيها دائناً (وبالنادر مديناً
+    // إن غلبته العكسية 42)، وصفرُ الصافي مع وجود أسطرٍ يعني تعادلها
+    // داخلياً فلا سطر لـ332 أصلاً — والقيد متوازن بالبناء في الحالين.
+    YearCloseLine? incomeCounterpart;
+    if (plan.incomeTotalMinor > 0) {
+      incomeCounterpart = YearCloseLine(
+          accountId: resultAccount.id, creditMinor: plan.incomeTotalMinor);
+    } else if (plan.incomeTotalMinor < 0) {
+      incomeCounterpart = YearCloseLine(
+          accountId: resultAccount.id,
+          debitMinor: -plan.incomeTotalMinor);
+    }
+    final incomeMoveId = plan.incomeLines.isEmpty
+        ? null
+        : await postEngineMove(
+            dateText: year.endDateText,
+            narration: 'إغلاق إيرادات سنة ${year.name}',
+            accountLines: plan.incomeLines,
+            resultLine: incomeCounterpart,
+            bypass: true,
+          );
+
+    // (2) إغلاق المصروفات — 332 مدين بصافيها (ودائناً إن غلبت العكسية
+    // 53) — والقيد متوازن بالبناء.
+    YearCloseLine? expenseCounterpart;
+    if (plan.expenseTotalMinor > 0) {
+      expenseCounterpart = YearCloseLine(
+          accountId: resultAccount.id, debitMinor: plan.expenseTotalMinor);
+    } else if (plan.expenseTotalMinor < 0) {
+      expenseCounterpart = YearCloseLine(
+          accountId: resultAccount.id,
+          creditMinor: -plan.expenseTotalMinor);
+    }
+    final expenseMoveId = plan.expenseLines.isEmpty
+        ? null
+        : await postEngineMove(
+            dateText: year.endDateText,
+            narration: 'إغلاق مصروفات سنة ${year.name}',
+            accountLines: plan.expenseLines,
+            resultLine: expenseCounterpart,
+            bypass: true,
+          );
+
+    // (3) الصافي إلى 331 — ربح 332 مدين/331 دائن والخسارة بالعكس.
+    int? netMoveId;
+    if (plan.netResultMinor != 0) {
+      final isProfit = plan.netResultMinor > 0;
+      final amount = plan.netResultMinor.abs();
+      netMoveId = await postEngineMove(
+        dateText: year.endDateText,
+        narration:
+            'نقل نتيجة سنة ${year.name} (${isProfit ? 'ربح' : 'خسارة'}) '
+            'إلى الأرباح المحتجزة',
+        accountLines: [
+          isProfit
+              ? YearCloseLine(
+                  accountId: retainedAccount.id, creditMinor: amount)
+              : YearCloseLine(
+                  accountId: retainedAccount.id, debitMinor: amount),
+        ],
+        resultLine: isProfit
+            ? YearCloseLine(
+                accountId: resultAccount.id, debitMinor: amount)
+            : YearCloseLine(
+                accountId: resultAccount.id, creditMinor: amount),
+        bypass: true,
+      );
+    }
+
+    // (4) بذر السنة التالية بفتراتها الشهرية المفتوحة (D-068).
+    final nextYear = int.parse(year.name) + 1;
+    final nextYearId = await into(fiscalYears).insert(
+      FiscalYearsCompanion.insert(
+        name: nextYear.toString(),
+        startDateText: '$nextYear-01-01',
+        endDateText: '$nextYear-12-31',
+        state: 'open',
+        uuid: const Uuid().v4(),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      ),
+    );
+    for (var month = 1; month <= 12; month++) {
+      final mm = month.toString().padLeft(2, '0');
+      final lastDay = DateTime(nextYear, month + 1, 0).day;
+      await into(periods).insert(
+        PeriodsCompanion.insert(
+          fiscalYearId: nextYearId,
+          startDateText: '$nextYear-$mm-01',
+          endDateText: '$nextYear-$mm-${lastDay.toString().padLeft(2, '0')}',
+          state: 'open',
+          uuid: const Uuid().v4(),
+          createdAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+    }
+
+    // (5) افتتاحية السنة الجديدة — بسنة مفتوحة فترحَّل بالمسار العادي
+    // بلا أي استثناء، و332 مستبعدة (صفر بعد الصافي) — ومرجعها المميز
+    // fiscal_year_opening كي تعرفه قراءة الميزانية وتتأسس منه بعد
+    // الإقفال (قيود الإغلاق الثلاثة بمرجع fiscal_year وحدها لا تُعتبر
+    // افتتاحاً).
+    int? openingMoveId;
+    if (plan.openingLines.isNotEmpty) {
+      openingMoveId = await postEngineMove(
+        dateText: '$nextYear-01-01',
+        narration: 'قيد افتتاح سنة $nextYear',
+        accountLines: plan.openingLines,
+        resultLine: null,
+        refType: 'fiscal_year_opening',
+      );
+    }
+
+    // (6) السنة «مقفلة» وحدث سجل موثق باللقطة الكاملة (07 §2.3).
+    await (update(fiscalYears)..where((t) => t.id.equals(fiscalYearId)))
+        .write(FiscalYearsCompanion(
+      state: const Value('closed'),
+      updatedAt: Value(now),
+    ));
+    await into(events).insert(
+      EventsCompanion.insert(
+        eventAt: now,
+        deviceId: await deviceId(),
+        entityType: 'fiscal_year',
+        entityId: Value(fiscalYearId),
+        action: 'fiscal_year_closed',
+        payload: jsonEncode(<String, Object?>{
+          'year_name': year.name,
+          'start_date_text': year.startDateText,
+          'end_date_text': year.endDateText,
+          'income_total_minor': plan.incomeTotalMinor,
+          'expense_total_minor': plan.expenseTotalMinor,
+          'net_result_minor': plan.netResultMinor,
+          'income_move_id': incomeMoveId,
+          'expense_move_id': expenseMoveId,
+          'net_move_id': netMoveId,
+          'opening_move_id': openingMoveId,
+          'next_year_id': nextYearId,
+          'periods_closed': yearPeriods.length,
+        }),
+        uuid: const Uuid().v4(),
+      ),
+    );
+    return YearCloseResult(
+      yearName: year.name,
+      nextYearName: nextYear.toString(),
+      closingMoveIds: [
+        if (incomeMoveId != null) incomeMoveId,
+        if (expenseMoveId != null) expenseMoveId,
+        if (netMoveId != null) netMoveId,
+      ],
+      openingMoveId: openingMoveId,
+      netResultMinor: plan.netResultMinor,
+      nextYearId: nextYearId,
+    );
+  });
+}
 /// ميزان المراجعة من المرحّل حصراً (س-71) — البناء بدالة المجال النقية
 /// ذاتها المستعملة بالاختبارات (نمط س-50: التخزين يقرأ ولا يحسب).
 Future<TrialBalanceReport> trialBalanceReport() async {
@@ -8419,6 +8774,124 @@ Future<TrialBalanceReport> trialBalanceReport() async {
       ),
   ];
   return buildTrialBalance(lines, await allLedgerAccounts());
+}
+
+/// قائمة الدخل بمدى تاريخ (الدفعة 33 — عاشرة م2: F-096 من أنواع
+/// الحسابات و07 §1.6) — من المرحّل حصراً بمدقق المدى حرساً أولاً
+/// (نمط تقارير المدى D-077)، والصياغة بالمجال النقي لا هنا.
+Future<IncomeStatement> incomeStatementReport({
+  required String fromText,
+  required String toText,
+}) async {
+  final errors = validateReportRange(fromText, toText);
+  if (errors.isNotEmpty) {
+    throw ReportValidationException(errors);
+  }
+  final rows = await customSelect(
+    'SELECT l.account_id AS account_id, '
+    'SUM(l.debit_minor) AS debit_minor, '
+    'SUM(l.credit_minor) AS credit_minor '
+    'FROM move_lines l JOIN moves m ON m.id = l.move_id '
+    "WHERE m.state = 'posted' "
+    'AND m.date_text >= ?1 AND m.date_text <= ?2 '
+    'GROUP BY l.account_id',
+    variables: [
+      Variable.withString(fromText),
+      Variable.withString(toText),
+    ],
+  ).get();
+  return buildIncomeStatement([
+    for (final r in rows)
+      LedgerLine(
+        moveId: 0,
+        accountId: r.data['account_id'] as int,
+        debitMinor: r.data['debit_minor'] as int,
+        creditMinor: r.data['credit_minor'] as int,
+      ),
+  ], await allLedgerAccounts());
+}
+
+/// الميزانية العمومية إلى تاريخ (الدفعة 33 — عاشرة م2: F-096) — من
+/// المرحّل حصراً بتاريخٍ مدقق حرساً أولاً، والصياغة بالمجال النقي،
+/// والنتيجة الجارية من حسابات النتيجة ذاتها حتى ذاك التاريخ.
+///
+/// التأسيس بعد الإقفال: إن وُجد قيدٌ افتتاحي (مرجع fiscal_year) بتاريخ
+/// ≤ التاريخ فالأرصدة تُبنى منه ثم بحركات ما بعده حصراً — فلا ازدواج
+/// بين سنةٍ افتتاحيتها قدمت أرصدتَها وسلفها (الافتتاحية تعيد إثبات
+/// ما قبلها فالتراكم الخام يضاعف)، وقبل أي إقفال فالتراكم الخام هو
+/// الأصح أصلاً.
+Future<BalanceSheet> balanceSheetReport({required String asOfText}) async {
+  if (!isValidIsoDate(asOfText)) {
+    throw ReportValidationException([ReportRangeInvalidDate(asOfText)]);
+  }
+  final openingRows = await customSelect(
+    "SELECT id, date_text FROM moves WHERE ref_doc_type = "
+    "'fiscal_year_opening' "
+    "AND state = 'posted' AND date_text <= ?1 "
+    'ORDER BY date_text DESC, id DESC LIMIT 1',
+    variables: [Variable.withString(asOfText)],
+  ).get();
+  final balances = <int, (int, int)>{};
+  void addRow(dynamic row) {
+    final id = row.data['account_id'] as int;
+    final (d, c) = balances[id] ?? (0, 0);
+    balances[id] = (
+      d + (row.data['debit_minor'] as int),
+      c + (row.data['credit_minor'] as int),
+    );
+  }
+
+  if (openingRows.isEmpty) {
+    final rows = await customSelect(
+      'SELECT l.account_id AS account_id, '
+      'SUM(l.debit_minor) AS debit_minor, '
+      'SUM(l.credit_minor) AS credit_minor '
+      'FROM move_lines l JOIN moves m ON m.id = l.move_id '
+      "WHERE m.state = 'posted' AND m.date_text <= ?1 "
+      'GROUP BY l.account_id',
+      variables: [Variable.withString(asOfText)],
+    ).get();
+    for (final row in rows) {
+      addRow(row);
+    }
+  } else {
+    final opening = openingRows.single;
+    final openingId = opening.data['id'] as int;
+    final openingDate = opening.data['date_text'] as String;
+    final baseRows = await customSelect(
+      'SELECT account_id, SUM(debit_minor) AS debit_minor, '
+      'SUM(credit_minor) AS credit_minor '
+      'FROM move_lines WHERE move_id = ?1 GROUP BY account_id',
+      variables: [Variable.withInt(openingId)],
+    ).get();
+    for (final row in baseRows) {
+      addRow(row);
+    }
+    final deltaRows = await customSelect(
+      'SELECT l.account_id AS account_id, '
+      'SUM(l.debit_minor) AS debit_minor, '
+      'SUM(l.credit_minor) AS credit_minor '
+      'FROM move_lines l JOIN moves m ON m.id = l.move_id '
+      "WHERE m.state = 'posted' AND m.date_text > ?1 "
+      'AND m.date_text <= ?2 GROUP BY l.account_id',
+      variables: [
+        Variable.withString(openingDate),
+        Variable.withString(asOfText),
+      ],
+    ).get();
+    for (final row in deltaRows) {
+      addRow(row);
+    }
+  }
+  return buildBalanceSheet([
+    for (final entry in balances.entries)
+      LedgerLine(
+        moveId: 0,
+        accountId: entry.key,
+        debitMinor: entry.value.$1,
+        creditMinor: entry.value.$2,
+      ),
+  ], await allLedgerAccounts());
 }
 
 // ═══ دفعة (13) الروابط التفرعية (س-143..س-147/D-135..D-137) ═══
@@ -8942,6 +9415,52 @@ Future<List<InventoryReportRow>> inventoryReport() async {
   ]);
 }
 
+/// مطابقة دفتر المخزون (الدفعة 31 — ثامنة م2: ربط المخزون بالدفتر) —
+/// قراءتان خامتان والصياغة بالمجال النقي: (أ) أسطر القيود المرحّلة
+/// الحاملة مرجع حركة مخزون مجمّعةً بالصنف (07 §3.1: الربط من الإصدار
+/// الأول — م-27 مؤكد)، (ب) قيمة المخزون من stock_balances مجمّعةً
+/// بالصنف — فثابت المطابقة D-067/F-178 يُعرض بالأرقام لا كلاماً.
+/// التخزين يقرأ ويجمع ولا يقرر — الاختلاف والاتجاهات بالمجال حصراً.
+Future<InventoryReconciliationReport> inventoryLedgerReconciliation() async {
+  final ledgerRows = await customSelect(
+    'SELECT sm.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    'SUM(ml.debit_minor) AS debit_minor, SUM(ml.credit_minor) AS credit_minor '
+    'FROM move_lines ml '
+    'JOIN moves m ON m.id = ml.move_id '
+    'JOIN stock_moves sm ON sm.id = ml.ref_stock_move_id '
+    'JOIN items i ON i.id = sm.item_id '
+    "WHERE m.state = 'posted' AND ml.ref_stock_move_id IS NOT NULL "
+    'AND sm.is_deleted = 0 '
+    'GROUP BY sm.item_id',
+  ).get();
+  final stockRows = await customSelect(
+    'SELECT sb.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    'SUM(sb.total_value_minor) AS value_minor '
+    'FROM stock_balances sb '
+    'JOIN items i ON i.id = sb.item_id '
+    'WHERE sb.is_deleted = 0 '
+    'GROUP BY sb.item_id',
+  ).get();
+  return buildInventoryLedgerReconciliation([
+    for (final r in ledgerRows)
+      InventoryLedgerRawRow(
+        itemId: r.data['item_id'] as int,
+        sku: r.data['sku'] as String,
+        name: r.data['name'] as String,
+        debitMinor: r.data['debit_minor'] as int,
+        creditMinor: r.data['credit_minor'] as int,
+      ),
+  ], [
+    for (final r in stockRows)
+      InventoryStockRawRow(
+        itemId: r.data['item_id'] as int,
+        sku: r.data['sku'] as String,
+        name: r.data['name'] as String,
+        valueMinor: r.data['value_minor'] as int,
+      ),
+  ]);
+}
+
 /// تقرير مبيعات وحركة الأصناف (س-75) — بيع ومردود بيع مرحّلان بمدى
 /// تاريخ، والقيم بالأساسية من سطور الفواتير المخزنة (D-089 معروض:
 /// حركة الشراء ظاهرة في المخزون والميزان، وتقرير المشتريات المستقل
@@ -9345,6 +9864,15 @@ Future<void> _createClosingTriggers() async {
         'AND p.start_date_text <= NEW.$dateColumn '
         'AND p.end_date_text >= NEW.$dateColumn LIMIT 1) = '
         "'closed'";
+    // الدفعة 32 (تاسعة م2/س-21/F-077): قيود الإقفال السنوي الثلاثة
+    // مرحّلة بتاريخ ذي الحجة داخل فترتها المقفلة لأنها جزء من عملية
+    // الإقفال ذاتها — فالإعفاء على جدول moves حصراً وبمرجع
+    // ref_doc_type = 'fiscal_year' حصراً، وهو ما يكتبه محرك الإقفال
+    // وحده (وحاجز المحرك bypassClosedPeriod مضبوط على المسار ذاته —
+    // قفلٌ مزدوج: لا مسار آخر يكتب المرجع ولا يمرر الاستثناء).
+    final exemption = table == 'moves'
+        ? " AND COALESCE(NEW.ref_doc_type,'') <> 'fiscal_year'"
+        : '';
     await customStatement(
         'DROP TRIGGER IF EXISTS trg_${table}_closed_period_insert');
     await customStatement(
@@ -9352,7 +9880,7 @@ Future<void> _createClosingTriggers() async {
     await customStatement(
       'CREATE TRIGGER trg_${table}_closed_period_insert '
       'BEFORE INSERT ON $table FOR EACH ROW '
-      "WHEN NEW.state IN ($committedStates) AND $periodClosed "
+      "WHEN NEW.state IN ($committedStates) AND $periodClosed$exemption "
       "BEGIN SELECT RAISE(ABORT, 'فترة مقفلة: لا ترحيل فيها "
       "(حاجز القاعدة)'); END",
     );
@@ -9360,7 +9888,7 @@ Future<void> _createClosingTriggers() async {
       'CREATE TRIGGER trg_${table}_closed_period_post '
       'BEFORE UPDATE OF state ON $table FOR EACH ROW '
       "WHEN NEW.state IN ($committedStates) "
-      'AND OLD.state NOT IN ($committedStates) AND $periodClosed '
+      'AND OLD.state NOT IN ($committedStates) AND $periodClosed$exemption '
       "BEGIN SELECT RAISE(ABORT, 'فترة مقفلة: لا ترحيل فيها "
       "(حاجز القاعدة)'); END",
     );

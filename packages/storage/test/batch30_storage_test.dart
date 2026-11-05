@@ -193,7 +193,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 21);
+    expect(migrated.schemaVersion, 22);
     final cols = await migrated.customSelect(
       "SELECT name FROM pragma_table_info('invoice_lines') "
       "WHERE name = 'unit_level_id'",

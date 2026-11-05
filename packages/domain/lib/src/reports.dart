@@ -482,3 +482,128 @@ class ReportValidationException implements Exception {
   String toString() =>
       'رفض مدقق التقرير: ${errors.map(describeReportValidationError).join('؛ ')}';
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 7. مطابقة دفتر المخزون (الدفعة 31 — ثامنة م2) — ربط المخزون بالدفتر
+//     بصرياً (07 §3.1 محسوم س1: الجرد الدائم بالمتوسط المرجح، وD-012
+//     محسومها): ثابت المطابقة D-067/§1.10 «رصيد حساب المخزون بالقيود ==
+//     قيمة المخزون بالحركات» يُعرض للمالك كما هو فلا يُطمَر ميل ولو كان
+//     مستحيلاً بنياً (نمط ميزان المراجعة F-068) — القراءة من أسطر القيود
+//     المرحّلة المربوطة بحركاتها (move_lines.ref_stock_move_id — 07 §3.1
+//     الالتزام المؤكد م-27) لا من أرصدة مخزنة ثانية.
+// ═══════════════════════════════════════════════════════════════════
+
+/// الخام: تجميع أسطر القيود المرحّلة الحاملة مرجع حركة مخزون لصنف —
+/// قيمته الدفترية مدينُه − دائنُه (الصنف يُشتق من الحركة المرجَعة لا
+/// من الحساب: الأسطر المربوطة هي عين ربط المخزون بالدفتر).
+class InventoryLedgerRawRow {
+  final int itemId;
+  final String sku;
+  final String name;
+  final int debitMinor;
+  final int creditMinor;
+
+  const InventoryLedgerRawRow({
+    required this.itemId,
+    required this.sku,
+    required this.name,
+    required this.debitMinor,
+    required this.creditMinor,
+  });
+}
+
+/// الخام: قيمة المخزون الفعلية لصنف من stock_balances مجمّعةً على
+/// مستودعاته (مجموع القيمة الإجمالية D-067 — كلفة الوحدة عرضٌ لا مصدر).
+class InventoryStockRawRow {
+  final int itemId;
+  final String sku;
+  final String name;
+  final int valueMinor;
+
+  const InventoryStockRawRow({
+    required this.itemId,
+    required this.sku,
+    required this.name,
+    required this.valueMinor,
+  });
+}
+
+/// صف المطابقة لصنف — والميل مشتق هنا لا مخزن: الدفتري − المخزني،
+/// والصنف بجهة واحدة فقط يظهر بطرف صفر فلا يخفى أي انفراد.
+class InventoryReconciliationRow {
+  final int itemId;
+  final String sku;
+  final String name;
+  final int ledgerValueMinor;
+  final int stockValueMinor;
+
+  const InventoryReconciliationRow({
+    required this.itemId,
+    required this.sku,
+    required this.name,
+    required this.ledgerValueMinor,
+    required this.stockValueMinor,
+  });
+
+  int get driftMinor => ledgerValueMinor - stockValueMinor;
+
+  bool get isMatched => driftMinor == 0;
+}
+
+/// تقرير المطابقة كاملاً — «متطابقة» تعني تطابق الثابت حرفاً على كل صنف
+/// وعلى الإجمالي معاً (F-178)، وإلا فالميل ظاهر بالأرقام لا كلاماً.
+class InventoryReconciliationReport {
+  final List<InventoryReconciliationRow> rows;
+  final int ledgerTotalMinor;
+  final int stockTotalMinor;
+
+  const InventoryReconciliationReport({
+    required this.rows,
+    required this.ledgerTotalMinor,
+    required this.stockTotalMinor,
+  });
+
+  int get driftMinor => ledgerTotalMinor - stockTotalMinor;
+
+  bool get isMatched => driftMinor == 0;
+}
+
+/// بناء المطابقة: الدمج بالصنف على الطرفين، والقيمة الدفترية مدينُه −
+/// دائنُه (اتجاه 113 الطبيعي مدين — 03 §2)، والصفوف بترتيب الكود —
+/// وبلا أي تدوير: القيم وحدات صغرى صحيحة كما خُزنت (D-067 فلا غبار).
+InventoryReconciliationReport buildInventoryLedgerReconciliation(
+  List<InventoryLedgerRawRow> ledgerRaws,
+  List<InventoryStockRawRow> stockRaws,
+) {
+  final ledgerByItem = <int, InventoryLedgerRawRow>{
+    for (final r in ledgerRaws) r.itemId: r,
+  };
+  final stockByItem = <int, InventoryStockRawRow>{
+    for (final r in stockRaws) r.itemId: r,
+  };
+  final itemIds = <int>{...ledgerByItem.keys, ...stockByItem.keys};
+  var ledgerTotal = 0;
+  var stockTotal = 0;
+  final rows = <InventoryReconciliationRow>[];
+  for (final id in itemIds) {
+    final ledger = ledgerByItem[id];
+    final stock = stockByItem[id];
+    final ledgerValue = ledger == null ? 0 : ledger.debitMinor - ledger.creditMinor;
+    final stockValue = stock == null ? 0 : stock.valueMinor;
+    ledgerTotal += ledgerValue;
+    stockTotal += stockValue;
+    rows.add(InventoryReconciliationRow(
+      itemId: id,
+      sku: (ledger?.sku ?? stock?.sku)!,
+      name: (ledger?.name ?? stock?.name)!,
+      ledgerValueMinor: ledgerValue,
+      stockValueMinor: stockValue,
+    ));
+  }
+  rows.sort((a, b) => a.sku.compareTo(b.sku));
+  return InventoryReconciliationReport(
+    rows: rows,
+    ledgerTotalMinor: ledgerTotal,
+    stockTotalMinor: stockTotal,
+  );
+}

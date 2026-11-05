@@ -116,6 +116,33 @@ class ReportsScreen extends StatelessWidget {
                 'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
             onTap: () => _open(context, _JournalBookView(db: db)),
           ),
+          // الدفعة 31 (ثامنة م2): ربط المخزون بالدفتر بصرياً — ثابت
+          // المطابقة D-067/F-178 معروض بالأرقام لا كلاماً (07 §3.1).
+          ListTile(
+            leading: const Icon(Icons.rule_outlined),
+            title: const Text('مطابقة دفتر المخزون'),
+            subtitle: const Text(
+                'رصيد المخزون بالقيود مقابل قيمته بالحركات — لكل صنف والإجمالي'),
+            onTap: () =>
+                _open(context, LedgerReconView(db: db)),
+          ),
+          // الدفعة 33 (عاشرة م2): القوائم المالية الأساسية F-096 من
+          // أنواع الحسابات و07 §1.6 — قائمة الدخل بمدى والميزانية
+          // العمومية إلى تاريخ.
+          ListTile(
+            leading: const Icon(Icons.receipt_long_outlined),
+            title: const Text('قائمة الدخل'),
+            subtitle: const Text(
+                'الإيرادات والمصروفات وصافي النتيجة بمدى تاريخ — من أنواع الحسابات'),
+            onTap: () => _open(context, IncomeStatementView(db: db)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.balance_outlined),
+            title: const Text('الميزانية العمومية'),
+            subtitle: const Text(
+                'الأصول والخصوم وحقوق الملكية إلى تاريخ — وبشارة المعادلة'),
+            onTap: () => _open(context, BalanceSheetView(db: db)),
+          ),
         ],
       ),
     );
@@ -1157,6 +1184,472 @@ class _JournalBookViewState extends State<_JournalBookView> {
 /// يُنشأ مرة واحدة لعمر الحالة لا في build — إنشاؤه في build يعيد
 /// FutureBuilder الانتظار عند كل إطار فيحلّق الجلب والتحديث بلا نهاية
 /// ويحرق pumpAndSettle بمهلته الكاملة.
+/// مطابقة دفتر المخزون (الدفعة 31 — ثامنة م2): ثابت المطابقة D-067/F-178
+/// معروض للمالك كما هو — «متطابقة ✓» ليرى الربط عيناً، و«ميل» بأرقامه
+/// إن ظهر مستحيلاً بنياً (نمط شارة الميزان F-068: الصدق لا الطمْر).
+/// الصفوف بترتيب الكود والإجماليان أسفلها — والتصدير والطباعة بصفوف
+/// العرض ذاتها (F-166: لا تقرير بلا زر CSV).
+class LedgerReconView extends StatelessWidget {
+  final DiqqahDatabase db;
+
+  const LedgerReconView({super.key, required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('مطابقة دفتر المخزون')),
+      body: FutureBuilder<InventoryReconciliationReport>(
+        future: db.inventoryLedgerReconciliation(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return _reportWait();
+          final report = snapshot.data!;
+          if (report.rows.isEmpty) {
+            return _reportEmpty('لا حركات مخزون بعد');
+          }
+          const docColumns = ['الصنف', 'بالقيود', 'بالحركات', 'الميل'];
+          final docRows = [
+            for (final row in report.rows)
+              [
+                '${row.sku} ${row.name}',
+                formatMinorAmount(row.ledgerValueMinor),
+                formatMinorAmount(row.stockValueMinor),
+                row.driftMinor == 0
+                    ? 'مطابق'
+                    : formatMinorAmount(row.driftMinor),
+              ],
+          ];
+          final footer = <(String, String)>[
+            ('إجمالي بالقيود', formatMinorAmount(report.ledgerTotalMinor)),
+            ('إجمالي بالحركات', formatMinorAmount(report.stockTotalMinor)),
+            ('الميل', report.isMatched
+                ? 'صفر'
+                : formatMinorAmount(report.driftMinor)),
+          ];
+          return Column(
+            children: [
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(context,
+                    title: 'مطابقة دفتر المخزون',
+                    columns: docColumns,
+                    rows: docRows,
+                    footer: footer),
+                onCsv: () => _exportReportCsv(context,
+                    title: 'مطابقة دفتر المخزون',
+                    columns: docColumns,
+                    rows: docRows,
+                    footer: footer),
+              ),
+              Card(
+                margin: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                color: report.isMatched ? Colors.green.shade50 : null,
+                child: ListTile(
+                  leading: Icon(
+                    report.isMatched
+                        ? Icons.check_circle_outline
+                        : Icons.warning_amber_outlined,
+                    color: report.isMatched ? Colors.green : Colors.orange,
+                  ),
+                  title: Text(report.isMatched
+                      ? 'المطابقة صحيحة ✓ — رصيد القيود يساوي قيمة المخزون (F-178)'
+                      : 'ميل دفتري! راجع فوراً'),
+                  subtitle: Text(
+                      'القيود: ${formatMinorAmount(report.ledgerTotalMinor)} · '
+                      'المخزون: ${formatMinorAmount(report.stockTotalMinor)}'),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final row in report.rows)
+                      ListTile(
+                        title: Text('${row.sku} ${row.name}'),
+                        subtitle: Text(
+                            'بالقيود: ${formatMinorAmount(row.ledgerValueMinor)} · '
+                            'بالحركات: ${formatMinorAmount(row.stockValueMinor)}'),
+                        trailing: Text(
+                          row.driftMinor == 0
+                              ? 'مطابق ✓'
+                              : 'ميل ${formatMinorAmount(row.driftMinor)}',
+                          style: TextStyle(
+                            color: row.isMatched ? Colors.green : Colors.orange,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// قائمة الدخل (الدفعة 33 — عاشرة م2/F-096): إيرادات ومصروفات وصافي
+/// بمدى تاريخ مدقَّق قبل القاعدة (D-077)، والمدى الافتراضي سنة البذور
+/// كاملة — والأرقام بوحداتها الصغرى كما تُخزن (D-092) والتصدير
+/// والطباعة بصفوف العرض ذاتها (F-166).
+class IncomeStatementView extends StatefulWidget {
+  final DiqqahDatabase db;
+
+  const IncomeStatementView({super.key, required this.db});
+
+  @override
+  State<IncomeStatementView> createState() => _IncomeStatementViewState();
+}
+
+class _IncomeStatementViewState extends State<IncomeStatementView> {
+  late Future<IncomeStatement> _future;
+  late final TextEditingController _from;
+  late final TextEditingController _to;
+  String? _rangeError;
+
+  @override
+  void initState() {
+    super.initState();
+    final year = DateTime.now().year;
+    _from = TextEditingController(text: '$year-01-01');
+    _to = TextEditingController(text: todayIsoDate());
+    _future = widget.db.incomeStatementReport(
+        fromText: _from.text, toText: _to.text);
+  }
+
+  @override
+  void dispose() {
+    _from.dispose();
+    _to.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    final errors = validateReportRange(_from.text.trim(), _to.text.trim());
+    setState(() {
+      _rangeError = errors.isEmpty
+          ? null
+          : errors.map(describeReportValidationError).join('؛ ');
+      if (errors.isEmpty) {
+        _future = widget.db.incomeStatementReport(
+            fromText: _from.text.trim(), toText: _to.text.trim());
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('قائمة الدخل')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _from,
+                  decoration: const InputDecoration(
+                      labelText: 'من (YYYY-MM-DD)'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _to,
+                  decoration: const InputDecoration(
+                      labelText: 'إلى (YYYY-MM-DD)'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _reload, child: const Text('عرض')),
+            ]),
+          ),
+          if (_rangeError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(_rangeError!,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error)),
+            ),
+          Expanded(
+            child: FutureBuilder<IncomeStatement>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return _reportWait();
+                final statement = snapshot.data!;
+                const docColumns = ['الحساب', 'البيان', 'المبلغ'];
+                final docRows = [
+                  for (final r in statement.revenueRows)
+                    [r.code, r.name, formatMinorAmount(r.amountMinor)],
+                  for (final r in statement.expenseRows)
+                    [
+                      r.code,
+                      r.name,
+                      formatMinorAmount(-r.amountMinor),
+                    ],
+                ];
+                final footer = <(String, String)>[
+                  ('إجمالي الإيرادات',
+                      formatMinorAmount(statement.totalRevenueMinor)),
+                  ('إجمالي المصروفات',
+                      formatMinorAmount(statement.totalExpenseMinor)),
+                  (
+                    'صافي النتيجة',
+                    statement.netResultMinor >= 0
+                        ? 'ربح ${formatMinorAmount(statement.netResultMinor)}'
+                        : 'خسارة ${formatMinorAmount(-statement.netResultMinor)}'
+                  ),
+                ];
+                return Column(
+                  children: [
+                    _ReportActionsBar(
+                      onPrint: () => _printReportDoc(context,
+                          title: 'قائمة الدخل',
+                          columns: docColumns,
+                          rows: docRows,
+                          footer: footer),
+                      onCsv: () => _exportReportCsv(context,
+                          title: 'قائمة الدخل',
+                          columns: docColumns,
+                          rows: docRows,
+                          footer: footer),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (final r in statement.revenueRows)
+                            ListTile(
+                              title: Text('${r.code} ${r.name}'),
+                              trailing: Text(
+                                  formatMinorAmount(r.amountMinor)),
+                            ),
+                          for (final r in statement.expenseRows)
+                            ListTile(
+                              title: Text('${r.code} ${r.name}'),
+                              trailing: Text(
+                                  '(${formatMinorAmount(r.amountMinor)})'),
+                            ),
+                          const Divider(),
+                          for (final (label, value) in footer)
+                            ListTile(
+                              title: Text(label,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
+                              trailing: Text(value,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// الميزانية العمومية إلى تاريخ (الدفعة 33 — عاشرة م2/F-096): أصول
+/// وخصوم وحقوق ملكية بنتيجتها الجارية، والمعادلة بشارتها الظاهرة
+/// (الصمتُ كذب — D-092 والصدقُ أولاً)، والتصدير والطباعة بصفوف
+/// العرض ذاتها (F-166).
+class BalanceSheetView extends StatefulWidget {
+  final DiqqahDatabase db;
+
+  const BalanceSheetView({super.key, required this.db});
+
+  @override
+  State<BalanceSheetView> createState() => _BalanceSheetViewState();
+}
+
+class _BalanceSheetViewState extends State<BalanceSheetView> {
+  late Future<BalanceSheet> _future;
+  late final TextEditingController _asOf;
+  String? _rangeError;
+
+  @override
+  void initState() {
+    super.initState();
+    _asOf = TextEditingController(text: todayIsoDate());
+    _future =
+        widget.db.balanceSheetReport(asOfText: _asOf.text);
+  }
+
+  @override
+  void dispose() {
+    _asOf.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    final text = _asOf.text.trim();
+    final valid = isValidIsoDate(text);
+    setState(() {
+      _rangeError = valid
+          ? null
+          : describeReportValidationError(ReportRangeInvalidDate(text));
+      if (valid) {
+        _future = widget.db.balanceSheetReport(asOfText: text);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('الميزانية العمومية')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _asOf,
+                  decoration: const InputDecoration(
+                      labelText: 'إلى تاريخ (YYYY-MM-DD)'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(onPressed: _reload, child: const Text('عرض')),
+            ]),
+          ),
+          if (_rangeError != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(_rangeError!,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.error)),
+            ),
+          Expanded(
+            child: FutureBuilder<BalanceSheet>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return _reportWait();
+                final sheet = snapshot.data!;
+                const docColumns = ['الحساب', 'البيان', 'الجانب', 'المبلغ'];
+                final docRows = [
+                  for (final r in sheet.assetRows)
+                    [
+                      r.code,
+                      r.name,
+                      r.isDebitSide ? 'مدين' : 'دائن',
+                      formatMinorAmount(r.magnitudeMinor),
+                    ],
+                  for (final r in sheet.liabilityRows)
+                    [
+                      r.code,
+                      r.name,
+                      r.isDebitSide ? 'مدين' : 'دائن',
+                      formatMinorAmount(r.magnitudeMinor),
+                    ],
+                  for (final r in sheet.equityRows)
+                    [
+                      r.code,
+                      r.name,
+                      r.isDebitSide ? 'مدين' : 'دائن',
+                      formatMinorAmount(r.magnitudeMinor),
+                    ],
+                ];
+                final footer = <(String, String)>[
+                  ('إجمالي الأصول', formatMinorAmount(sheet.totalAssetsMinor)),
+                  ('إجمالي الخصوم',
+                      formatMinorAmount(sheet.totalLiabilitiesMinor)),
+                  (
+                    'إجمالي حقوق الملكية',
+                    formatMinorAmount(sheet.totalEquityMinor),
+                  ),
+                ];
+                return Column(
+                  children: [
+                    _ReportActionsBar(
+                      onPrint: () => _printReportDoc(context,
+                          title: 'الميزانية العمومية',
+                          columns: docColumns,
+                          rows: docRows,
+                          footer: footer),
+                      onCsv: () => _exportReportCsv(context,
+                          title: 'الميزانية العمومية',
+                          columns: docColumns,
+                          rows: docRows,
+                          footer: footer),
+                    ),
+                    Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      color: sheet.isBalanced
+                          ? Colors.green.shade50
+                          : Theme.of(context).colorScheme.errorContainer,
+                      child: ListTile(
+                        leading: Icon(
+                          sheet.isBalanced
+                              ? Icons.check_circle_outline
+                              : Icons.warning_amber_outlined,
+                          color:
+                              sheet.isBalanced ? Colors.green : Colors.red,
+                        ),
+                        title: Text(sheet.isBalanced
+                            ? 'المعادلة متوازنة ✓ — الأصول تساوي الخصوم '
+                                'وحقوق الملكية'
+                            : 'المعادلة غير متوازنة — راجع فوراً!'),
+                        subtitle: Text(
+                            'الأصول ${formatMinorAmount(sheet.totalAssetsMinor)} '
+                            '· الخصوم ${formatMinorAmount(sheet.totalLiabilitiesMinor)} '
+                            '· الحقوق ${formatMinorAmount(sheet.totalEquityMinor)}'),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (final r in sheet.assetRows)
+                            ListTile(
+                              title: Text('${r.code} ${r.name}'),
+                              subtitle: const Text('أصول'),
+                              trailing: Text(
+                                  formatMinorAmount(r.magnitudeMinor)),
+                            ),
+                          for (final r in sheet.liabilityRows)
+                            ListTile(
+                              title: Text('${r.code} ${r.name}'),
+                              subtitle: const Text('خصوم'),
+                              trailing: Text(
+                                  formatMinorAmount(r.magnitudeMinor)),
+                            ),
+                          for (final r in sheet.equityRows)
+                            ListTile(
+                              title: Text('${r.code} ${r.name}'),
+                              subtitle: const Text('حقوق ملكية'),
+                              trailing: Text(
+                                  formatMinorAmount(r.magnitudeMinor)),
+                            ),
+                          if (sheet.currentResultMinor != 0)
+                            ListTile(
+                              title: const Text('نتيجة الفترة الجارية'),
+                              subtitle:
+                                  const Text('من حسابات النتيجة حتى التاريخ'),
+                              trailing: Text(
+                                  formatMinorAmount(
+                                      sheet.currentResultMinor)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class InventoryView extends StatefulWidget {
   final DiqqahDatabase db;
 
