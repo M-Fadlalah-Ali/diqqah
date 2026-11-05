@@ -215,7 +215,7 @@ void main() {
       final migrated = DiqqahDatabase(filePath: dbPath);
       addTearDown(migrated.close);
       await migrated.select(migrated.items).get();
-      expect(migrated.schemaVersion, 20);
+      expect(migrated.schemaVersion, 21);
       final bal = await migrated.customSelect(
         'SELECT qty_base, total_value_minor FROM stock_balances '
         'WHERE item_id = ?',

@@ -142,15 +142,28 @@ String formatPercentRate(int rate100) {
 
 /// سطر فاتورة خام كما يخرج من نموذج الإدخال (05 §4.1).
 ///
-/// - م1 الإدخال بالوحدة الأساسية حصراً (09 §2): [unitId] وحدة أساسية
-///   الصنف و[qtyBase] كمية بها — و`factor_at_entry` عمود بنية لم2 يُخزن
-///   1 (05 §3.2).
+/// - الإدخال بالوحدة الأساسية ([unitLevelId] = null): [unitId] وحدة
+///   أساسية الصنف و[qtyBase] كمية بها و[qty] كمية بها ذاتها (null =
+///   الأساسية فتساوي qtyBase).
+/// - الإدخال بمستوى تعبئة (س-10/D-031، الدفعة 30): [unitLevelId] معرف
+///   المستوى من مجموعة الصنف و[qty] الكمية بوحدة المستوى و[qtyBase]
+///   التحويل بعامل المستوى (qty × العامل) و[unitPriceMinor] سعر وحدة
+///   الاختيار من أسعار المستويات (لقطة السعر كما هي بلا مساس — D-187)
+///   — والوحدة المرجعية [unitId] تبقى الأساسية للعرض والدمج بالواحدة.
+/// - لقطة العامل `factor_at_entry` تُخزن وقت الترحيل بعامل المستوى
+///   المخزن (1 للأساسية) فلا يشوّه تغيير العامل لاحقاً التاريخ (05 §2).
 /// - [unitPriceMinor] و[discountMinor] بوحدة صغرى من عملة المستند (س7)،
-///   و[qtyBase] عدد صحيح بالوحدة الأساسية (غرام لا كيلو — 07 §2.1).
+///   والكميات أعداد صحيحة (غرام لا كيلو — 07 §2.1).
 class InvoiceLineDraft {
   final int itemId;
   final int unitId;
   final int qtyBase;
+
+  /// الكمية بوحدة الاختيار — null للإدخال بالأساسية فتساوي qtyBase.
+  final int? qty;
+
+  /// معرف مستوى التعبئة — null للإدخال بالوحدة الأساسية (س-10).
+  final int? unitLevelId;
   final int unitPriceMinor;
   final int discountMinor;
 
@@ -161,13 +174,18 @@ class InvoiceLineDraft {
     required this.itemId,
     required this.unitId,
     required this.qtyBase,
+    this.qty,
+    this.unitLevelId,
     this.unitPriceMinor = 0,
     this.discountMinor = 0,
     this.taxRate = 0,
   });
 
-  /// قيمة السطر قبل خصم الفاتورة الكلي بوحدة صغرى من عملة المستند.
-  int get grossDocMinor => qtyBase * unitPriceMinor - discountMinor;
+  /// قيمة السطر قبل خصم الفاتورة الكلي بوحدة صغرى من عملة المستند —
+  /// الكمية بوحدة الاختيار × سعر وحدة الاختيار (س-10: السعر يُدخل
+  /// لوحدة الاختيار مع عرض مكافئ الأساسية) — فبالأساسية مطابق القائم.
+  int get grossDocMinor =>
+      (qty ?? qtyBase) * unitPriceMinor - discountMinor;
 }
 
 /// مسودة فاتورة خام — ما يُدقق قبل أي كتابة (نمط القيود: MoveDraft).
@@ -280,7 +298,7 @@ class InvoiceTotals {
 /// بالمدقق InvoiceZeroTotal).
 InvoiceTotals computeInvoiceTotals(InvoiceDraft draft) {
   final gross = <int>[
-    for (final l in draft.lines) l.qtyBase * l.unitPriceMinor - l.discountMinor,
+    for (final l in draft.lines) l.grossDocMinor,
   ];
   var subtotal = 0;
   for (final g in gross) {
@@ -446,13 +464,38 @@ class InvoiceItemInactive extends InvoiceValidationError {
   const InvoiceItemInactive(this.lineIndex, this.itemLabel);
 }
 
-/// وحدة السطر ليست الوحدة الأساسية للصنف — م1 إدخال بالأساسية حصراً
-/// (09 §2/س-36) ووحدات التعبئة م2 (س-10).
+/// وحدة السطر ليست الوحدة الأساسية للصنف — الوحدة المرجعية للسطر
+/// الأساسية دائماً (س-10: مستوى التعبئة يحمله [InvoiceUnitLevelInvalid]
+/// والوحدة المرجعية تبقى للعرض والدمج بالواحدة).
 class InvoiceUnitMismatch extends InvoiceValidationError {
   final int lineIndex;
   final String itemLabel;
 
   const InvoiceUnitMismatch(this.lineIndex, this.itemLabel);
+}
+
+/// مستوى تعبئة غير صالح بالسطر — لا مستوى بهذا المعرف أو معطل، أو لا
+/// يعود لمجموعة الصنف المختارة، أو الصنف بلا مجموعة أصلاً (س-10:
+/// التعبئة من مجموعة الصنف حصراً).
+class InvoiceUnitLevelInvalid extends InvoiceValidationError {
+  final int lineIndex;
+  final String itemLabel;
+
+  const InvoiceUnitLevelInvalid(this.lineIndex, this.itemLabel);
+}
+
+/// الكمية بالأساسية لا تساوي كمية المستوى × عامل المستوى المخزن —
+/// اتساق اللقطة س-10: القيمة والتحويل والمخزون على qtyBase والسعر
+/// لوحدة الاختيار فلا يمر رقمٌ لا يلتقي حواملُه.
+class InvoiceUnitFactorMismatch extends InvoiceValidationError {
+  final int lineIndex;
+  final String itemLabel;
+  final int qty;
+  final int factor;
+  final int qtyBase;
+
+  const InvoiceUnitFactorMismatch(
+      this.lineIndex, this.itemLabel, this.qty, this.factor, this.qtyBase);
 }
 
 /// بضاعة بلا مستودع، أو مستودع غير معرف — «بضاعة بلا مستودع» مرفوضة
@@ -639,12 +682,18 @@ List<InvoiceValidationError> validateInvoiceDraftStructure(
       errors.add(InvoiceLineQtyInvalid(i, line.qtyBase));
       continue;
     }
+    // سطر بمستوى تعبئة: كمية المستوى نفسها موجبة حصراً — والتحويل
+    // بعامل المستوى فحص مرجعي شأن المحرك (القاعدة حاملة العامل).
+    if (line.qty != null && line.qty! <= 0) {
+      errors.add(InvoiceLineQtyInvalid(i, line.qty!));
+      continue;
+    }
     if (line.unitPriceMinor < 0) {
       errors.add(InvoiceLinePriceInvalid(i));
       continue;
     }
     if (line.discountMinor < 0 ||
-        line.discountMinor > line.qtyBase * line.unitPriceMinor) {
+        line.discountMinor > line.grossDocMinor) {
       errors.add(InvoiceLineDiscountInvalid(i));
     }
   }
@@ -696,7 +745,17 @@ String describeInvoiceValidationError(InvoiceValidationError error) {
     case InvoiceItemInactive(:final lineIndex, :final itemLabel):
       return 'السطر ${lineIndex + 1}: الصنف «$itemLabel» معطل';
     case InvoiceUnitMismatch(:final lineIndex, :final itemLabel):
-      return 'السطر ${lineIndex + 1}: وحدة السطر ليست الوحدة الأساسية للصنف «$itemLabel» — م1 بالأساسية حصراً';
+      return 'السطر ${lineIndex + 1}: وحدة السطر ليست الوحدة الأساسية للصنف «$itemLabel»';
+    case InvoiceUnitLevelInvalid(:final lineIndex, :final itemLabel):
+      return 'السطر ${lineIndex + 1}: وحدة التعبئة للصنف «$itemLabel» غير صالحة — المستوى لا يعود لمجموعة الصنف (س-10)';
+    case InvoiceUnitFactorMismatch(
+        :final lineIndex,
+        :final itemLabel,
+        :final qty,
+        :final factor,
+        :final qtyBase
+      ):
+      return 'السطر ${lineIndex + 1}: كمية «$itemLabel» بالأساسية ($qtyBase) لا تساوي $qty × $factor — التحويل بعامل المستوى (س-10)';
     case InvoiceServiceInPurchase(:final lineIndex, :final itemLabel):
       return 'السطر ${lineIndex + 1}: الخدمة «$itemLabel» لا تُشترى بفاتورة شراء في هذه الدفعة — حساب المصروف يُعرض لاحقاً';
     case InvoiceBundleReturnUnsupported(:final lineIndex, :final itemLabel):

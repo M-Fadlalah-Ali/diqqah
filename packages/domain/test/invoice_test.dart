@@ -358,4 +358,94 @@ void main() {
       );
     });
   });
+
+  group('لقطة الوحدة والعامل (س-10/D-031، الدفعة 30)', () {
+    test('قيمة السطر بالتعبئة: كمية المستوى × سعر وحدة الاختيار حصراً — '
+        'لا qtyBase × السعر (المثال الحرفي للسير 06)', () {
+      final line = InvoiceLineDraft(
+        itemId: 1,
+        unitId: 1,
+        qty: 3,
+        unitLevelId: 7,
+        qtyBase: 36,
+        unitPriceMinor: 12000,
+      );
+      expect(line.grossDocMinor, 36000, reason: '3 علب × 12,000 — و36 × '
+          '12,000 كان ليعطي 432,000 كذباً');
+      final totals = computeInvoiceTotals(InvoiceDraft(
+        kind: InvoiceKind.sale,
+        dateText: '2026-03-15',
+        cashBoxId: 2,
+        lines: [line],
+      ));
+      expect(totals.subtotalDocMinor, 36000);
+      expect(totals.totalDocMinor, 36000);
+      expect(totals.lines.single.line.qtyBase, 36,
+          reason: 'المحرك المخزني على الأساسية كما هي');
+    });
+
+    test('بالأساسية مطابق القائم حرفاً: qty فارغة فالقيمة qtyBase × السعر', () {
+      final line = InvoiceLineDraft(
+          itemId: 1, unitId: 1, qtyBase: 36, unitPriceMinor: 1000);
+      expect(line.grossDocMinor, 36000);
+    });
+
+    test('كمية المستوى صفر أو سالبة مرفوضة بمدقق البنية برسالة الكمية', () {
+      final errors = validateInvoiceDraftStructure(InvoiceDraft(
+        kind: InvoiceKind.sale,
+        dateText: '2026-03-15',
+        cashBoxId: 2,
+        lines: [
+          InvoiceLineDraft(
+              itemId: 1,
+              unitId: 1,
+              qtyBase: 24,
+              qty: 0,
+              unitLevelId: 7,
+              unitPriceMinor: 1000),
+        ],
+      ));
+      expect(errors, contains(isA<InvoiceLineQtyInvalid>()));
+    });
+
+    test('خصم السطر يتقاس على القيمة بالتعبئة لا على qtyBase × السعر', () {
+      // قيمة السطر 3 × 12,000 = 36,000 — خصم 40,000 يتجاوزها رغم أن
+      // 36 × 12,000 = 432,000 كان سيمرّه لو بقي الضرب القديم.
+      final errors = validateInvoiceDraftStructure(InvoiceDraft(
+        kind: InvoiceKind.sale,
+        dateText: '2026-03-15',
+        cashBoxId: 2,
+        lines: [
+          InvoiceLineDraft(
+              itemId: 1,
+              unitId: 1,
+              qtyBase: 36,
+              qty: 3,
+              unitLevelId: 7,
+              unitPriceMinor: 12000,
+              discountMinor: 40000),
+        ],
+      ));
+      expect(errors, contains(isA<InvoiceLineDiscountInvalid>()));
+    });
+
+    test('أوصاف أخطاء الوحدة تحمل السطر والمستوى والعامل (رسائل صادقة)', () {
+      expect(
+        describeInvoiceValidationError(
+            const InvoiceUnitLevelInvalid(0, 'زيت (Z-100)')),
+        contains('لا يعود لمجموعة الصنف'),
+      );
+      expect(
+        describeInvoiceValidationError(
+            const InvoiceUnitFactorMismatch(0, 'زيت (Z-100)', 2, 12, 36)),
+        contains('2 × 12'),
+        reason: 'الرسالة تُظهر الكمية والعامل والمخالفة معاً',
+      );
+      expect(
+        describeInvoiceValidationError(
+            const InvoiceUnitFactorMismatch(0, 'زيت (Z-100)', 2, 12, 36)),
+        contains('36'),
+      );
+    });
+  });
 }

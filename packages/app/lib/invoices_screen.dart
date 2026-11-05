@@ -82,6 +82,10 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   // س-148/D-138 (دفعة 14): أسماء الوحدات — الخلاصة «بالواحدة».
   final units = await db.select(db.units).get();
   final unitNameById = {for (final u in units) u.id: u.name};
+  // س-10 (الدفعة 30): أسماء مستويات التعبئة — الخلاصة «بالواحدة»
+  // بوحدة اللقطة لكل سطر.
+  final groupLevels = await db.select(db.unitGroupLevels).get();
+  final levelNameById = {for (final l in groupLevels) l.id: l.name};
   final kind = InvoiceKind.fromStorage(invoice.kind);
   final isSale = kind == InvoiceKind.sale;
 
@@ -125,7 +129,9 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     for (final line in lines)
       [
         itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
-        '${line.qtyBase}',
+        // س-10 (الدفعة 30): الكمية بوحدة الاختيار — والسعر لوحتها فلا
+        // يُعرض بالأساسية رقمٌ لا يلتقي سعرُه (وبالأساسية مطابق القائم).
+        '${line.qty}',
         formatMinorAmount(line.unitPriceMinor),
         formatMinorAmount(line.lineTotalDocMinor),
         line.delivered
@@ -141,11 +147,24 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     // س-148/D-138: الافتراضي «مجموع الكميات بالواحدة» بقاعدة الوحدة
     // الموثقة — والقسيمة المطبوعة على الافتراضي دائماً (القائمة
     // المنسدلة عرضُ شاشة لا سياسة مطبوع).
-    final totalQty = quantitiesByUnit(
-        [for (final l in lines) (l.qtyBase, unitNameById[l.unitId] ?? '')]);
+    final totalQty = quantitiesByUnit([
+      for (final l in lines)
+        (
+          l.qty,
+          l.unitLevelId == null
+              ? (unitNameById[l.unitId] ?? '')
+              : (levelNameById[l.unitLevelId] ?? '')
+        ),
+    ]);
     final deliveredQty = quantitiesByUnit([
       for (final l in lines)
-        if (l.delivered) (l.qtyBase, unitNameById[l.unitId] ?? ''),
+        if (l.delivered)
+          (
+            l.qty,
+            l.unitLevelId == null
+                ? (unitNameById[l.unitId] ?? '')
+                : (levelNameById[l.unitLevelId] ?? '')
+          ),
     ]);
     summary = invoiceDeliverySummary(
       deliveredLines: lines.where((l) => l.delivered).length,
@@ -664,6 +683,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 class _LineUi {
   int? itemId;
 
+  /// مستوى التعبئة المختار للسطر — null للوحدة الأساسية (س-10/D-031:
+  /// لقطة الوحدة والعامل في السطر). تغيير الصنف يعيده للأساسية.
+  int? unitLevelId;
+
   /// وسم مصدر السعر حين جاء اقتراح «آخر سعر فعلي» (F-146/D-183) —
   /// يُعرض صغيراً ليصدر الاقتراح من أين جاء، ويصمت حين عدّله الإنسان
   /// أو جاء من المرجعي كالعادة.
@@ -759,6 +782,13 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   List<Item> _items = [];
   Map<int, String> _unitNames = {};
 
+  /// س-10 (الدفعة 30): مستويات التعبئة وأسعارها لأصناف النموذج —
+  /// قائمة الوحدة بالسطر وتعبئة سعر وحدة الاختيار (سعر المخزن لقطة
+  /// الدفعة 27 وغيابه اشتقاق لحظي من الأساسية بعامل المستوى).
+  List<UnitGroupLevel> _groupLevels = const [];
+  Map<int, Map<int, (int, int)>> _levelPrices = {};
+  Map<int, String> _levelNameById = {};
+
   /// فهرس الباركودات (س-132 — D-126): البحث السريع والمطابقة الكاملة
   /// بقارئ البلوتوث.
   Map<int, List<String>> _barcodesByItem = {};
@@ -818,6 +848,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final currencies = await widget.db.currenciesOf();
     final items = await widget.db.select(widget.db.items).get();
     final units = await widget.db.select(widget.db.units).get();
+    // س-10 (الدفعة 30): مستويات المجموعات وأسعار الأصناف بها — قراءة
+    // واحدة عند الفتح كأخواتها (درس لا Future داخل build).
+    final groupLevels =
+        await widget.db.select(widget.db.unitGroupLevels).get();
+    final levelPrices = await widget.db
+        .itemLevelPricesForItems([for (final i in items) i.id]);
     // س-132: فهرس الباركودات للبحث السريع — قراءة واحدة عند الفتح،
     // والإضافة من البطاقات تتجدد بفتح جديد للنموذج.
     final barcodes = await widget.db.barcodeIndexByItem();
@@ -847,6 +883,11 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _currencies = currencies;
       _items = items.where((i) => i.isActive).toList();
       _unitNames = {for (final u in units) u.id: u.name};
+      _groupLevels = groupLevels;
+      _levelPrices = levelPrices;
+      _levelNameById = {
+        for (final l in groupLevels) l.id: l.name,
+      };
       _barcodesByItem = barcodes;
       _stockAvail = avail;
       // الافتراضي المعقول لصاحب المنشأة: أول صندوق وأول مستودع نشط —
@@ -925,6 +966,23 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     return null;
   }
 
+  /// مستويات مجموعة الصنف — مرشّحو قائمة الوحدة بالسطر (س-10).
+  List<UnitGroupLevel> _levelsOfItem(int? itemId) {
+    final gid = _itemOf(itemId)?.unitGroupId;
+    if (gid == null) return const [];
+    return _groupLevels.where((l) => l.groupId == gid).toList();
+  }
+
+  /// عامل مستوى التعبئة من الحمولة الأولية — والأساسية 1 (المستويات
+  /// لا تُحذف نمط المراجع 03 §6-3 فالغائب فقط بيانات تالفة يعامل
+  /// كالأساسية حفاظاً على المسار).
+  int _factorOfLevel(int levelId) {
+    for (final l in _groupLevels) {
+      if (l.id == levelId) return l.factor;
+    }
+    return 1;
+  }
+
   /// لقطة الصرف: الأساسية لقطتها المحايدة (D-082) وغيرها من الحقل
   /// — والفراغ صفر يلتقطه مدقق البنية برسالته (InvoiceFxRateInvalid).
   int get _fx => _currencyId == 1
@@ -955,8 +1013,35 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
             : null;
   }
 
-  /// إجمالي السطر الخام — الكمية × السعر − خصم السطر (س-120/D-115)
-  /// قبل نصيبه من خصم الفاتورة الكلي، ويُعرض لحظياً في بطاقة البند.
+  /// تعبئة سعر وحدة الاختيار (س-10): من أسعار المستويات المخزنة (لقطة
+  /// الدفعة 27 — آلياً مشتقة ويدوياً مكتوبة)، وغيابها اشتقاق لحظي من
+  /// الأساسية بعامل المستوى بمحرك المجال ذاته (D-187) — واقتراحٌ
+  /// بقبول بشري كالسعر الافتراضي، والتعديل بعده رقم الإنسان هو رقمه
+  /// (لقطة السعر في سطر المستند كما هي بلا مساس — D-187).
+  void _fillLevelPrice(_LineUi line) {
+    final levelId = line.unitLevelId;
+    if (levelId == null) {
+      _fillDefaultPrice(line);
+      return;
+    }
+    final factor = _factorOfLevel(levelId);
+    final stored = _levelPrices[line.itemId]?[levelId];
+    final item = _itemOf(line.itemId);
+    final baseMinor = _kind.isSalesSide
+        ? (item?.salePriceMinor ?? 0)
+        : (item?.purchasePriceMinor ?? 0);
+    final minor = stored != null
+        ? (_kind.isSalesSide ? stored.$1 : stored.$2)
+        : derivedLevelPriceMinor(basePriceMinor: baseMinor, factor: factor);
+    line.price.text = minor > 0 ? groupDigits(minor) : '';
+    line.priceSource = stored != null
+        ? 'سعر ${_levelNameById[levelId] ?? 'المستوى'} المخزن'
+        : 'مشتق من الأساسية ×$factor';
+  }
+
+  /// إجمالي السطر الخام — الكمية بوحدة الاختيار × سعرها − خصم السطر
+  /// (س-120/D-115 وس-10: السعر لوحدة الاختيار) — وبالأساسية مطابق
+  /// القائم، ويُعرض لحظياً في بطاقة البند.
   int _lineGrossMinor(_LineUi line) =>
       _parsed(line.qty) * _parsed(line.price) - _parsed(line.discount);
 
@@ -976,10 +1061,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   }
 
   /// تعيين صنف بند بأي مسار (القائمة أو البحث السريع) — تعبئة السعر
-  /// الافتراضي س-108 سارية في كل المسارات.
+  /// الافتراضي س-108 سارية في كل المسارات، وتغيير الصنف يعيد الوحدة
+  /// للأساسية (س-10: مستوى مجموعةٍ آخر لا يصح على صنفٍ آخر).
   void _setLineItem(_LineUi line, int itemId) {
     setState(() {
       line.itemId = itemId;
+      line.unitLevelId = null;
       _fillDefaultPrice(line);
     });
   }
@@ -1073,7 +1160,15 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         InvoiceLineDraft(
           itemId: l.itemId ?? 0,
           unitId: _baseUnitIdOf(l.itemId) ?? 0,
-          qtyBase: _parsed(l.qty),
+          // س-10 (الدفعة 30): بالتعبئة الكمية بوحدة المستوى والأساسية
+          // بعاملها واللقطة بالمستوى، وبالأساسية ما اعتاد م1 حرفاً
+          // (qty = null فتساوي qtyBase).
+          qty: l.unitLevelId == null ? null : _parsed(l.qty),
+          unitLevelId: l.unitLevelId,
+          qtyBase: _parsed(l.qty) *
+              (l.unitLevelId == null
+                  ? 1
+                  : _factorOfLevel(l.unitLevelId!)),
           unitPriceMinor: _parsed(l.price),
           discountMinor: _parsed(l.discount),
         ),
@@ -1576,6 +1671,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
               ],
               onChanged: (value) => setState(() {
                 line.itemId = value;
+                line.unitLevelId = null; // صنف آخر يعيد الوحدة للأساسية
                 _fillDefaultPrice(line); // س-108: السعر الافتراضي يُعبأ
               }),
             ),
@@ -1608,7 +1704,23 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                           if (unitName.isNotEmpty)
                             Align(
                               alignment: Alignment.centerLeft,
-                              child: Text('الوحدة: $unitName (الأساسية)'),
+                              child: Text(
+                                  line.unitLevelId == null
+                                      ? 'الوحدة: $unitName (الأساسية)'
+                                      : 'الوحدة: ${_levelNameById[line.unitLevelId] ?? ''} ×${_factorOfLevel(line.unitLevelId!)}',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                            ),
+                          if (line.unitLevelId != null &&
+                              _parsed(line.qty) > 0)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                // س-10 (السير الموثق 06): السعر يُدخل لوحدة
+                                // الاختيار مع عرض مكافئ الأساسية — والفرق
+                                // الحي بonChanged (درس س79).
+                                'المكافئ بالأساسية: ${groupDigits(_parsed(line.qty) * _factorOfLevel(line.unitLevelId!))} $unitName',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
                             ),
                           Align(
                             alignment: Alignment.centerLeft,
@@ -1623,6 +1735,34 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            if (line.itemId != null &&
+                _levelsOfItem(line.itemId).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: DropdownButtonFormField<int?>(
+                  // س-10 (الدفعة 30): قائمة الوحدة — الأساسية ومستوياها،
+                  // واختيار المستوى يعبّئ سعره ويظهر المكافئ اللحظي.
+                  initialValue: line.unitLevelId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'الوحدة'),
+                  items: [
+                    DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text(
+                          '${_unitNames[_baseUnitIdOf(line.itemId)] ?? 'الأساسية'} (الأساسية)'),
+                    ),
+                    for (final lv in _levelsOfItem(line.itemId))
+                      DropdownMenuItem<int?>(
+                        value: lv.id,
+                        child: Text('${lv.name} ×${lv.factor}'),
+                      ),
+                  ],
+                  onChanged: (value) => setState(() {
+                    line.unitLevelId = value;
+                    _fillLevelPrice(line);
+                  }),
                 ),
               ),
             Row(
@@ -1641,8 +1781,14 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         // «الفاصلة أيضاً تشمل الكميات والمبالغ»).
                         ThousandsSeparatorInputFormatter(),
                       ],
-                      decoration:
-                          const InputDecoration(labelText: 'الكمية'),
+                      decoration: InputDecoration(
+                        labelText: 'الكمية',
+                        // س-10: الكمية بوحدة الاختيار حينها — واسمها على
+                        // الحقل ليُدخل بها لا بالأساسية.
+                        helperText: line.unitLevelId == null
+                            ? null
+                            : 'بوحدة ${_levelNameById[line.unitLevelId] ?? ''}',
+                      ),
                       onSubmitted: (_) => FocusScope.of(context)
                           .requestFocus(line.priceFocus),
                     ),
@@ -1781,6 +1927,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   DeliveryBasis _deliveryBasis = DeliveryBasis.quantities;
   Map<int, String> _unitNames = {};
 
+  /// س-10 (الدفعة 30): أسماء مستويات التعبئة — الخلاصة «بالواحدة»
+  /// بوحدة اللقطة لكل سطر.
+  Map<int, String> _levelNameById = {};
+
   /// الموردون النشطون لخانة «المورد المسؤول» (س-138/D-132).
   List<Party> _suppliers = [];
 
@@ -1828,6 +1978,9 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       final docSymbol = currencySymbol(docCode);
       // س-148/D-138: أسماء الوحدات لتجميع عدّاد التسليم «بالواحدة».
       final units = await widget.db.select(widget.db.units).get();
+      // س-10 (الدفعة 30): أسماء المستويات لتجميع أسطر التعبئة بوحدتها.
+      final groupLevels =
+          await widget.db.select(widget.db.unitGroupLevels).get();
       final suggestions = <int, int>{};
       for (final line in lines) {
         final s = await widget.db
@@ -1844,6 +1997,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             .toList();
         _supplierSuggestion = suggestions;
         _unitNames = {for (final u in units) u.id: u.name};
+        _levelNameById = {for (final l in groupLevels) l.id: l.name};
         _covered = covered;
         _docSuffix = docSymbol.isEmpty ? 'بعملة المستند' : docSymbol;
         _baseSymbol = currencySymbol(baseCode);
@@ -2050,15 +2204,22 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     );
   }
 
+  /// س-10 (الدفعة 30): وحدة سطر الفاتورة بلقطته — مستوى التعبئة عند
+  /// الإدخال بها والأساسية وإلا، فتتجمع الكميات بوحدة كل سطر لا
+  /// بالأساسية كلها (نمط D-138 «بالواحدة» على لقطة السطر).
+  String _lineUnitLabel(InvoiceLineDocument l) => l.unitLevelId == null
+      ? (_unitNames[l.unitId] ?? '')
+      : (_levelNameById[l.unitLevelId] ?? '');
+
   /// س-148/D-138: عدّاد التسليم وقائمة التبديل في نفس السطر —
   /// النص بأساس العد المختار والقائمة بخيارَيها (الكميات/الأسطر).
   Widget _deliveryCounterRow() {
     final deliveredQty = quantitiesByUnit([
       for (final l in _lines)
-        if (l.delivered) (l.qtyBase, _unitNames[l.unitId] ?? ''),
+        if (l.delivered) (l.qty, _lineUnitLabel(l)),
     ]);
     final totalQty = quantitiesByUnit(
-        [for (final l in _lines) (l.qtyBase, _unitNames[l.unitId] ?? '')]);
+        [for (final l in _lines) (l.qty, _lineUnitLabel(l))]);
     final text = invoiceDeliverySummary(
       deliveredLines: _lines.where((l) => l.delivered).length,
       totalLines: _lines.length,
@@ -2092,7 +2253,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final item = _itemById[line.itemId];
     final itemName = item?.name ?? 'صنف #${line.itemId}';
     final title =
-        '$itemName — ${line.qtyBase} × ${formatMinorAmount(line.unitPriceMinor)}';
+        '$itemName — ${line.qty} × ${formatMinorAmount(line.unitPriceMinor)}';
     final isSale = _isSale;
     final kind = _invoice == null
         ? InvoiceKind.sale

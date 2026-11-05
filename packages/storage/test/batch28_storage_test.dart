@@ -223,7 +223,7 @@ void main() {
       final migrated = DiqqahDatabase(filePath: dbPath);
       addTearDown(migrated.close);
       await migrated.select(migrated.items).get();
-      expect(migrated.schemaVersion, 20);
+      expect(migrated.schemaVersion, 21);
       final tables = await migrated.customSelect(
         "SELECT name FROM sqlite_master WHERE type = 'table' "
         "AND name = 'bundle_components'",
@@ -242,7 +242,7 @@ void main() {
       final third = DiqqahDatabase(filePath: dbPath);
       addTearDown(third.close);
       await third.select(third.items).get();
-      expect(third.schemaVersion, 20);
+      expect(third.schemaVersion, 21);
       expect(await third.select(third.items).get(), hasLength(1));
     });
   });

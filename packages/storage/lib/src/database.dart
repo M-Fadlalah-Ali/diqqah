@@ -816,7 +816,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1211,6 +1211,31 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // لحاجزٍ جديد).
             if (version == 20) {
               await _createAssemblyTables();
+            }
+            // 20→21 (من إصدار أدنى مباشرة): الدفعة 30 — لقطة الوحدة
+            // والعامل (س-10/D-031، F-032): عمود unit_level_id على
+            // invoice_lines بـADD COLUMN بحرس pragma (درس v3 — آمن
+            // التكرار أي مسار وصول): NULL للإدخال بالوحدة الأساسية (كل
+            // القائم) ومعرف مستوى التعبئة عند الإدخال بها، واللقطة
+            // الثلاثية (unit_id للأساسية المرجعية + unit_level_id +
+            // factor_at_entry بعامل المستوى وقت الإنشاء) مجمّدة بحرس
+            // تجميد أسطر المرحّل المحدث — إعادة بناؤه DROP+CREATE
+            // إلزامية هنا لأن CREATE IF NOT EXISTS لا تستبدل المشغل
+            // القائم (نمط v9: البناء DROP+CREATE آمن التكرار أي مسار
+            // وصول).
+            if (version == 21) {
+              final lineCols21 = (await customSelect(
+                      "SELECT name FROM pragma_table_info('invoice_lines')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!lineCols21.contains('unit_level_id')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN unit_level_id INTEGER NULL');
+              }
+              await customStatement(
+                  'DROP TRIGGER IF EXISTS trg_invoice_lines_frozen_update');
+              await _createInvoiceTriggers();
             }
           }
         },
@@ -3027,6 +3052,9 @@ Future<void> _createInvoiceTables() async {
         '"item_id" INTEGER NOT NULL, '
         '"unit_id" INTEGER NOT NULL, '
         '"factor_at_entry" INTEGER NOT NULL DEFAULT 1, '
+        // v21 (الدفعة 30/س-10/D-031): لقطة الوحدة — معرف مستوى التعبئة،
+        // NULL للإدخال بالوحدة الأساسية (كل القائم قبل الدفعة).
+        '"unit_level_id" INTEGER NULL, '
         '"qty" INTEGER NOT NULL, '
         '"qty_base" INTEGER NOT NULL, '
         '"unit_price_minor" INTEGER NOT NULL DEFAULT 0, '
@@ -3168,6 +3196,9 @@ Future<void> _createInvoiceTriggers() async {
     // (delivered) والمورد المسؤول (supplier_party_id) على السطر
     // المرحّل — تحديث جزئي موثق لعلم عمل لا محاسبة بلا فك إقفال،
     // وأي مساس بمال السطر يرفض كما كان.
+    // v21 (الدفعة 30/س-10): لقطة الوحدة unit_level_id ضمن المجمدة —
+    // القائمة القديمة من المشغل تعاد بناؤها DROP+CREATE بالترحيلة
+    // لأن CREATE IF NOT EXISTS لا تستبدل المشغل القائم.
     "CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_frozen_update "
         "BEFORE UPDATE ON invoice_lines FOR EACH ROW "
         "WHEN (SELECT state FROM invoices WHERE id = OLD.invoice_id) "
@@ -3176,6 +3207,8 @@ Future<void> _createInvoiceTriggers() async {
         "OLD.item_id IS NOT NEW.item_id OR "
         "OLD.unit_id IS NOT NEW.unit_id OR "
         "OLD.factor_at_entry IS NOT NEW.factor_at_entry OR "
+        "COALESCE(OLD.unit_level_id,-1) IS NOT "
+        "COALESCE(NEW.unit_level_id,-1) OR "
         "OLD.qty IS NOT NEW.qty OR "
         "OLD.qty_base IS NOT NEW.qty_base OR "
         "OLD.unit_price_minor IS NOT NEW.unit_price_minor OR "
@@ -3312,8 +3345,10 @@ Future<void> _createTransferTables() async {
 
 Future<Map<String, Object?>?> _itemByIdTx(int id) async {
   final rows = await customSelect(
+    // س-10 (الدفعة 30): unit_group_id مع القراءة — مدقق مستوى التعبئة
+    // يفحص انتماء المستوى لمجموعة الصنف من هذه القراءة ذاتها.
     'SELECT id, sku, name, kind, base_unit_id, is_active, '
-    'purchase_price_minor FROM items '
+    'purchase_price_minor, unit_group_id FROM items '
     'WHERE id = ? AND is_deleted = 0',
     variables: [Variable.withInt(id)],
   ).get();
@@ -3501,7 +3536,8 @@ Future<InvoiceDocument?> _invoiceRowTx(int id) async {
 
 Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
   final rows = await customSelect(
-    'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, qty, '
+    'SELECT id, invoice_id, item_id, unit_id, factor_at_entry, '
+    'unit_level_id, qty, '
     'qty_base, unit_price_minor, discount_minor, tax_rate, '
     'line_total_doc_minor, line_total_base_minor, uuid, delivered, '
     'supplier_party_id, delivery_note '
@@ -3516,6 +3552,8 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
         itemId: r.data['item_id'] as int,
         unitId: r.data['unit_id'] as int,
         factorAtEntry: r.data['factor_at_entry'] as int,
+        // v21 (س-10): لقطة الوحدة مع السطر — null للأساسية.
+        unitLevelId: r.data['unit_level_id'] as int?,
         qty: r.data['qty'] as int,
         qtyBase: r.data['qty_base'] as int,
         unitPriceMinor: r.data['unit_price_minor'] as int,
@@ -3558,6 +3596,9 @@ Future<String> _invoiceSnapshotTx(int invoiceId) async {
         <String, Object?>{
           'item_id': l.itemId,
           'unit_id': l.unitId,
+          'factor_at_entry': l.factorAtEntry,
+          'unit_level_id': l.unitLevelId,
+          'qty': l.qty,
           'qty_base': l.qtyBase,
           'unit_price_minor': l.unitPriceMinor,
           'discount_minor': l.discountMinor,
@@ -3610,6 +3651,10 @@ InvoiceDraft _draftFromRows(InvoiceDocument inv, List<InvoiceLineDocument> lines
           itemId: l.itemId,
           unitId: l.unitId,
           qtyBase: l.qtyBase,
+          // v21 (س-10): اللقطة المخزنة تعود للمسودة كما خزنت — الكمية
+          // بوحدة الاختيار ومستواها، والتحقق على ما خُزّن لا على ما قيل.
+          qty: l.qty,
+          unitLevelId: l.unitLevelId,
           unitPriceMinor: l.unitPriceMinor,
           discountMinor: l.discountMinor,
           taxRate: l.taxRate,
@@ -3909,6 +3954,44 @@ Future<List<InvoiceValidationError>> _collectInvoiceErrors(
     if (line.unitId != (item['base_unit_id'] as int)) {
       errors.add(InvoiceUnitMismatch(i, label));
     }
+    // س-10 (الدفعة 30): مسار مستوى التعبئة — المستوى من مجموعة الصنف
+    // حصراً والتحويل بعامله الحالي، والكمية بالأساسية محسوبة به فلا
+    // يمر سطرٌ لا يلتقي حواملُه. والتحقق على ما خُزّن لا على ما قيل:
+    // فاتورة تُرحّل بعد تغيّر العامل تُرفض فتعاد مسودتها (المسودة
+    // حرة الحذف والفاصل موثق برسالته).
+    if (line.unitLevelId != null) {
+      final groupId = item['unit_group_id'] as int?;
+      var levelValid = false;
+      int levelFactor = 0;
+      if (groupId != null) {
+        final levelRows = await customSelect(
+          'SELECT group_id, factor FROM unit_group_levels '
+          'WHERE id = ? AND is_deleted = 0',
+          variables: [Variable.withInt(line.unitLevelId!)],
+        ).get();
+        if (levelRows.isNotEmpty) {
+          final level = levelRows.first.data;
+          if (level['group_id'] as int == groupId) {
+            levelFactor = level['factor'] as int;
+            levelValid = levelFactor >= 2;
+          }
+        }
+      }
+      if (!levelValid) {
+        errors.add(InvoiceUnitLevelInvalid(i, label));
+      } else {
+        final chosenQty = line.qty ?? line.qtyBase;
+        if (chosenQty * levelFactor != line.qtyBase) {
+          errors.add(InvoiceUnitFactorMismatch(
+              i, label, chosenQty, levelFactor, line.qtyBase));
+        }
+      }
+    } else if ((line.qty ?? line.qtyBase) != line.qtyBase) {
+      // سطر بلا مستوى فكميته بالأساسية ذاتها — اختلافهما بيانات لا
+      // تلتقي (حرس بيانات لا يلمسه المسار الطبيعي).
+      errors.add(InvoiceUnitFactorMismatch(
+          i, label, line.qty ?? line.qtyBase, 1, line.qtyBase));
+    }
     final kind = item['kind'] as String;
     // التجميعي يُشترى جاهزاً ويُبَع بالجاهز أولاً ثم الفكك (F-034) —
     // ومردود بيعه وحده مؤجل بالحد الصادق الموثق (الدفعة 28)، فحرس
@@ -4051,17 +4134,26 @@ Future<int> createInvoiceDraft(InvoiceDraft draft) async {
       'SELECT last_insert_rowid() AS id',
     ).getSingle()).data['id'] as int;
     for (final r in totals.lines) {
+      // س-10 (الدفعة 30): لقطة العامل مشتقة من السطر المتسق المدقق —
+      // القسمة تامة بالضبط لأن المدقق اشترط qtyBase == qty × عامل
+      // المستوى الحالي داخل المعاملة ذاتها، وبالأساسية العامل 1
+      // كالقائم (qty = qtyBase).
+      final factorAtEntry =
+          r.line.qtyBase ~/ (r.line.qty ?? r.line.qtyBase);
       await customStatement(
         'INSERT INTO invoice_lines (invoice_id, item_id, unit_id, '
-        'factor_at_entry, qty, qty_base, unit_price_minor, discount_minor, '
+        'factor_at_entry, unit_level_id, qty, qty_base, '
+        'unit_price_minor, discount_minor, '
         'tax_rate, line_total_doc_minor, line_total_base_minor, uuid, '
         'created_at, updated_at, is_deleted) '
-        'VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
         [
           invoiceId,
           r.line.itemId,
           r.line.unitId,
-          r.line.qtyBase,
+          factorAtEntry,
+          r.line.unitLevelId,
+          r.line.qty ?? r.line.qtyBase,
           r.line.qtyBase,
           r.line.unitPriceMinor,
           r.line.discountMinor,
@@ -10031,6 +10123,12 @@ class InvoiceLineDocument {
   final int itemId;
   final int unitId;
   final int factorAtEntry;
+
+  /// v21 (الدفعة 30/س-10): لقطة الوحدة — معرف مستوى التعبئة عند
+  /// الإدخال بها، وnull للإدخال بالوحدة الأساسية (كل القائم).
+  final int? unitLevelId;
+
+  /// الكمية المخزنة بوحدة الاختيار — بالأساسية تساوي qtyBase (القائم).
   final int qty;
   final int qtyBase;
   final int unitPriceMinor;
@@ -10059,6 +10157,7 @@ class InvoiceLineDocument {
     required this.itemId,
     required this.unitId,
     required this.factorAtEntry,
+    this.unitLevelId,
     required this.qty,
     required this.qtyBase,
     required this.unitPriceMinor,
