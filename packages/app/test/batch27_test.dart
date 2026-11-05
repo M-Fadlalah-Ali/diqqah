@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:diqqah_app/items_screen.dart';
 import 'package:diqqah_app/price_update_screen.dart';
@@ -21,7 +20,7 @@ Finder _fieldByLabel(String label) => find.byWidgetPredicate(
 /// قوائم الاختيار ليست TextField — بُنيتها بـInputDecorator حول
 /// DropdownButton (نمط مُجدئ منفصل).
 Finder _dropdownByLabel(String label) => find.byWidgetPredicate(
-    (w) => w is DropdownButtonFormField && (w.decoration?.labelText == label));
+    (w) => w is DropdownButtonFormField && (w.decoration.labelText == label));
 
 void _bigView(WidgetTester tester) {
   // عريضة بما يكفي لأزرار AppBar الحافة (درس الاختبار: الإطار الافتراضي
