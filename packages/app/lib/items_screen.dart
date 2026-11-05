@@ -220,6 +220,24 @@ class ItemEditScreen extends StatefulWidget {
   State<ItemEditScreen> createState() => _ItemEditScreenState();
 }
 
+/// صف وصفة التجميعي في المحرر — المكوّن وكميته وتكلفة الخدمة إن قُيمت
+/// (F-034/F-212، الدفعة 28) — ومتحكماته تُصفّى مع الصف عند إزالته.
+class _RecipeRow {
+  int? itemId;
+  final TextEditingController qty = TextEditingController();
+  final TextEditingController cost = TextEditingController();
+
+  _RecipeRow({this.itemId, String qty = '', String cost = ''}) {
+    this.qty.text = qty;
+    this.cost.text = cost;
+  }
+
+  void dispose() {
+    qty.dispose();
+    cost.dispose();
+  }
+}
+
 class _ItemEditScreenState extends State<ItemEditScreen> {
   final _sku = TextEditingController();
   final _name = TextEditingController();
@@ -229,6 +247,14 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   late ItemKind _kind;
   int? _unitId;
   List<Unit> _units = const [];
+
+  // ── وصفة التجميعي (F-034/F-212، الدفعة 28) ──
+  /// مرشّحو المكونات: الأصناف النشطة بلا تجميعي (بضاعة أو خدمة حصراً —
+  /// لا تداخل وصفة) وبلا الصنف ذاته.
+  List<Item> _recipeCandidates = const [];
+
+  /// صفوف الوصفة قبل الحفظ — المكوّن وكميته وتكلفة الخدمة إن قُيمت.
+  final List<_RecipeRow> _recipeRows = [];
 
   // ── مجموعات التعبئة وأسعارها آلي (F-032/F-208، D-026/D-187) ──
   List<UnitGroup> _groups = const [];
@@ -292,9 +318,45 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     }
     _loadUnits();
     _loadUnitGroups();
+    _loadRecipeCandidates();
     if (_isEdit) {
       _loadBarcodes();
+      if (_kind == ItemKind.bundle) {
+        _loadExistingRecipe();
+      }
     }
+  }
+
+  /// مرشّحو المكونات — الأصناف النشطة بلا تجميعي وبلا الصنف ذاته
+  /// (بضاعة أو خدمة حصراً — F-034/F-212).
+  Future<void> _loadRecipeCandidates() async {
+    final rows = await widget.db.select(widget.db.items).get();
+    if (!mounted) return;
+    setState(() {
+      _recipeCandidates = rows
+          .where((r) =>
+              r.isActive && r.kind != 'bundle' && r.id != widget.existing?.id)
+          .toList();
+    });
+  }
+
+  /// الوصفة القائمة في وضع التعديل — صفوف المحرر بلقطة الجدول.
+  Future<void> _loadExistingRecipe() async {
+    final rows =
+        await widget.db.bundleRecipeByItem(widget.existing!.id);
+    if (!mounted) return;
+    setState(() {
+      _recipeRows
+        ..clear()
+        ..addAll([
+          for (final r in rows)
+            _RecipeRow(
+              itemId: r.componentItemId,
+              qty: groupDigits(r.qtyBase),
+              cost: (r.costMinor ?? 0) > 0 ? groupDigits(r.costMinor!) : '',
+            ),
+        ]);
+    });
   }
 
   /// رموز الصنف القائمة — قسم الباركود في وضع التعديل (س-131).
@@ -316,6 +378,9 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     for (final ctrls in _levelPriceCtrls.values) {
       ctrls.$1.dispose();
       ctrls.$2.dispose();
+    }
+    for (final row in _recipeRows) {
+      row.dispose();
     }
     super.dispose();
   }
@@ -451,6 +516,138 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   int _levelPriceSaved(TextEditingController c) {
     final v = _parsePrice(c);
     return v < 0 ? 0 : v;
+  }
+
+  // ── محرر وصفة التجميعي (F-034/F-212، الدفعة 28) ──
+
+  void _addRecipeRow() {
+    setState(() => _recipeRows.add(_RecipeRow()));
+  }
+
+  void _removeRecipeRow(int index) {
+    setState(() {
+      _recipeRows[index].dispose();
+      _recipeRows.removeAt(index);
+    });
+  }
+
+  /// المكوّن الخدمي؟ — خانة التكلفة لخدمة الوصفة بالخيارين حصراً (F-212).
+  bool _recipeRowIsService(_RecipeRow row) {
+    final id = row.itemId;
+    if (id == null) return false;
+    final match = _recipeCandidates.where((c) => c.id == id).toList();
+    return match.isNotEmpty && match.single.kind == 'service';
+  }
+
+  /// مرشّحو الصف: بلا مكرر عبر الصفوف — المكوّن مرة واحدة بالوصفة
+  /// (س-09 روحاً والمكرر مرفوض بالمدقق) فلا يُعرض المستخدم حرفاً ممنوعاً.
+  List<Item> _recipeRowCandidates(int index) {
+    final usedElsewhere = <int>{
+      for (var i = 0; i < _recipeRows.length; i++)
+        if (i != index && _recipeRows[i].itemId != null)
+          _recipeRows[i].itemId!,
+    };
+    return _recipeCandidates
+        .where((c) =>
+            !usedElsewhere.contains(c.id) || c.id == _recipeRows[index].itemId)
+        .toList();
+  }
+
+  Widget _recipeRowCard(int index) {
+    final row = _recipeRows[index];
+    final isService = _recipeRowIsService(row);
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          children: [
+            DropdownButtonFormField<int>(
+              initialValue: row.itemId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'المكوّن'),
+              items: [
+                for (final it in _recipeRowCandidates(index))
+                  DropdownMenuItem<int>(
+                    value: it.id,
+                    child: Text(
+                      '${it.sku} ${it.name}'
+                      '${it.kind == 'service' ? ' (خدمة)' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => row.itemId = value),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: row.qty,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [ThousandsSeparatorInputFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'الكمية لكل وحدة',
+                      helperText: 'بوحدة الصنف الأساسية',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (isService)
+                  Expanded(
+                    child: TextFormField(
+                      controller: row.cost,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [ThousandsSeparatorInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'تكلفة الخدمة (اختياري)',
+                        helperText: 'فارغة = بند بيعي ضمن السعر (F-212)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  tooltip: 'إزالة المكوّن',
+                  onPressed: _saving ? null : () => _removeRecipeRow(index),
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// مدقق الوصفة قبل الحفظ — رسالة واحدة أول خطأ (نمط س-36) والرفض
+  /// قبل الكتابة حصراً فلا صنف يُحفظ بوصفة مكسورة.
+  String? _recipeRowsValidationError() {
+    final seen = <int>{};
+    for (final row in _recipeRows) {
+      if (row.itemId == null) {
+        return 'اختَر المكوّن في كل صف — أو أزِل الصف الفارغ';
+      }
+      if (seen.contains(row.itemId)) {
+        return 'المكوّن نفسه لا يتكرر بالوصفة — الصف الواحد بكميته الكلية';
+      }
+      seen.add(row.itemId!);
+      final qty = parseGroupedInt(row.qty.text.trim(), fallback: -1);
+      if (qty <= 0) {
+        return 'كمية المكوّن موجبة حصراً — والفراغ ليس كمية';
+      }
+      final costText = row.cost.text.trim();
+      if (costText.isNotEmpty) {
+        final cost = parseGroupedInt(costText, fallback: -1);
+        if (cost < 0) {
+          return 'تكلفة الخدمة عدد موجب إن أُدخلت — والفراغ بند بيعي (س6)';
+        }
+      }
+    }
+    return null;
   }
 
   /// قراءة سعر: الفراغ صفر مشروع «بلا سعر بعد» (س-36)، وإدخال شاذ
@@ -647,6 +844,21 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           }
         }
       }
+      // وصفة التجميعي (F-034/F-212): المدقق ما قبل الكتابة حصراً فلا
+      // صنف يُحفظ بوصفة مكسورة — رسالة واحدة أول خطأ (نمط س-36).
+      if (_kind == ItemKind.bundle) {
+        final recipeError = _recipeRowsValidationError();
+        if (recipeError != null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(SnackBar(
+              content: Text(recipeError),
+              duration: const Duration(seconds: 4),
+            ));
+          return;
+        }
+      }
       int? savedItemId;
       if (_isEdit) {
         savedItemId = widget.existing!.id;
@@ -712,6 +924,19 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
               ),
           ],
         );
+      }
+      // وصفة التجميعي (F-034/F-212): تُكتب بعد الصنف — والتجميعي حصراً.
+      if (_kind == ItemKind.bundle) {
+        await widget.db.saveBundleRecipe(savedItemId, [
+          for (final row in _recipeRows)
+            BundleComponentDraft(
+              componentItemId: row.itemId!,
+              qtyBase: parseGroupedInt(row.qty.text.trim()),
+              costMinor: row.cost.text.trim().isEmpty
+                  ? null
+                  : parseGroupedInt(row.cost.text.trim()),
+            ),
+        ]);
       }
       // س-123/س-124: ملفات الصورة بعد نجاح الصف — الاستبدال يحذف
       // الملفين القديمين ويحفظ الجديدين (لا ملفات يتيمة)، والحذف
@@ -866,12 +1091,18 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           const SizedBox(height: 16),
           SegmentedButton<ItemKind>(
             segments: [
-              for (final kind in const [ItemKind.good, ItemKind.service])
+              for (final kind in const [
+                ItemKind.good,
+                ItemKind.service,
+                ItemKind.bundle,
+              ])
                 ButtonSegment(value: kind, label: Text(kind.label)),
             ],
             selected: {_kind},
-            onSelectionChanged: (selection) =>
-                setState(() => _kind = selection.first),
+            onSelectionChanged: _saving
+                ? null
+                : (selection) =>
+                    setState(() => _kind = selection.first),
           ),
           const SizedBox(height: 16),
           Row(
@@ -1032,6 +1263,31 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                   '(D-066 الاصطلاح) — التغيير يُفتح مع دفعة العملات',
             ),
           ),
+          // ── وصفة المكونات (F-034/F-212، الدفعة 28) — التجميعي حصراً ──
+          if (_kind == ItemKind.bundle) ...[
+            const SizedBox(height: 24),
+            Text('وصفة المكونات',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              'بيع التجميعي يسحب من رصيده الجاهز أولاً ويكمل النقص بفكك '
+              'مكوناته بكمياتها (F-034) — والمكوّن بضاعة أو خدمة حصراً '
+              'لا تجميعي، وخدمة الوصفة تكلفتها اختيارية (F-212: فارغة '
+              'بند بيعي ضمن السعر وبقيمة تدخل مجموع كلف الوصفة)',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            for (var i = 0; i < _recipeRows.length; i++)
+              _recipeRowCard(i),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: _saving ? null : _addRecipeRow,
+                icon: const Icon(Icons.add),
+                label: const Text('إضافة مكوّن'),
+              ),
+            ),
+          ],
           // ── صورة الصنف (س-123/س-124، D-120/D-121/D-122/D-125) ──
           const SizedBox(height: 24),
           Text('صورة الصنف', style: Theme.of(context).textTheme.titleMedium),

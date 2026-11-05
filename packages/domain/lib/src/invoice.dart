@@ -554,13 +554,45 @@ class InvoiceServiceInPurchase extends InvoiceValidationError {
   const InvoiceServiceInPurchase(this.lineIndex, this.itemLabel);
 }
 
-/// سطر بصنف تجميعي — التجميعي م2 (F-034/09 §2) ووصفته غير موجودة في
-/// م1 أصلاً، فأي مسار يصل به مرفوض صريحاً لا صامتاً.
-class InvoiceBundleUnsupported extends InvoiceValidationError {
+/// مردود بيع بسطر تجميعي — مؤجل بالحد الصادق الموثق (الدفعة 28:
+/// الاستعادة المركبة للجاهز والمفكك تحتاج قاعدة موثقة تُعرض على
+/// المالك) — فمسار المردود الوحيد الذي لا يحمل التجميعي بعد.
+class InvoiceBundleReturnUnsupported extends InvoiceValidationError {
   final int lineIndex;
   final String itemLabel;
 
-  const InvoiceBundleUnsupported(this.lineIndex, this.itemLabel);
+  const InvoiceBundleReturnUnsupported(this.lineIndex, this.itemLabel);
+}
+
+/// بيع تجميعي يزيد على الجاهز بلا وصفة — لا نقص يُفكك بلا مكونات
+/// (س-09 روحاً: «وصفة فارغة مرفوضة» / F-034).
+class InvoiceBundleRecipeRequired extends InvoiceValidationError {
+  final int lineIndex;
+  final String itemLabel;
+
+  const InvoiceBundleRecipeRequired(this.lineIndex, this.itemLabel);
+}
+
+/// مكوّن بضاعة رصيده لا يكفي الكمية المفككة — منع السالب على المكونات
+/// يُفحص كل المكونات قبل القبول (س-09/F-042).
+class InvoiceBundleComponentInsufficient extends InvoiceValidationError {
+  final int lineIndex;
+  final String componentLabel;
+  final int neededQty;
+  final int availableQty;
+
+  const InvoiceBundleComponentInsufficient(
+      this.lineIndex, this.componentLabel, this.neededQty, this.availableQty);
+}
+
+/// وصفة تجميعي غير صالحة للاستعمال عند البيع — مكوّن معطل أو مفقود
+/// أو وصفة مرفوضة بمدققها (السبب نصي يحمله).
+class InvoiceBundleInvalid extends InvoiceValidationError {
+  final int lineIndex;
+  final String itemLabel;
+  final String reason;
+
+  const InvoiceBundleInvalid(this.lineIndex, this.itemLabel, this.reason);
 }
 
 /// ترحيل فاتورة ليست مسودة — آلة الحالة (05 §4.1/F-052).
@@ -667,8 +699,24 @@ String describeInvoiceValidationError(InvoiceValidationError error) {
       return 'السطر ${lineIndex + 1}: وحدة السطر ليست الوحدة الأساسية للصنف «$itemLabel» — م1 بالأساسية حصراً';
     case InvoiceServiceInPurchase(:final lineIndex, :final itemLabel):
       return 'السطر ${lineIndex + 1}: الخدمة «$itemLabel» لا تُشترى بفاتورة شراء في هذه الدفعة — حساب المصروف يُعرض لاحقاً';
-    case InvoiceBundleUnsupported(:final lineIndex, :final itemLabel):
-      return 'السطر ${lineIndex + 1}: الصنف التجميعي «$itemLabel» من المرحلة 2 — لا بيع له في م1 (F-034)';
+    case InvoiceBundleReturnUnsupported(:final lineIndex, :final itemLabel):
+      return 'السطر ${lineIndex + 1}: مردود بيع التجميعي «$itemLabel» '
+          'مؤجل — الاستعادة المركبة للجاهز والمفكك تحتاج قاعدة موثقة '
+          '(الدفعة 28)';
+    case InvoiceBundleRecipeRequired(:final lineIndex, :final itemLabel):
+      return 'السطر ${lineIndex + 1}: بيع «$itemLabel» يزيد على رصيده '
+          'الجاهز بلا وصفة مكونات — النقص يُفكك بوصفة (F-034)';
+    case InvoiceBundleComponentInsufficient(
+        :final lineIndex,
+        :final componentLabel,
+        :final neededQty,
+        :final availableQty
+      ):
+      return 'السطر ${lineIndex + 1}: الفكك يحتاج «$componentLabel» '
+          '$neededQty والرصيد $availableQty — منع السالب على المكونات '
+          '(F-042)';
+    case InvoiceBundleInvalid(:final lineIndex, :final itemLabel, :final reason):
+      return 'السطر ${lineIndex + 1}: وصفة «$itemLabel» غير صالحة للاستعمال — $reason';
     case InvoiceWarehouseMissing(:final warehouseId):
       return 'بضاعة بلا مستودع معرف (المعرف ${warehouseId ?? 'فارغ'}) — س-03';
     case InvoicePartyMissing(:final partyId):

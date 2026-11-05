@@ -1529,9 +1529,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         minor > 0 ? formatMinorAmount(minor) : 'بلا سعر بعد';
     final priceLabel = _kind.isSalesSide ? 'سعر بيع' : 'سعر شراء';
     final avail = _stockAvail[it.id] ?? 0;
+    // التجميعي مخزوني برصيد جاهز (F-034) — فالمتاح عنده «الجاهز»
+    // بلفظها، والبضاعة كما هي بحرفها القائم (D-106/س-108).
+    final availLabel = it.kind == 'bundle' ? 'المتاح (الجاهز)' : 'المتاح';
     return it.kind == 'service'
         ? '$priceLabel: $priceText'
-        : 'المتاح: ${groupDigits(avail)} · $priceLabel: $priceText';
+        : '$availLabel: ${groupDigits(avail)} · $priceLabel: $priceText';
   }
 
   Widget _lineCard(int index) {
@@ -1564,7 +1567,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     // فصار سطراً واحداً يلتف مقصوصاً لا يفاض.
                     child: Text(
                       '${it.sku} ${it.name}'
-                      '${it.kind == 'service' ? ' (خدمة)' : ''}'
+                      '${it.kind == 'service' ? ' (خدمة)' : it.kind == 'bundle' ? ' (تجميعي)' : ''}'
                       ' — ${_itemSubtitle(it)}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,

@@ -235,6 +235,44 @@ class ItemLevelPrices extends Table {
       boolean().withDefault(const Constant(false)).named('is_deleted')();
 }
 
+/// وصفة التجميعي — `bundle_component` (05 §3.2/الدفعة 28/F-034/F-212):
+/// مكونات الصنف التجميعي بكمياتها الوصفية بالوحدة الأساسية لكل وحدة
+/// تجميعية واحدة، وتكلفة المكوّن الخدمي اختيارياً (للخدمة بالخيارين
+/// F-212: فارغة = بند بيعي ضمن السعر، بقيمة = تدخل مجموع كلف الوصفة؛
+/// للبضاعة null حصراً فكلفة البضاعة من مخزونها الحاكم لا من الخانة).
+/// تفرد (التجميعي، المكوّن) قيدُ UNIQUE داخل DDL الجدول ذاته
+/// (uniqueKeys — درس آمنة التكرار الموثق س86: فهرس @TableIndex
+/// المستقل يكسر نداءات createAll المتعددة عبر خطوات الترقية).
+class BundleComponents extends Table {
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {bundleItemId, componentItemId},
+      ];
+
+  IntColumn get id => integer().autoIncrement()();
+
+  IntColumn get bundleItemId => integer().named('bundle_item_id')();
+
+  IntColumn get componentItemId => integer().named('component_item_id')();
+
+  IntColumn get qtyBase => integer().named('qty_base')();
+
+  /// تكلفة المكوّن الخدمي — null للبضاعة واختيارية للخدمة (F-212).
+  IntColumn get costMinor => integer().nullable().named('cost_minor')();
+
+  /// اصطلاح «كل جدول» (D-055).
+  TextColumn get uuid => text()();
+
+  IntColumn get createdAt =>
+      integer().withDefault(const Constant(0)).named('created_at')();
+
+  IntColumn get updatedAt =>
+      integer().withDefault(const Constant(0)).named('updated_at')();
+
+  BoolColumn get isDeleted =>
+      boolean().withDefault(const Constant(false)).named('is_deleted')();
+}
+
 /// بنية الباركود — 05: `item_barcode` جاهزة من اليوم الأول (F-035،
 /// «بنية الباركود جدول جاهز من اليوم الأول، القراءة الفعلية مؤجلة للمرحلة
 /// 5») — لا شاشة قراءة ولا مسار مستخدم في م1، والحقلان `unit_id`
@@ -735,6 +773,7 @@ class AppMeta extends Table {
   UnitGroups,
   UnitGroupLevels,
   ItemLevelPrices,
+  BundleComponents,
   ItemBarcodes,
   Accounts,
   Journals,
@@ -777,7 +816,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 18;
+  int get schemaVersion => 19;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1138,6 +1177,25 @@ class DiqqahDatabase extends _$DiqqahDatabase {
               if (!itemCols18.contains('price_auto')) {
                 await customStatement(
                     'ALTER TABLE items ADD COLUMN price_auto INTEGER NOT NULL DEFAULT 1');
+              }
+            }
+            // 18→19 (من إصدار أدنى مباشرة): الدفعة 28 — التجميعي الجاهز
+            // والفكك (F-034/F-212): جدول الوصفة خالص يبنيه createAll
+            // بـIF NOT EXISTS ولا مساس بجداول قائمة (نمط v18)، وعمود
+            // «جاهز/فُكِّك» (F-034: التفصيل بعلم في الحركات) على
+            // stock_moves بـADD COLUMN بحرس pragma (درس v3 — آمن
+            // التكرار أي مسار وصول): NULL للحركات العادية و«ready»
+            // لخروج الجاهز و«broken» لحركات مكونات الفكك.
+            if (version == 19) {
+              await m.createAll();
+              final moveCols19 = (await customSelect(
+                      "SELECT name FROM pragma_table_info('stock_moves')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!moveCols19.contains('move_detail')) {
+                await customStatement(
+                    'ALTER TABLE stock_moves ADD COLUMN move_detail TEXT NULL');
               }
             }
           }
@@ -1797,6 +1855,110 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         );
       }
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // وصفة التجميعي — الدفعة 28 (F-034/F-212): حفظ وقراءة بمدققين
+  // (المجال ثم القاعدة) والرفض قبل الكتابة حصراً.
+  // ─────────────────────────────────────────────────────────────────
+
+  /// حفظ وصفة تجميعي — الاستبدال الكامل داخل معاملة (نمط
+  /// saveItemLevelPrices) بعد مدققين: مدقق المجال (البنية والكميات
+  /// والتكاليف والتكرار والذاتية — س-09) ثم مدقق القاعدة (الوجود
+  /// والتفعيل والنوع: التجميعي صاحبها ومكوناتها بضاعة أو خدمة حصراً —
+  /// لا تداخل) — فلا وصفة ناقصة تُخزن ولا استبدال جزئي.
+  Future<void> saveBundleRecipe(
+    int bundleItemId,
+    List<BundleComponentDraft> components,
+  ) async {
+    final structural = validateBundleRecipeStructure(
+      BundleRecipeDraft(bundleItemId: bundleItemId, components: components),
+    );
+    if (structural.isNotEmpty) {
+      throw BundleValidationException(structural);
+    }
+    final errors = <BundleValidationError>[];
+    final owner = await _itemByIdTx(bundleItemId);
+    if (owner == null) {
+      errors.add(BundleOwnerNotFound(bundleItemId));
+    } else {
+      final ownerLabel =
+          itemDisplayLabel(owner['name'] as String, owner['sku'] as String);
+      if ((owner['is_active'] as int) == 0) {
+        errors.add(BundleOwnerInactive(ownerLabel));
+      }
+      if ((owner['kind'] as String) != 'bundle') {
+        errors.add(BundleOwnerNotBundle(ownerLabel));
+      }
+    }
+    for (var i = 0; i < components.length; i++) {
+      final comp = await _itemByIdTx(components[i].componentItemId);
+      if (comp == null) {
+        errors.add(
+            BundleComponentNotFound(i, components[i].componentItemId));
+        continue;
+      }
+      final compLabel =
+          itemDisplayLabel(comp['name'] as String, comp['sku'] as String);
+      if ((comp['is_active'] as int) == 0) {
+        errors.add(BundleComponentInactive(i, compLabel));
+      }
+      if ((comp['kind'] as String) == 'bundle') {
+        errors.add(BundleComponentIsBundle(i, compLabel));
+      }
+      // خانة التكلفة للخدمة بالخيارين حصراً (F-212) — والبضاعة كلفتها
+      // من مخزونها الحاكم لحظة الفك (F-034) فلا خانة تكلفة لها أبداً.
+      if ((comp['kind'] as String) == 'good' &&
+          components[i].costMinor != null) {
+        errors.add(BundleComponentCostInvalid(i, components[i].costMinor));
+      }
+    }
+    if (errors.isNotEmpty) throw BundleValidationException(errors);
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      await (delete(bundleComponents)
+            ..where((t) => t.bundleItemId.equals(bundleItemId)))
+          .go();
+      for (final c in components) {
+        await into(bundleComponents).insert(
+          BundleComponentsCompanion.insert(
+            bundleItemId: bundleItemId,
+            componentItemId: c.componentItemId,
+            qtyBase: c.qtyBase,
+            costMinor: Value(c.costMinor),
+            uuid: const Uuid().v4(),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+    });
+  }
+
+  /// وصفة تجميعي بمكوناتها — عرض محرر الوصفة ببطاقة الصنف: المكوّن
+  /// باسمه وكوده ونوعه وكميته الوصفية وتكلفته الخدمية إن قُيمت (F-212).
+  Future<List<BundleRecipeRow>> bundleRecipeByItem(int bundleItemId) async {
+    final rows = await customSelect(
+      'SELECT bc.component_item_id, bc.qty_base, bc.cost_minor, '
+      'i.kind, i.sku, i.name '
+      'FROM bundle_components bc '
+      'JOIN items i ON i.id = bc.component_item_id '
+      'WHERE bc.bundle_item_id = ?1 AND bc.is_deleted = 0 '
+      'ORDER BY bc.id',
+      variables: [Variable.withInt(bundleItemId)],
+    ).get();
+    return [
+      for (final r in rows)
+        BundleRecipeRow(
+          componentItemId: r.data['component_item_id'] as int,
+          qtyBase: r.data['qty_base'] as int,
+          costMinor: r.data['cost_minor'] as int?,
+          kind: r.data['kind'] as String,
+          sku: r.data['sku'] as String,
+          name: r.data['name'] as String,
+        ),
+    ];
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -2880,6 +3042,10 @@ Future<void> _createInvoiceTables() async {
         '"state" TEXT NOT NULL DEFAULT \'posted\', '
         '"ref_doc_type" TEXT NOT NULL, '
         '"ref_doc_id" INTEGER NOT NULL, '
+        // v19 (الدفعة 28/F-034): علم «جاهز/فُكِّك» — NULL للحركات
+        // العادية و«ready» لخروج التجميعي الجاهز و«broken» لحركات
+        // مكونات الفكك، بقيم إنجليزية مخزنة والعرض ترجمتها الواجهة.
+        '"move_detail" TEXT NULL, '
         '"uuid" TEXT NOT NULL, '
         '"created_at" INTEGER NOT NULL DEFAULT 0, '
         '"updated_at" INTEGER NOT NULL DEFAULT 0, '
@@ -3438,11 +3604,13 @@ InvoiceDraft _draftFromRows(InvoiceDocument inv, List<InvoiceLineDocument> lines
   );
 }
 
-/// تخطيط الأسطر المخزنية لكل أنواع الفواتير — بضاعة حصراً (الخدمة بلا
-/// مخزون ولا تكلفة — س-08): دخول الشراء صافي السطر، خروج البيع ومردود
-/// الشراء بالمتوسط الجاري المتسلسل (D-067)، ودخول مردود البيع بلقطة
-/// كلفة الأصل ويمتص آخر مردود ما تبقى من قيمتها (م-25/D-067). أخطاء
-/// الاكتفاء تضاف إلى [errors] (منع السالب — F-042).
+/// تخطيط الأسطر المخزنية لكل أنواع الفواتير — البضاعة والتجميعي حصراً
+/// (الخدمة بلا مخزون ولا تكلفة — س-08): دخول الشراء صافي السطر (والتجميعي
+/// يدخل الجاهز مباشرة بلا فكك — F-034)، وخروج البيع والمردود الشرائي
+/// بالمتوسط الجاري المتسلسل (D-067)، ودخول مردود البيع بلقطة كلفة الأصل
+/// ويمتص آخر مردود ما تبقى من قيمتها (م-25/D-067) — وبيع التجميعي
+/// بالجاهز أولاً ثم الفكك بمكوناته (F-034/الدفعة 28). أخطاء الاكتفاء
+/// تضاف إلى [errors] (منع السالب — F-042).
 Future<List<_StockLinePlan>> _planStockLines(
   InvoiceDraft draft,
   List<InvoiceLineResult> results,
@@ -3469,12 +3637,27 @@ Future<List<_StockLinePlan>> _planStockLines(
   for (var i = 0; i < draft.lines.length; i++) {
     final line = draft.lines[i];
     final item = await _itemByIdTx(line.itemId);
-    if (item == null || (item['kind'] as String) != 'good') continue;
+    if (item == null) continue;
+    final kind = item['kind'] as String;
+    // الخدمة بلا مخزون ولا تكلفة — والبضاعة والتجميعي مخزونيان.
+    if (kind == 'service') continue;
     final label =
         itemDisplayLabel(item['name'] as String, item['sku'] as String);
+
+    // مردود بيع التجميعي مرفوض — الحد الصادق الموثق (الدفعة 28):
+    // الاستعادة المركبة للجاهز والمفكك تحتاج قاعدة موثقة تُعرض على
+    // المالك، والمرجع لأصل مرحّل لا يصل بسطر تجميعي أصلاً لأن بيعه
+    // الجديد هو الذي يحمله.
+    if (draft.kind == InvoiceKind.saleReturn && kind == 'bundle') {
+      errors.add(InvoiceBundleReturnUnsupported(i, label));
+      continue;
+    }
+
     if (draft.kind == InvoiceKind.purchase) {
       // الدخول بقيمة السطر الصافية (بعد خصمه — «لا يمس كلفة المخزون»
-      // معناه الخصم يخفض الكلفة لا يفصل حساباً — 05 §4.1)
+      // معناه الخصم يخفض الكلفة لا يفصل حساباً — 05 §4.1) — والتجميعي
+      // يدخل الجاهز مباشرة بلا فكك (الوصفة لا تفعل شيئاً في الشراء
+      // الجاهز — F-034).
       plans.add(_StockLinePlan(
         lineIndex: i,
         itemId: line.itemId,
@@ -3484,6 +3667,124 @@ Future<List<_StockLinePlan>> _planStockLines(
       ));
       continue;
     }
+
+    // بيع التجميعي — الجاهز أولاً ثم الفكك (F-034/الدفعة 28 حرفاً).
+    if (draft.kind == InvoiceKind.sale && kind == 'bundle') {
+      final (bundleQty, bundleValue) = await sim.of(line.itemId);
+      if (line.qtyBase <= bundleQty) {
+        // الجاهز يكفي — لا فكك ولا مساس بالوصفة والمكونات، وخروج
+        // بالمتوسط الحاكم (F-047/D-067) بعلم «جاهز».
+        final exit = wacExitValue(bundleValue, bundleQty, line.qtyBase);
+        sim.apply(line.itemId, -line.qtyBase, -exit);
+        plans.add(_StockLinePlan(
+          lineIndex: i,
+          itemId: line.itemId,
+          qtyBase: line.qtyBase,
+          stockValueMinor: exit,
+          counterpartMinor: exit,
+          detail: 'ready',
+        ));
+        continue;
+      }
+      // النقص يفكك — الوصفة إلزاماً وسلامة مكوناتها شرطاً (س-09/F-034).
+      final recipe = await _bundleRecipeTx(line.itemId);
+      if (recipe.isEmpty) {
+        errors.add(InvoiceBundleRecipeRequired(i, label));
+        continue;
+      }
+      final inputs = <BundleComponentStockInput>[];
+      final componentLabels = <int, String>{};
+      var recipeInvalid = false;
+      for (final r in recipe) {
+        final compId = r['component_item_id'] as int;
+        final compKind = r['kind'] as String;
+        final compLabel = itemDisplayLabel(
+            r['name'] as String, r['sku'] as String);
+        componentLabels[compId] = compLabel;
+        if ((r['is_active'] as int) == 0) {
+          errors.add(InvoiceBundleInvalid(
+              i, label, 'المكوّن «$compLabel» معطل'));
+          recipeInvalid = true;
+          continue;
+        }
+        if (compKind == 'bundle') {
+          errors.add(InvoiceBundleInvalid(i, label,
+              'المكوّن «$compLabel» تجميعي — لا تداخل وصفة (بضاعة أو خدمة حصراً)'));
+          recipeInvalid = true;
+          continue;
+        }
+        final isService = compKind == 'service';
+        final (sq, sv) = isService ? (0, 0) : await sim.of(compId);
+        inputs.add(BundleComponentStockInput(
+          itemId: compId,
+          isService: isService,
+          qtyPerBundle: r['qty_base'] as int,
+          serviceCostMinor: r['cost_minor'] as int?,
+          stockQty: sq,
+          stockValue: sv,
+        ));
+      }
+      if (recipeInvalid) continue;
+
+      final outcome = planBundleSaleBreakdown(
+        saleQtyBase: line.qtyBase,
+        bundleReadyQty: bundleQty,
+        bundleReadyValue: bundleValue,
+        components: inputs,
+      );
+      var blocked = false;
+      for (final e in outcome.errors) {
+        switch (e) {
+          case BundleSaleRecipeRequired():
+            errors.add(InvoiceBundleRecipeRequired(i, label));
+            blocked = true;
+          case BundleSaleComponentInsufficient(
+              :final componentItemId,
+              :final neededQty,
+              :final availableQty
+            ):
+            errors.add(InvoiceBundleComponentInsufficient(
+              i,
+              componentLabels[componentItemId] ??
+                  'معرف $componentItemId',
+              neededQty,
+              availableQty,
+            ));
+            blocked = true;
+        }
+      }
+      if (blocked) continue;
+
+      final bp = outcome.plan;
+      // الجاهز أولاً — خروج التجميعي بعلمه (F-034: علم «جاهز»).
+      if (bp.readyQty > 0) {
+        sim.apply(line.itemId, -bp.readyQty, -bp.readyValueMinor);
+        plans.add(_StockLinePlan(
+          lineIndex: i,
+          itemId: line.itemId,
+          qtyBase: bp.readyQty,
+          stockValueMinor: bp.readyValueMinor,
+          counterpartMinor: bp.readyValueMinor,
+          detail: 'ready',
+        ));
+      }
+      // النقص يفكك — مكونات البضاعة بحركاتها بعلم «فُكِّك»، والخدمة
+      // بلا حركة ولا خطة (بلا مساس قيمةً ولا كميةً — F-212).
+      for (final c in bp.components) {
+        if (c.isService || c.qtyOut == 0) continue;
+        sim.apply(c.itemId, -c.qtyOut, -c.valueMinor);
+        plans.add(_StockLinePlan(
+          lineIndex: i,
+          itemId: c.itemId,
+          qtyBase: c.qtyOut,
+          stockValueMinor: c.valueMinor,
+          counterpartMinor: c.valueMinor,
+          detail: 'broken',
+        ));
+      }
+      continue;
+    }
+
     if (draft.kind == InvoiceKind.sale ||
         draft.kind == InvoiceKind.purchaseReturn) {
       // الخروج بالقيمة الدفترية الجارية — متسلسل بالترتيب (D-067)
@@ -3530,6 +3831,22 @@ Future<List<_StockLinePlan>> _planStockLines(
   return plans;
 }
 
+/// قراءة وصفة تجميعي بمكوناتها من القاعدة — انعكاس مستخدم بالمخطط
+/// (نمط القراءات الداخلية للمحرك): نوع كل مكوّن وتفعيله واسمه وكمية
+/// الوصفة وتكلفة الخدمة (F-212).
+Future<List<Map<String, Object?>>> _bundleRecipeTx(int bundleItemId) async {
+  final rows = await customSelect(
+    'SELECT bc.component_item_id, bc.qty_base, bc.cost_minor, '
+    'i.kind, i.name, i.sku, i.is_active '
+    'FROM bundle_components bc '
+    'JOIN items i ON i.id = bc.component_item_id '
+    'WHERE bc.bundle_item_id = ?1 AND bc.is_deleted = 0 '
+    'ORDER BY bc.id',
+    variables: [Variable.withInt(bundleItemId)],
+  ).get();
+  return [for (final r in rows) r.data];
+}
+
 /// جمع أخطاء الفاتورة بمعطيات القاعدة — التسلسل التدريجي المعتمد:
 /// البنية ثم الزمن (عند الترحيل) ثم الأسطر (الوجود والتفعيل والوحدة
 /// والنوع) ثم المستودع ثم جهة الدفع ثم الأصل والمتبقي للمردود ثم
@@ -3552,11 +3869,16 @@ Future<List<InvoiceValidationError>> _collectInvoiceErrors(
   }
 
   final itemByLine = <Map<String, Object?>?>[];
-  var hasGoods = false;
+  var hasStock = false;
   for (final line in draft.lines) {
     final item = await _itemByIdTx(line.itemId);
     itemByLine.add(item);
-    if (item != null && (item['kind'] as String) == 'good') hasGoods = true;
+    // البضاعة والتجميعي مخزونيان — والتجميعي رصيده الجاهز (F-034).
+    if (item != null &&
+        ((item['kind'] as String) == 'good' ||
+            (item['kind'] as String) == 'bundle')) {
+      hasStock = true;
+    }
   }
   for (var i = 0; i < draft.lines.length; i++) {
     final item = itemByLine[i];
@@ -3574,15 +3896,18 @@ Future<List<InvoiceValidationError>> _collectInvoiceErrors(
       errors.add(InvoiceUnitMismatch(i, label));
     }
     final kind = item['kind'] as String;
-    if (kind == 'bundle') {
-      errors.add(InvoiceBundleUnsupported(i, label));
+    // التجميعي يُشترى جاهزاً ويُبَع بالجاهز أولاً ثم الفكك (F-034) —
+    // ومردود بيعه وحده مؤجل بالحد الصادق الموثق (الدفعة 28)، فحرس
+    // المسار هنا والخطة أسفله ترفض ما لا يحمله.
+    if (kind == 'bundle' && draft.kind == InvoiceKind.saleReturn) {
+      errors.add(InvoiceBundleReturnUnsupported(i, label));
     }
     if (draft.kind == InvoiceKind.purchase && kind == 'service') {
       errors.add(InvoiceServiceInPurchase(i, label));
     }
   }
 
-  if (hasGoods) {
+  if (hasStock) {
     final warehouse = draft.warehouseId == null
         ? null
         : await _warehouseByIdTx(draft.warehouseId!);
@@ -3814,6 +4139,7 @@ Future<int> postInvoice(int invoiceId) async {
     }
 
     // حركات المخزون أولاً (داخل المعاملة) لأخذ معرفاتها لربط أسطر 113
+    // — وعلم «جاهز/فُكِّك» يحملته خطط التجميعي (F-034/الدفعة 28).
     final stockMoveIds = <int>[];
     final stockIn =
         draft.kind == InvoiceKind.purchase || draft.kind == InvoiceKind.saleReturn;
@@ -3821,8 +4147,9 @@ Future<int> postInvoice(int invoiceId) async {
       await customStatement(
         "INSERT INTO stock_moves (item_id, qty_base, from_warehouse_id, "
         "to_warehouse_id, value_base_minor, unit_cost_base_minor, state, "
-        "ref_doc_type, ref_doc_id, uuid, created_at, updated_at, is_deleted) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'posted', 'invoice', ?, ?, ?, ?, 0)",
+        "ref_doc_type, ref_doc_id, move_detail, uuid, created_at, "
+        "updated_at, is_deleted) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'posted', 'invoice', ?, ?, ?, ?, ?, 0)",
         [
           p.itemId,
           stockIn ? p.qtyBase : -p.qtyBase,
@@ -3831,6 +4158,7 @@ Future<int> postInvoice(int invoiceId) async {
           p.stockValueMinor,
           roundHalfAwayFromZeroRatio(p.stockValueMinor, p.qtyBase),
           invoiceId,
+          p.detail,
           const Uuid().v4(),
           now,
           now,
@@ -3904,24 +4232,36 @@ Future<int> postInvoice(int invoiceId) async {
           fxRate: fx,
         ));
       }
+      // سطر التكلفة الواحد لكل سطر فاتورة (F-034: «سطر تكلفة واحد
+      // بالمبلغ المركب»): البضاعة العادية خطة واحدة فلا تغيير، وسطر
+      // التجميعي خططُه (الجاهز + مكونات الفكك) تُجمع في سطر 51 واحد —
+      // و113 دائناً بحركة كل خطة مربوطة بها فمجموعها المركب حرفاً.
+      final planByLine = <int, List<int>>{};
       for (var k = 0; k < plan.length; k++) {
-        final p = plan[k];
-        if (p.counterpartMinor > 0) {
+        planByLine.putIfAbsent(plan[k].lineIndex, () => []).add(k);
+      }
+      for (final ks in planByLine.values) {
+        final lineCost =
+            ks.fold(0, (s, k) => s + plan[k].stockValueMinor);
+        if (lineCost > 0) {
           moveLines.add(MoveLineDraft(
             accountId: acc51,
-            debitMinor: p.counterpartMinor,
+            debitMinor: lineCost,
             currencyId: 1,
-            amountMinor: p.counterpartMinor,
+            amountMinor: lineCost,
           ));
         }
-        if (p.stockValueMinor > 0) {
-          moveLines.add(MoveLineDraft(
-            accountId: acc113,
-            creditMinor: p.stockValueMinor,
-            currencyId: 1,
-            amountMinor: p.stockValueMinor,
-            refStockMoveId: stockMoveIds[k],
-          ));
+        for (final k in ks) {
+          final p = plan[k];
+          if (p.stockValueMinor > 0) {
+            moveLines.add(MoveLineDraft(
+              accountId: acc113,
+              creditMinor: p.stockValueMinor,
+              currencyId: 1,
+              amountMinor: p.stockValueMinor,
+              refStockMoveId: stockMoveIds[k],
+            ));
+          }
         }
       }
     } else if (draft.kind == InvoiceKind.saleReturn) {
@@ -9195,7 +9535,13 @@ class _StockLinePlan {
 
   /// نظير سطر التكلفة 51: تكلفة البيع أو المتوسط الجاري للمردود —
   /// والفرق بينه وبين [stockValueMinor] يجمع على 58 فروق التكلفة.
+  /// (الدفعة 28: سطر التجميعي خططه تُجمع في سطر 51 واحد بالمبلغ
+  /// المركب — F-034 — فالنظير صار لكل سطر فاتورة لا لكل خطة.)
   final int counterpartMinor;
+
+  /// علم «جاهز/فُكِّك» (F-034/الدفعة 28): «ready» لخروج التجميعي
+  /// الجاهز و«broken» لحركات مكونات الفكك — وNULL لبقية الحركات.
+  final String? detail;
 
   const _StockLinePlan({
     required this.lineIndex,
@@ -9203,6 +9549,7 @@ class _StockLinePlan {
     required this.qtyBase,
     required this.stockValueMinor,
     required this.counterpartMinor,
+    this.detail,
   });
 }
 
@@ -9472,6 +9819,31 @@ class BarcodeHolderRow {
 
   /// العرض المعتمد «الاسم (الكود)» — صياغة رسالة الرفض تري صاحبها.
   String get displayLabel => itemDisplayLabel(name, sku);
+}
+
+/// صف وصفة تجميعي للعرض — الدفعة 28 (F-034/F-212): المكوّن بمعرفه
+/// ونوعه وكميته الوصفية وتكلفته الخدمية إن قُيمت.
+class BundleRecipeRow {
+  final int componentItemId;
+  final int qtyBase;
+  final int? costMinor;
+  final String kind;
+  final String sku;
+  final String name;
+
+  const BundleRecipeRow({
+    required this.componentItemId,
+    required this.qtyBase,
+    required this.kind,
+    required this.sku,
+    required this.name,
+    this.costMinor,
+  });
+
+  /// العرض المعتمد «الاسم (الكود)».
+  String get displayLabel => itemDisplayLabel(name, sku);
+
+  bool get isService => kind == 'service';
 }
 
 /// صف قائمة تحويلات الصناديق للتصفح (س-16/05 §6).
