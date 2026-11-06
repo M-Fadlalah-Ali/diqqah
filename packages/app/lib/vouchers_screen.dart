@@ -731,6 +731,21 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
         : (parseGroupedInt(_fx.text.trim()));
   }
 
+  /// تعبئة لقطة الصرف من آخر سعر مسجل بالجدول (F-121/D-194) — الجدول
+  /// يملأ الافتراض فحسب والحقل المكتوب يدوياً لا يُمس (D-070 اللقطة
+  /// اليدوية باقية) وبلا سجل يبقى الحقل فارغاً ليدخله المالك.
+  Future<void> _prefillFxFromLedger() async {
+    final box = _box;
+    if (box == null) return;
+    final currency = _currencyOf(box);
+    if (currency.isBase) return;
+    if (_fx.text.trim().isNotEmpty) return;
+    final rate = await widget.db.latestExchangeRate(currency.id);
+    if (!mounted || rate == null) return;
+    if (_fx.text.trim().isNotEmpty) return;
+    setState(() => _fx.text = '${rate.rateToBase}');
+  }
+
   VoucherDraft _buildDraft() {
     return VoucherDraft(
       kind: _kind,
@@ -904,6 +919,7 @@ class _VoucherEditScreenState extends State<VoucherEditScreen> {
                   ],
                   onChanged: (value) {
                     setState(() => _boxId = value);
+                    _prefillFxFromLedger();
                     _reloadOpenInvoices();
                   },
                 ),

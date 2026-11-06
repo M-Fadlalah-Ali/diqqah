@@ -989,6 +989,18 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       ? baseCurrencyFxRate
       : parseGroupedInt(_fxRate.text.trim());
 
+  /// تعبئة لقطة الصرف من آخر سعر مسجل بالجدول (F-121/D-194) — الجدول
+  /// يملأ الافتراض فحسب: الحقل المكتوب يدوياً لا يُمس (D-070 اللقطة
+  /// اليدوية باقية) وبلا سجل يبقى الحقل فارغاً ليدخله المالك.
+  Future<void> _prefillFxFromLedger(int currencyId) async {
+    if (currencyId == 1) return;
+    if (_fxRate.text.trim().isNotEmpty) return;
+    final rate = await widget.db.latestExchangeRate(currencyId);
+    if (!mounted || rate == null) return;
+    if (_fxRate.text.trim().isNotEmpty) return;
+    setState(() => _fxRate.text = '${rate.rateToBase}');
+  }
+
   int _parsed(TextEditingController c) => parseGroupedInt(c.text.trim());
 
   /// السعر الافتراضي: آخر سعر فعلي مع الطرف يقدَّم على المرجعي (F-146/
@@ -1489,9 +1501,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       DropdownMenuItem<int>(
                           value: c.id, child: Text('${c.code} ${c.name}')),
                   ],
-                  onChanged: (value) => setState(() {
-                    _currencyId = value ?? 1;
-                  }),
+                  onChanged: (value) {
+                    setState(() {
+                      _currencyId = value ?? 1;
+                    });
+                    _prefillFxFromLedger(_currencyId);
+                  },
                 ),
                 if (showFx)
                   TextField(

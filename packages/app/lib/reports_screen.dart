@@ -143,6 +143,17 @@ class ReportsScreen extends StatelessWidget {
                 'الأصول والخصوم وحقوق الملكية إلى تاريخ — وبشارة المعادلة'),
             onTap: () => _open(context, BalanceSheetView(db: db)),
           ),
+          // الدفعة 34 (F-124، D-194): مراكز العملات — كل عملة حية
+          // بصناديقها وفواتيرها المفتوحة ومكافئها الأساسي المخزن
+          // وآخر سعر مسجل — القيم المخزنة حصراً لا حساب صرف جديد.
+          ListTile(
+            leading: const Icon(Icons.currency_exchange),
+            title: const Text('مراكز العملات'),
+            subtitle: const Text(
+                'كل عملة بصناديقها وفواتيرها المفتوحة ومكافئها بالأساسية '
+                'ومآخر سعر مسجل (F-124)'),
+            onTap: () => _open(context, _CurrencyPositionsView(db: db)),
+          ),
         ],
       ),
     );
@@ -1449,6 +1460,108 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// مراكز العملات (الدفعة 34 — F-124، D-194): كل عملة حية بصناديقها
+/// بعددها ومجموع أرصدتها بالأساسية من الدفتر، وفواتيرها المفتوحة
+/// المرحّلة المتبقية بعملة الفاتورة وبأساسها المخزن بلقطة الفاتورة
+/// ذاتها، ومكافئها الأساسي المجموع — القيم المخزنة حصراً لا حساب
+/// صرف جديد — وآخر سعر مسجل بتاريخه. والتصدير والطباعة بصفوف
+/// العرض ذاتها (F-166: لا تقرير بلا زر CSV).
+class _CurrencyPositionsView extends StatelessWidget {
+  final DiqqahDatabase db;
+
+  const _CurrencyPositionsView({required this.db});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('مراكز العملات')),
+      body: FutureBuilder<List<CurrencyPositionInput>>(
+        future: db.currencyPositions(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return _reportWait();
+          final rows = currencyPositionsCompute(snapshot.data!);
+          const docColumns = [
+            'العملة',
+            'الصناديق',
+            'رصيد الصناديق (أساسي)',
+            'فواتير مفتوحة',
+            'المتبقي بعملة الفاتورة',
+            'المتبقي بالأساسية',
+            'المكافئ الإجمالي بالأساسية',
+            'آخر سعر مسجل',
+            'تاريخه',
+          ];
+          final docRows = [
+            for (final r in rows)
+              [
+                '${r.code}${r.isBase ? ' (الأساسية)' : ''}',
+                '${r.boxesCount}',
+                formatMinorAmount(r.boxesBaseMinor),
+                '${r.openInvoicesCount}',
+                formatMinorAmount(r.openRemainderDocMinor),
+                formatMinorAmount(r.openRemainderBaseMinor),
+                formatMinorAmount(r.totalBaseMinor),
+                r.latestRateToBase == null
+                    ? '—'
+                    : displayRateToBase(r.latestRateToBase),
+                r.latestRateDate ?? '—',
+              ],
+          ];
+          return Column(
+            children: [
+              _ReportActionsBar(
+                onPrint: () => _printReportDoc(context,
+                    title: 'مراكز العملات',
+                    columns: docColumns,
+                    rows: docRows),
+                onCsv: () => _exportReportCsv(context,
+                    title: 'مراكز العملات',
+                    columns: docColumns,
+                    rows: docRows),
+              ),
+              Expanded(
+                child: ListView(
+                  children: [
+                    for (final r in rows)
+                      ListTile(
+                        leading: Icon(
+                          r.isBase
+                              ? Icons.star
+                              : Icons.currency_exchange_outlined,
+                          size: 22,
+                        ),
+                        title: Text(
+                            '${r.code} — ${r.name}'
+                            '${r.isBase ? ' (الأساسية)' : ''}'),
+                        subtitle: Text(
+                          'صناديق: ${r.boxesCount} — رصيدها بالأساسية '
+                          '${formatMinorAmount(r.boxesBaseMinor)}؛ '
+                          'فواتير مفتوحة: ${r.openInvoicesCount} — '
+                          'المتبقي بعملتها '
+                          '${formatMinorAmount(r.openRemainderDocMinor)} '
+                          'وبأساسها '
+                          '${formatMinorAmount(r.openRemainderBaseMinor)}'
+                          '${r.latestRateToBase == null ? '' : '؛ آخر سعر '
+                              '${displayRateToBase(r.latestRateToBase)} '
+                              '(${r.latestRateDate})'}',
+                        ),
+                        trailing: Text(
+                          formatMinorAmount(r.totalBaseMinor),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

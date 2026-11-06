@@ -816,7 +816,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       : super(connection);
 
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -831,6 +831,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           await _createCountTables();
           await _createMovementDocTables();
           await _createAssemblyTables();
+          await _createExchangeRateTables();
           await _createClosingTriggers();
           await _seedAccountingBaseline();
           await _seedInvoiceBaseline();
@@ -1245,6 +1246,18 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             // (درس v9 الموثق) فالـDROP إلزامي قبله.
             if (version == 22) {
               await _createClosingTriggers();
+            }
+            // 22→23 (ومن إصدار أدنى مباشرة): الدفعة 34 — تعدد العملات
+            // الفعلي (F-120/F-121/F-124، D-194): جدول أسعار الصرف
+            // التاريخية جديد خالص SQL خاماً بنمط v15..v20 (آمن التكرار
+            // بـIF NOT EXISTS وتفرد (العملة، اليوم) داخل DDL — درس س86)
+            // ومشغلات تجميد نمط F-140 — لا تعديل لسعر محفوظ أبداً.
+            // وبلا أعمدة جديدة على جداول قائمة — بنية اللقطات على
+            // المستندات قائمة من م1 (F-122/D-070) — ولا بذر بخطوة v9
+            // إلزاماً (لا حاجز فترة جديد: الأسعار مرجع عملة لا مستند
+            // قيدي — درس v16 لا يُستدعى إلا لحاجزٍ جديد).
+            if (version == 23) {
+              await _createExchangeRateTables();
             }
           }
         },
@@ -5209,6 +5222,41 @@ Future<void> _createCountTables() async {
   }
 }
 
+/// جدول الدفعة 34 — أسعار الصرف التاريخية (F-121، D-194): سجل واحد
+/// لكل (العملة، اليوم) بالتفرّد داخل DDL الجدول ذاته (درس س86:
+/// القيد يولد مع جدوله مرة واحدة آمناً أي مسار وصول)، ومُشغّلات
+/// تجميد نمط F-140 — «لا تعديل لسعر محفوظ أبداً» — بلا حاجز فترة
+/// (الأسعار مرجع عملة لا مستند قيدي، ولا بذر بخطوة v9 إلزاماً —
+/// درس v16 لا يُستدعى إلا لحاجزٍ جديد). والسعر عدد صحيح مكبَّر
+/// باصطلاح fxRateScale الموحد (invoice.dart).
+Future<void> _createExchangeRateTables() async {
+  const statements = <String>[
+    'CREATE TABLE IF NOT EXISTS "exchange_rate" ('
+        '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
+        '"currency_id" INTEGER NOT NULL, '
+        '"date" TEXT NOT NULL, '
+        '"rate_to_base" INTEGER NOT NULL, '
+        '"uuid" TEXT NOT NULL, '
+        '"created_at" INTEGER NOT NULL DEFAULT 0, '
+        '"updated_at" INTEGER NOT NULL DEFAULT 0, '
+        '"is_deleted" INTEGER NOT NULL DEFAULT 0, '
+        'UNIQUE("currency_id", "date"))',
+    'CREATE TRIGGER IF NOT EXISTS trg_exchange_rate_frozen_update '
+        'BEFORE UPDATE ON exchange_rate FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سعر الصرف المحفوظ لا يُعدل أبداً (F-121)'); "
+        'END',
+    'CREATE TRIGGER IF NOT EXISTS trg_exchange_rate_frozen_delete '
+        'BEFORE DELETE ON exchange_rate FOR EACH ROW '
+        'BEGIN '
+        "SELECT RAISE(ABORT, 'سعر الصرف المحفوظ لا يُحذف أبداً (F-121)'); "
+        'END',
+  ];
+  for (final sql in statements) {
+    await customStatement(sql);
+  }
+}
+
 /// جدولا إذني المخزون وأسطرهما (F-209/F-210 — الدفعة 26 س85/D-189):
 /// أربعة جداول خالصة بنمط v15/v16 (آمنة التكرار بـIF NOT EXISTS) —
 /// الرأس مرحّل فوراً (state 'posted' ثابت — بلا مسودة نمط س-18:
@@ -5939,6 +5987,221 @@ Future<List<CurrencyRow>> currenciesOf() async {
         isBase: (r.data['is_base'] as int) == 1,
       ),
   ];
+}
+
+// ═══ الدفعة 34 — تعدد العملات الفعلي (F-120/F-121/F-124، D-194) ═══
+// الإدارة الكاملة بلا مساس بالبنية القائمة من م1 (D-070/F-122/F-123):
+// إضافة عملات جديدة حصراً — لا تعديل بعد الحفظ — والتعطيل بحرستيه
+// (الأساسية محمية والمرجعية مرفوضة)، وأسعار الصرف التاريخية مجمدة
+// بطبقة القاعدة (لا تعديل لسعر محفوظ أبداً — F-121)، وتقرير مراكز
+// العملات بقيمه المخزنة حصراً بلا أي حساب صرف جديد (F-124).
+
+/// إضافة عملة جديدة (F-120/D-194) — المدقق البنيوي في المجال
+/// (validateCurrencySpec) والفحص هنا على ما خُزّن: تفرد الكود مطلق
+/// بالحي والمعطل معاً لأن اللقطات التاريخية تحيل إلى الكود لا إلى
+/// الصف، والحقول محفوظة كما كتبت أول مرة فلا تعديل بعد الحفظ
+/// (نمط المرجع الدائم 03 §6-3).
+Future<int> currenciesAdd({
+  required String code,
+  required String name,
+  required int minorUnits,
+}) async {
+  final existingCodes = <String>{
+    for (final r in (await customSelect('SELECT code FROM currencies').get()))
+      normalizeCurrencyCode(r.data['code'] as String),
+  };
+  final errors = validateCurrencySpec(
+    CurrencySpec(code: code, name: name, minorUnits: minorUnits),
+    existingCodes: existingCodes,
+  );
+  if (errors.isNotEmpty) {
+    throw StateError('عملة غير سليمة — ${errors.first.runtimeType}');
+  }
+  final now = DateTime.now().millisecondsSinceEpoch;
+  await customStatement(
+    'INSERT INTO currencies (code, name, minor_units, is_base, uuid, '
+    'created_at, updated_at, is_deleted) VALUES (?, ?, ?, 0, ?, ?, ?, 0)',
+    [
+      normalizeCurrencyCode(code),
+      name.trim(),
+      minorUnits,
+      const Uuid().v4(),
+      now,
+      now,
+    ],
+  );
+  return (await customSelect('SELECT last_insert_rowid() AS id').getSingle())
+      .data['id'] as int;
+}
+
+/// تعطيل عملة (F-120/D-194) — بحرستيه: الأساسية لا تُعطَّل (هي مقياس
+/// الكل)، والعملة عليها مرجع قائم — ولو في صف معطَّل — لا تُعطَّل
+/// لأن اللقطات التاريخية تحيل إليها. والتعطيل علامة is_deleted لا
+/// حذف أبداً (نمط 03 §6-3).
+Future<void> currenciesDeactivate(int currencyId) async {
+  final cur = await customSelect(
+    'SELECT id, is_base FROM currencies WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(currencyId)],
+  ).get();
+  if (cur.isEmpty) {
+    throw StateError('لا عملة حية بالمعرف $currencyId');
+  }
+  if ((cur.first.data['is_base'] as int) == 1) {
+    throw StateError('عملة الأساسية لا تُعطَّل — هي مقياس الكل (D-194)');
+  }
+  const checks = <(String, String)>[
+    ('invoices', 'currency_id'),
+    ('vouchers', 'currency_id'),
+    ('cash_boxes', 'currency_id'),
+    ('parties', 'default_currency_id'),
+    ('move_lines', 'currency_id'),
+    ('items', 'price_currency_id'),
+  ];
+  var refs = 0;
+  for (final (table, column) in checks) {
+    final r = await customSelect(
+      'SELECT COUNT(*) AS c FROM "$table" WHERE "$column" = ?',
+      variables: [Variable.withInt(currencyId)],
+    ).getSingle();
+    refs += r.data['c'] as int;
+  }
+  if (refs > 0) {
+    throw StateError(
+      'العملة عليها $refs مرجع قائم — التعطيل للعملات غير المستخدمة '
+      'حصراً (اللقطات التاريخية تحيل إليها — D-194)',
+    );
+  }
+  await customStatement(
+    'UPDATE currencies SET is_deleted = 1, updated_at = ? WHERE id = ?',
+    [DateTime.now().millisecondsSinceEpoch, currencyId],
+  );
+}
+
+/// تسجيل سعر صرف يومي (F-121/D-194) — المدقق في المجال (السعر
+/// المكبَّر موجب والتاريخ ISO صالح غير مستقبل والعملة ليست الأساسية)
+/// والفحص هنا على ما خُزّن: العملة حية واليوم بلا سجل سابق — فاليوم
+/// المسجل لا يقبل ثانية والسجل المحفوظ لا يُعدل ولا يُحذف إطلاقاً
+/// (التجميد نمط F-140 بطبقة القاعدة).
+Future<int> exchangeRateRecord({
+  required int currencyId,
+  required String date,
+  required int rateToBase,
+}) async {
+  final cur = await customSelect(
+    'SELECT is_base FROM currencies WHERE id = ? AND is_deleted = 0',
+    variables: [Variable.withInt(currencyId)],
+  ).get();
+  if (cur.isEmpty) {
+    throw StateError('لا عملة حية بالمعرف $currencyId');
+  }
+  final errors = validateExchangeRateRecord(
+    rateToBase: rateToBase,
+    date: date,
+    todayIso: todayIsoDate(),
+    isBase: (cur.first.data['is_base'] as int) == 1,
+  );
+  if (errors.isNotEmpty) {
+    throw StateError('سعر غير سليم — ${errors.first.runtimeType}');
+  }
+  final day = date.trim();
+  final dup = await customSelect(
+    'SELECT id FROM exchange_rate WHERE currency_id = ? AND date = ?',
+    variables: [Variable.withInt(currencyId), Variable.withString(day)],
+  ).get();
+  if (dup.isNotEmpty) {
+    throw StateError(
+      'سعر هذا اليوم محفوظ سابقاً — لا تعديل لسعر محفوظ أبداً (F-121)',
+    );
+  }
+  final now = DateTime.now().millisecondsSinceEpoch;
+  await customStatement(
+    'INSERT INTO exchange_rate (currency_id, date, rate_to_base, uuid, '
+    'created_at, updated_at, is_deleted) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    [currencyId, day, rateToBase, const Uuid().v4(), now, now],
+  );
+  return (await customSelect('SELECT last_insert_rowid() AS id').getSingle())
+      .data['id'] as int;
+}
+
+/// أسعار عملة محفوظة — الأحدث أولاً (F-121).
+Future<List<ExchangeRateEntry>> exchangeRatesOf(int currencyId) async {
+  final rows = await customSelect(
+    'SELECT currency_id, date, rate_to_base FROM exchange_rate '
+    'WHERE currency_id = ? ORDER BY date DESC, id DESC',
+    variables: [Variable.withInt(currencyId)],
+  ).get();
+  return [
+    for (final r in rows)
+      ExchangeRateEntry(
+        currencyId: r.data['currency_id'] as int,
+        date: r.data['date'] as String,
+        rateToBase: r.data['rate_to_base'] as int,
+      ),
+  ];
+}
+
+/// آخر سعر مسجل لعملة — يملأ الافتراض بلقطة المستند فحسب (D-070:
+/// اللقطة اليدوية باقية) — ويعود null بلا سجل.
+Future<ExchangeRateEntry?> latestExchangeRate(int currencyId) async {
+  final rows = await exchangeRatesOf(currencyId);
+  return rows.isEmpty ? null : rows.first;
+}
+
+/// مراكز العملات (F-124/D-194) — لكل عملة حية: صناديقها بعددها
+/// ومجموع أرصدتها بالأساسية من الدفتر (نمط تقرير الصناديق ذاته)،
+/// وفواتيرها المفتوحة المرحّلة المتبقية بعملة الفاتورة وبأساسها
+/// المخزن بلقطة الفاتورة ذاتها (لا حساب صرف جديد — القيم المخزنة
+/// حصراً؛ الصندوق الدولاري رصيده الدفتري بالأساسية)، وآخر سعر
+/// مسجل بتاريخه. التجميع النهائي بالمجال النقي
+/// (currencyPositionsCompute).
+Future<List<CurrencyPositionInput>> currencyPositions() async {
+  final currencies = await customSelect(
+    'SELECT id, code, name, is_base FROM currencies '
+    'WHERE is_deleted = 0 ORDER BY id',
+  ).get();
+  final rows = <CurrencyPositionInput>[];
+  for (final c in currencies) {
+    final cid = c.data['id'] as int;
+    final boxes = await customSelect(
+      'SELECT id FROM cash_boxes WHERE currency_id = ? '
+      'AND is_deleted = 0 ORDER BY id',
+      variables: [Variable.withInt(cid)],
+    ).get();
+    var boxesBase = 0;
+    for (final b in boxes) {
+      boxesBase += await _cashBoxBalanceTx(b.data['id'] as int);
+    }
+    final open = await customSelect(
+      'SELECT COUNT(*) AS cnt, '
+      'COALESCE(SUM(i.total_doc_minor - COALESCE(a.applied, 0)), 0) '
+      'AS rem_doc, '
+      'COALESCE(SUM(i.total_base_minor - COALESCE(a.applied_base, 0)), 0) '
+      'AS rem_base '
+      'FROM invoices i '
+      'LEFT JOIN (SELECT invoice_id, SUM(applied_doc_minor) AS applied, '
+      'SUM(applied_base_minor) AS applied_base FROM voucher_allocations '
+      'GROUP BY invoice_id) a ON a.invoice_id = i.id '
+      'WHERE i.currency_id = ? AND i.is_deleted = 0 '
+      "AND i.state IN ('posted', 'partially_paid') "
+      'AND (i.total_doc_minor - COALESCE(a.applied, 0)) > 0',
+      variables: [Variable.withInt(cid)],
+    ).getSingle();
+    final rate = await latestExchangeRate(cid);
+    rows.add(CurrencyPositionInput(
+      currencyId: cid,
+      code: c.data['code'] as String,
+      name: c.data['name'] as String,
+      isBase: (c.data['is_base'] as int) == 1,
+      boxesCount: boxes.length,
+      boxesBaseMinor: boxesBase,
+      openInvoicesCount: open.data['cnt'] as int,
+      openRemainderDocMinor: open.data['rem_doc'] as int,
+      openRemainderBaseMinor: open.data['rem_base'] as int,
+      latestRateToBase: rate?.rateToBase,
+      latestRateDate: rate?.date,
+    ));
+  }
+  return rows;
 }
 
   // ═══ الدفعة 26 — إذنا المخزون (F-209/F-210، س85/D-189) ═══

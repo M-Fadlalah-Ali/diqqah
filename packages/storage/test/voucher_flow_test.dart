@@ -199,7 +199,7 @@ void main() {
 
   test('س-61 بذر v8: الجداول الأربعة وحسابا فروق العملة صارا مفعّلين',
       () async {
-    expect(db.schemaVersion, 22);
+    expect(db.schemaVersion, 23);
     for (final table in const [
       'vouchers',
       'voucher_allocations',
@@ -798,7 +798,7 @@ void main() {
 
     final migrated = DiqqahDatabase(filePath: dbPath);
     addTearDown(migrated.close);
-    expect(migrated.schemaVersion, 22);
+    expect(migrated.schemaVersion, 23);
     final vouchers = await migrated.customSelect(
       "SELECT name FROM sqlite_master WHERE type = 'table' "
       "AND name = 'vouchers'",

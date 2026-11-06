@@ -3,6 +3,7 @@ library diqqah_domain;
 export 'src/assembly.dart';
 export 'src/backup.dart';
 export 'src/bundle.dart';
+export 'src/currencies.dart';
 export 'src/csv_export.dart';
 export 'src/financials.dart';
 export 'src/integrity.dart';

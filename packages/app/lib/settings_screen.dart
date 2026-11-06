@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
 import 'hijri_display.dart';
+import 'currencies_screen.dart';
 import 'ui_fonts.dart';
 import 'print_image_prefs.dart';
 
@@ -1110,6 +1111,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          // الدفعة 34 (F-120/F-121، D-194): إدارة العملات وأسعار
+          // الصرف — بند ظاهر لا مدفون (درس D-098)، والتعطيل بلا
+          // حذف والأسعار المحفوظة لا تعدل أبداً.
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.currency_exchange),
+              title: const Text('العملات وأسعار الصرف'),
+              subtitle: const Text(
+                  'إضافة عملات وتعطيل غير المستخدمة — وأسعار يومية '
+                  'محفوظة لا تُعدل أبداً (F-120/F-121)'),
+              onTap: () async {
+                await Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => CurrenciesScreen(db: widget.db)),
+                );
+              },
+            ),
+          ),
           // خط التطبيق والطباعة (D-104، دفعة 8 س39) — خيار واحد يغيّر
           // العرض والطباعة معاً بلفظ المالك، والمكتبة مدمجة حصراً:
           // ساحل وتجوال لا غير — لا خطوط جهاز ولا تحميل خارجي.
