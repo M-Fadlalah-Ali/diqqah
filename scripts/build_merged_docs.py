@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""توليد النسخة المجمّعة لوثائق الحزمة v2.02 (D-013/D-019/D-023).
+"""توليد النسخة المجمّعة لوثائق الحزمة v2.03 (D-013/D-019/D-023).
 
-السكربت المعتمد لتوليد docs/diqqah-docs-merged-v2.02.md من الملفات
-المنفصلة الإحدى عشرة في docs/diqqah-v2.02/ — الملفات المنفصلة تبقى
+السكربت المعتمد لتوليد docs/diqqah-docs-merged-v2.03.md من الملفات
+المنفصلة الإحدى عشرة في docs/diqqah-v2.03/ — الملفات المنفصلة تبقى
 المرجع الوحيد وهذا الملف أرشيف قراءة يعاد توليده بعد كل تحديث.
 
 الاستخدام:
@@ -27,28 +27,28 @@ from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOCS = ROOT / "docs" / "diqqah-v2.02"
-OUT = ROOT / "docs" / "diqqah-docs-merged-v2.02.md"
+DOCS = ROOT / "docs" / "diqqah-v2.03"
+OUT = ROOT / "docs" / "diqqah-docs-merged-v2.03.md"
 
 SOURCES = [
-    "README-v2.02.md",
-    "01-vision-and-scope-v2.02.md",
-    "02-terminology-v2.02.md",
-    "03-chart-of-accounts-v2.02.md",
-    "04-srs-v2.02.md",
-    "05-data-model-v2.02.md",
-    "06-workflows-v2.02.md",
-    "07-tryton-principles-v2.02.md",
-    "08-sync-strategy-v2.02.md",
-    "09-release-plan-v2.02.md",
-    "10-test-plan-v2.02.md",
+    "README-v2.03.md",
+    "01-vision-and-scope-v2.03.md",
+    "02-terminology-v2.03.md",
+    "03-chart-of-accounts-v2.03.md",
+    "04-srs-v2.03.md",
+    "05-data-model-v2.03.md",
+    "06-workflows-v2.03.md",
+    "07-tryton-principles-v2.03.md",
+    "08-sync-strategy-v2.03.md",
+    "09-release-plan-v2.03.md",
+    "10-test-plan-v2.03.md",
 ]
 
-HEADER = """# «دِقَّة» (Diqqah) — الحزمة الكاملة المجمّعة — v2.02
+HEADER = """# «دِقَّة» (Diqqah) — الحزمة الكاملة المجمّعة — v2.03
 
 | البند | القيمة |
 |---|---|
-| طبيعة هذا الملف | نسخة قراءة مجمّعة وُلِّدت آلياً من ملفات الحزمة v2.02 — وفق D-013 (نسخة مجمّعة عند الطلب) |
+| طبيعة هذا الملف | نسخة قراءة مجمّعة وُلِّدت آلياً من ملفات الحزمة v2.03 — وفق D-013 (نسخة مجمّعة عند الطلب) |
 | المصدر الرسمي | ملفات الحزمة المنفصلة الإحدى عشرة في `diqqah-docs/` — تبقى المرجع الوحيد (D-019)؛ هذا الملف أرشيف قراءة لا يُحدَّث، وأي تحديث يُصدر في الملفات المنفصلة بإصدار جديد (D-023) ثم يعاد توليد المجمّعة |
 | تاريخ التوليد | {today} |
 | ترتيب الأقسام | README ثم الوثائق 01 → 10 بترتيب القراءة المعلن |
