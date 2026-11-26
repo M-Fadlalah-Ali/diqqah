@@ -1,0 +1,169 @@
+// اختبار محرك التفقيط — دفعة (14) س-149/D-139 بقرار المالك
+// «التفقيط للمبلغ لا للكميات». الصيغ المثبتة هنا هي لسان القسيمة
+// المطبوعة — بالعملتين المبذورتين وبالسلوك العام لغيرهما.
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:diqqah_app/tafqit.dart';
+
+void main() {
+  final syp =
+      tafqitCurrencyFor(code: 'SYP', name: 'ليرة سورية', minorUnits: 2);
+  final usd =
+      tafqitCurrencyFor(code: 'USD', name: 'دولار أمريكي', minorUnits: 2);
+
+  String tSyp(int minor) =>
+      tafqitAmountWords(totalMinor: minor, currency: syp);
+  String tUsd(int minor) =>
+      tafqitAmountWords(totalMinor: minor, currency: usd);
+
+  group('الليرة السورية — معدود مؤنث بصيغه', () {
+    test('الواحد والثنائي والجمع', () {
+      expect(tSyp(100), 'فقط ليرة سورية واحدة لا غير');
+      expect(tSyp(200), 'فقط ليرتان سوريتان لا غير');
+      expect(tSyp(300), 'فقط ثلاث ليرات سورية لا غير');
+      expect(tSyp(1000), 'فقط عشر ليرات سورية لا غير');
+    });
+    test('أحد عشر..تسع وتسعون بمفرد المعدود', () {
+      expect(tSyp(1100), 'فقط إحدى عشرة ليرة سورية لا غير');
+      expect(tSyp(2100), 'فقط إحدى وعشرون ليرة سورية لا غير');
+      expect(tSyp(2500), 'فقط خمس وعشرون ليرة سورية لا غير');
+      expect(tSyp(9900), 'فقط تسع وتسعون ليرة سورية لا غير');
+    });
+    test('المئات بمفرد المعدود ومئتا بصيغة الإضافة', () {
+      expect(tSyp(10000), 'فقط مئة ليرة سورية لا غير');
+      expect(tSyp(20000), 'فقط مئتا ليرة سورية لا غير');
+      expect(tSyp(25000), 'فقط مئتان وخمسون ليرة سورية لا غير');
+      expect(tSyp(99900), 'فقط تسعمئة وتسع وتسعون ليرة سورية لا غير');
+    });
+    test('المئات مركبة مع باقي المجموعة', () {
+      expect(tSyp(10100), 'فقط مئة وليرة سورية واحدة لا غير');
+      expect(tSyp(10200), 'فقط مئة وليرتان سوريتان لا غير');
+      expect(tSyp(10500), 'فقط مئة وخمس ليرات سورية لا غير');
+      expect(tSyp(11000), 'فقط مئة وعشر ليرات سورية لا غير');
+      expect(tSyp(12500), 'فقط مئة وخمس وعشرون ليرة سورية لا غير');
+    });
+    test('القياسات: ألف وألفا وألفان ومضاعفاتها', () {
+      expect(tSyp(100000), 'فقط ألف ليرة سورية لا غير');
+      expect(tSyp(100100), 'فقط ألف وليرة سورية واحدة لا غير');
+      expect(tSyp(200000), 'فقط ألفا ليرة سورية لا غير');
+      expect(tSyp(250000), 'فقط ألفان وخمسمئة ليرة سورية لا غير');
+      expect(tSyp(2500000), 'فقط خمسة وعشرون ألف ليرة سورية لا غير');
+      expect(tSyp(10000000), 'فقط مئة ألف ليرة سورية لا غير');
+    });
+    test('الملايين بصيغها', () {
+      expect(tSyp(100000000), 'فقط مليون ليرة سورية لا غير');
+      expect(tSyp(200000000), 'فقط مليونا ليرة سورية لا غير');
+      expect(tSyp(300000000), 'فقط ثلاثة ملايين ليرة سورية لا غير');
+    });
+    test('مزيج كامل بجزء القروش', () {
+      expect(tSyp(125075),
+          'فقط ألف ومئتان وخمسون ليرة سورية وخمسة وسبعون قرشاً لا غير');
+    });
+  });
+
+  group('القروش — معدود مذكر بصيغه', () {
+    test('الواحد والثنائي والجمع والمنصوب', () {
+      expect(tSyp(1), 'فقط قرش واحد لا غير');
+      expect(tSyp(2), 'فقط قرشان لا غير');
+      expect(tSyp(3), 'فقط ثلاثة قروش لا غير');
+      expect(tSyp(50), 'فقط خمسون قرشاً لا غير');
+      expect(tSyp(99), 'فقط تسعة وتسعون قرشاً لا غير');
+    });
+    test('صفر المبلغ المعرَّف', () {
+      expect(tSyp(0), 'فقط صفر ليرة سورية لا غير');
+    });
+  });
+
+  group('الدولار — معدود مذكر بصيغه', () {
+    test('الثنائي والجمع والمنصوب', () {
+      expect(tUsd(200), 'فقط دولاران أمريكيان لا غير');
+      expect(tUsd(300), 'فقط ثلاثة دولارات أمريكية لا غير');
+      expect(tUsd(2500), 'فقط خمسة وعشرون دولاراً أمريكياً لا غير');
+    });
+    test('مزيج بالسنت', () {
+      expect(tUsd(125), 'فقط دولار أمريكي واحد وخمسة وعشرون سنتاً لا غير');
+    });
+  });
+
+  group('السلوك العام لعملة غير مبذورة', () {
+    final czk = tafqitCurrencyFor(
+        code: 'CZK', name: 'كورونا تشيكية', minorUnits: 2);
+    test('الاسم كما هو وصيغة الواحد والثنائي الموثقة', () {
+      expect(
+        tafqitAmountWords(totalMinor: 100, currency: czk),
+        'فقط كورونا تشيكية واحد لا غير',
+      );
+      expect(
+        tafqitAmountWords(totalMinor: 300, currency: czk),
+        'فقط ثلاثة كورونا تشيكية لا غير',
+      );
+      // وصيغة الفرعي الغائب: «من مئة» — موثقة بالبوابة لا صمتاً.
+      expect(
+        tafqitAmountWords(totalMinor: 150, currency: czk),
+        'فقط كورونا تشيكية واحد وخمسون من مئة لا غير',
+      );
+    });
+  });
+
+  group('التوسعة س146/D-209 — صيغ الكتالوج المضمّن', () {
+    test('الريال السعودي بالهللة — منصوب 11..99 والفرعي مؤنث', () {
+      final sar =
+          tafqitCurrencyFor(code: 'SAR', name: 'ريال سعودي', minorUnits: 2);
+      String t(int minor) =>
+          tafqitAmountWords(totalMinor: minor, currency: sar);
+      expect(t(100), 'فقط ريال سعودي واحد لا غير');
+      expect(t(200), 'فقط ريالان سعوديان لا غير');
+      expect(t(300), 'فقط ثلاثة ريالات سعودية لا غير');
+      expect(
+          t(2550), 'فقط خمسة وعشرون ريالاً سعودياً وخمسون هللةً لا غير');
+    });
+
+    test('اليورو بصيغه والسنت بدل «من مئة» بعد التوسعة', () {
+      final eur = tafqitCurrencyFor(code: 'EUR', name: 'يورو', minorUnits: 2);
+      expect(
+        tafqitAmountWords(totalMinor: 100, currency: eur),
+        'فقط يورو واحد لا غير',
+      );
+      expect(
+        tafqitAmountWords(totalMinor: 150, currency: eur),
+        'فقط يورو واحد وخمسون سنتاً لا غير',
+      );
+    });
+
+    test('الدينار الكويتي بدقته الثلاثية (ISO) بالفلس', () {
+      final kwd =
+          tafqitCurrencyFor(code: 'KWD', name: 'دينار كويتي', minorUnits: 3);
+      expect(
+        tafqitAmountWords(totalMinor: 1250, currency: kwd),
+        'فقط دينار كويتي واحد ومئتان وخمسون فلساً لا غير',
+      );
+    });
+
+    test('الين الياباني دقة صفر — لا جزء أصلاً', () {
+      final jpy =
+          tafqitCurrencyFor(code: 'JPY', name: 'ين ياباني', minorUnits: 0);
+      expect(
+        tafqitAmountWords(totalMinor: 5, currency: jpy),
+        'فقط خمسة ينات يابانية لا غير',
+      );
+    });
+
+    test('الليرة التركية المذكرة بالثنائي والكوروش المنصوب', () {
+      final tryCur =
+          tafqitCurrencyFor(code: 'TRY', name: 'ليرة تركية', minorUnits: 2);
+      expect(
+        tafqitAmountWords(totalMinor: 250, currency: tryCur),
+        'فقط ليرتان تركيتان وخمسون كوروشاً لا غير',
+      );
+    });
+
+    test('الدينار التونسي بخاناته الثلاث والملّيم', () {
+      final tnd =
+          tafqitCurrencyFor(code: 'TND', name: 'دينار تونسي', minorUnits: 3);
+      expect(
+        tafqitAmountWords(totalMinor: 1500, currency: tnd),
+        'فقط دينار تونسي واحد وخمسمئة ملّيم لا غير',
+      );
+    });
+  });
+}

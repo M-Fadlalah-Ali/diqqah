@@ -1,0 +1,19 @@
+name: diqqah_domain
+description: حزمة المجال النقي لدِقَّة — بلا Flutter ولا Drift (F-010، 07 §1.8)
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  crypto: ^3.0.7
+  cryptography: ^2.5.0
+  # D-125 (دفعة 10 — بوابة الصور والباركود): محرك صورة الصنف النقي
+  # F-010 يلزم ضغطاً نقياً بلا Flutter — `image` نقية حصراً وتعمل على
+  # المنصتين وفي الاختبارات النقية، وflutter_image_compress لا يدعم
+  # Windows ولا يجري تحت F-010 (الحسم الموثق بقرار الدفعة).
+  image: ^4.2.0
+
+dev_dependencies:
+  test: ^1.33.0

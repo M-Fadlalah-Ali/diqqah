@@ -1,0 +1,241 @@
+# بناء حزم التثبيت (APK / Windows) — البند الاسمي الأخير من م0 (09 §1، سجل Task 42).
+# لماذا هنا وليس محلياً؟ القيد المؤسس من Task 37: لا SDK محلياً أبداً —
+# Flutter يعيش على عُدّة GitHub، والناتج artifact يستلمه المالك من متصفحه
+# بتحميل واحد مقنن بقراره هو (مجالات الحزم ضمن حصة التخزين المجانية).
+#
+# الإطلاق: دفعة إلى فرع «build» من بيئة العمل (دفعة كيلوبايتية)،
+# أو زر «Run workflow» بيد المالك من صفحة Actions مباشرة.
+#
+# منصات التطبيق (android/ وwindows/) غير مودعة بعد — تُولَّد هنا عند غيابها
+# فقط بحرس صريح، وحين تودع هياكلها تصير هذه الخطوة صامتة لا تعيد الكتابة
+# فوق شيئاً. أرشفة الهياكل نفسها artifact صغيراً ليودع في المستودع بعد
+# مراجعتها، فيصير البناء مُعاد إنتاجه من المودع لا من التوليد العشوائي.
+name: بناء الحزم
+
+on:
+  workflow_dispatch:
+    inputs:
+      universal_apk:
+        description: 'APK شامل لكل المعماريات بدل arm64 وحده (~50MB — عند الحاجة حصراً؛ D-056 باقٍ على قيده)'
+        type: boolean
+        default: false
+        required: false
+  push:
+    branches: [build]
+
+jobs:
+  android:
+    name: حزمة أندرويد (APK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # 3.47.9 مثبتة حرفاً (س126): بيئة البناء = بيئة الحكم — b36 بُنيت
+          # عليها والتحقق الشيفري كله جرى عليها فلا تنزلق القناة ببناء b37
+          # إلى 3.50.0 (درس الجولة 256 — تثبيت مطابق بci.yml).
+          flutter-version: 3.47.9
+      - name: توليد منصة أندرويد إن غابت (diqqah_app/app.diqqah — المعرفات التقنية المعتمدة)
+        id: gen
+        run: |
+          if [ ! -d android ]; then
+            flutter create --platforms=android --org app.diqqah --project-name diqqah_app .
+            rm -f test/widget_test.dart
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: أرشفة هيكل أندرويد المولد (ليودَع في المستودع بعد المراجعة)
+        if: steps.gen.outputs.created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diqqah-scaffold-android
+          path: |
+            packages/app/android
+            packages/app/.metadata
+            packages/app/.gitignore
+          retention-days: 7
+      # قالب التوليد يضع الاسم التقني عنواناً للساحة — الواجهة لاتينياً
+      # لها موضعها المعرفي (قاعدة D-025) لا شاشة هاتف المالك.
+      - name: عنوان الساحة «دِقَّة»
+        run: sed -i 's/android:label="diqqah_app"/android:label="دِقَّة"/' android/app/src/main/AndroidManifest.xml || true
+      # ملفات Drift المولدة (database.g.dart) غير مودعة في المستودع — درس
+      # CI #6/#7 (Task 41) نفسه: البناء يجمّع مصادر ../storage فلا يرى
+      # API الحزمة المولد إلا بتوليده هنا قبل البناء.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - run: flutter pub get
+      # D-056 + القاعدة السادسة (سقف تحميل المالك 35MB): artifact arm64
+      # وحده (~9MB فعلياً بالقياس البايتي) لهواتف اليوم — كل الأجهزة
+      # الحديثة arm64. APK الشامل (~50MB يضخم الحزمة) عند التوزيع العام
+      # حصراً — سطر واحد موثق (§9.1-3): مفتاح dispatch «universal_apk»
+      # يبدّل الأمر إلى flutter build apk --release بلا split ولا
+      # target-platform فشامل لكل المعماريات (س117).
+      - name: قراءة الإصدار من pubspec (مصدر واحد للحقيقة — Task 51)
+        id: ver
+        run: |
+          VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          # D-213 (كلمة المالك «0.260 دون الإضافات الأخرى»): الإصدار الجديد
+          # «0.N.0» يُعرض «0.N» بسقوط الصفر البخلي — وpatch مثبتة صفراً
+          # ببوابة صارمة لا صمت (بواباتٌ لا تفشل ليست بوابات).
+          MA=$(echo "$VER" | cut -d. -f1); MI=$(echo "$VER" | cut -d. -f2); PA=$(echo "$VER" | cut -d. -f3)
+          if [ "$PA" != "0" ]; then
+            echo "D-213: patch لا يكون إلا صفراً — الإصدار 0.N.0 حصراً والمُعطى $VER"
+            exit 1
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "disp=$MA.$MI" >> "$GITHUB_OUTPUT"
+      - name: APK arm64 مصغّر — رقم البناء = رقم تشغيل CI (أو شامل بالطلب الموثق)
+        id: apk
+        run: |
+          if [ "${{ inputs.universal_apk }}" = "true" ]; then
+            # سطر التوزيع العام الموثق (س117): شامل لكل المعماريات.
+            flutter build apk --release \
+              --build-number="$GITHUB_RUN_NUMBER" \
+              --dart-define=APP_VERSION=${{ steps.ver.outputs.disp }} \
+              --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
+            echo "rel=app-release.apk" >> "$GITHUB_OUTPUT"
+          else
+            flutter build apk --release --split-per-abi --target-platform android-arm64 \
+              --build-number="$GITHUB_RUN_NUMBER" \
+              --dart-define=APP_VERSION=${{ steps.ver.outputs.disp }} \
+              --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
+            echo "rel=app-arm64-v8a-release.apk" >> "$GITHUB_OUTPUT"
+          fi
+      # Task 51: خاتم توقيع ثابت — علاج «التعارض مع حزمة حالية».
+      # آلة CI تولد خاتم debug مؤقتاً جديداً بكل تشغيل، فيرفض أندرويد
+      # تثبيت نسخة موقعة بخاتم مختلف فوق المثبتة. الخاتم الثابت مودع في
+      # هذا المستودع الخاص (رمز المالك بلا صلاحية إدارة أسرار GitHub).
+      # إن صار المستودع عاماً يوماً: تدوير الخاتم ونقله لأسرار GitHub أولاً.
+      - name: إعادة توقيع APK بالخاتم الثابت (zipalign ثم apksigner)
+        env:
+          KS: ${{ github.workspace }}/.github/keystore
+        run: |
+          PW=$(cat "$KS/diqqah.keystore.pass.txt")
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          APK="build/app/outputs/flutter-apk/${{ steps.apk.outputs.rel }}"
+          "$BT/zipalign" -f 4 "$APK" apk-aligned.apk
+          "$BT/apksigner" sign --ks "$KS/diqqah-release.keystore" \
+            --ks-key-alias diqqah --ks-pass "pass:$PW" --key-pass "pass:$PW" \
+            --out apk-signed.apk apk-aligned.apk
+          mv apk-signed.apk "$APK"
+          "$BT/apksigner" verify "$APK"
+      # البند ⑤ (س168): التحقق البايتي البنائي — يقرأ الإصدار من pubspec
+      # (مصدر واحد للحقيقة) ويتحقق به بالثنائي المبني مع أساس الاستمرارية.
+      # علة س163 الموثقة (اختلاف كتالوج الإصدار عن pubspec) صارت هنا
+      # حارساً بنائياً: أي انزلاق يُسقط التشغيل أحمر بلا صمت (لا سكوت).
+      - name: التحقق البايتي البنائي ⑤ — الإصدار من pubspec على الثنائي
+        run: |
+          APK="$GITHUB_WORKSPACE/packages/app/build/app/outputs/flutter-apk/${{ steps.apk.outputs.rel }}"
+          rm -rf /tmp/markerx && mkdir -p /tmp/markerx
+          unzip -o -q "$APK" "lib/arm64-v8a/libapp.so" -d /tmp/markerx
+          python3 "$GITHUB_WORKSPACE/scripts/verify_build_markers.py" \
+            --binary /tmp/markerx/lib/arm64-v8a/libapp.so \
+            --label "أندرويد (libapp.so)" --repo "$GITHUB_WORKSPACE"
+      - name: رفع حزمة أندرويد
+        uses: actions/upload-artifact@v4
+        with:
+          name: diqqah-android-${{ steps.ver.outputs.disp }}
+          path: packages/app/build/app/outputs/flutter-apk/${{ steps.apk.outputs.rel }}
+          retention-days: 30
+
+  windows:
+    name: حزمة ويندوز (مجلد محمول)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # 3.47.9 مثبتة حرفاً (س126): بيئة البناء = بيئة الحكم (تثبيت مطابق
+          # بci.yml وبمهمة الأندرويد أعلاه — درس الجولة 256).
+          flutter-version: 3.47.9
+      - name: توليد منصة Windows إن غابت
+        id: gen
+        shell: pwsh
+        run: |
+          # الحرس على الملف المُدار لا المجلد (درس التشغيل 25): الهيكل
+          # المودع قد يكون جزئياً — runner مودع وwindows/flutter/ المُولَّد
+          # غائب فيفشل CMake عند add_subdirectory(flutter). فحص
+          # windows/flutter/CMakeLists.txt يولّد الناقص ويترك المودع ساكناً.
+          if (-not (Test-Path "windows/flutter/CMakeLists.txt")) {
+            flutter create --platforms=windows --org app.diqqah --project-name diqqah_app .
+            Add-Content $env:GITHUB_OUTPUT "created=true"
+          } else {
+            Add-Content $env:GITHUB_OUTPUT "created=false"
+          }
+      - name: أرشفة هيكل Windows المولد
+        if: steps.gen.outputs.created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diqqah-scaffold-windows
+          path: packages/app/windows
+          retention-days: 7
+      # عنوان النافذة من القالب اسم تقني — يستبدل حرفياً إن وُجد موقعه،
+      # وغيابه لا يُسقط البناء (تجميل موثق لا وظيفة).
+      - name: عنوان النافذة «دِقَّة»
+        shell: pwsh
+        run: |
+          $f = "windows/runner/main.cpp"
+          if (Test-Path $f) {
+            $c = Get-Content $f -Raw
+            $c = $c.Replace('"diqqah_app"', '"دِقَّة"')
+            Set-Content -Path $f -Value $c -NoNewline -Encoding utf8BOM
+          }
+      # نفس درس CI #1 للبناء: التوليد قبل pub get وإلا فشل تجميع مصادر التخزين.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        shell: pwsh
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - run: flutter pub get
+      - name: قراءة الإصدار من pubspec (مصدر واحد للحقيقة — Task 51)
+        id: ver
+        shell: bash
+        run: |
+          VER=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | cut -d+ -f1 | tr -d '[:space:]')
+          # D-213 (كلمة المالك «0.260 دون الإضافات الأخرى»): نفس بوابة الأندرويد
+          MA=$(echo "$VER" | cut -d. -f1); MI=$(echo "$VER" | cut -d. -f2); PA=$(echo "$VER" | cut -d. -f3)
+          if [ "$PA" != "0" ]; then
+            echo "D-213: patch لا يكون إلا صفراً — الإصدار 0.N.0 حصراً والمُعطى $VER"
+            exit 1
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "disp=$MA.$MI" >> "$GITHUB_OUTPUT"
+      - name: بناء إصدار Windows — رقم البناء = رقم تشغيل CI
+        shell: bash
+        run: |
+          flutter build windows --release \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=APP_VERSION=${{ steps.ver.outputs.disp }} \
+            --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
+      # البند ⑤ (س168): التحقق البايتي البنائي — نفس الحارس بمهمة
+      # الأندرويد أعلاه على ثنائي ويندوز (data/app.so) بعلة س163 حارساً.
+      - name: التحقق البايتي البنائي ⑤ — الإصدار من pubspec على الثنائي
+        shell: bash
+        run: |
+          python "$GITHUB_WORKSPACE/scripts/verify_build_markers.py" \
+            --binary "$GITHUB_WORKSPACE/packages/app/build/windows/x64/runner/Release/data/app.so" \
+            --label "ويندوز (data/app.so)" --repo "$GITHUB_WORKSPACE"
+      - name: ضغط مجلد الإصدار المحمول
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath diqqah-windows-x64.zip -Force
+      - name: رفع حزمة ويندوز
+        uses: actions/upload-artifact@v4
+        with:
+          name: diqqah-windows-${{ steps.ver.outputs.disp }}
+          path: packages/app/diqqah-windows-x64.zip
+          retention-days: 30

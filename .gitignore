@@ -1,0 +1,30 @@
+# المهارات وحزم العقدة
+skills/
+node_modules/
+
+# أسرار البيئة — لا تصعد أبداً
+.env
+.env.*
+
+# ملفات العمل المؤقتة للجلسات
+tool-results/
+
+# إصدارات Flutter المستقبلية (م0)
+.dart_tool/
+build/
+
+# مولّدات محلية لا تُلزم — CI يولّدها بنفسه (درس س71) واستكمالاً لعلاج ضجيج الشجرة (س69)
+packages/*/pubspec.lock
+packages/storage/lib/src/database.g.dart
+
+# مولدات منصة ويندوز المحلية — CI يولدها بنفسه (درس س71/س73، س85)
+# تعديل س95 (D-196): المولَّد المتغير فقط يُهمد؛ وwindows/flutter/CMakeLists.txt
+# المُدار الثابت مودع حصراً فالبناء مُعاد إنتاجه من المودع (التشغيل 25 فشل بغيابه:
+# add_subdirectory(flutter) لا تجد CMakeLists.txt فيفرق المودعُ البنيوي عن المولَّد المتجدد)
+packages/app/windows/flutter/ephemeral/
+packages/app/windows/flutter/generated_plugins.cmake
+packages/app/windows/flutter/generated_plugin_registrant.cc
+packages/app/windows/flutter/generated_plugin_registrant.h
+
+# ثنائيات التحقق المؤقتة — خارج المستودع دوماً (عرف b37: /home/z/my-project/verify)
+verify/

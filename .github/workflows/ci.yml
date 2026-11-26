@@ -1,0 +1,85 @@
+# تبعيات الواجهة فقط — لماذا ثلاث مهام منفصلة؟
+# معيار F-010 نفسه: حزمة المجال تُبنى وتُختبَر بلا Flutter ولا Drift،
+# فلو انكسر هذا الفصل لاختراقته مهام دمج واحدة. وsqlite3 مطلوبة لحزمة
+# التخزين على جهاز المشغّل (apt هنا بلا كلفة إنترنت على المالك).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  domain:
+    name: المجال النقي — بلا Flutter ولا Drift (F-010)
+    runs-on: ubuntu-latest
+    # س217 — حارس سقف المهمة (درس الجولة #435): مهمة بلا timeout-minutes
+    # إذا مات مشغلها بمنتصفها بقيت in_progress للأبد بلا سجل حي
+    # (BlobNotFound) ولا تلقّيها إلا إلغاء يدوي — والسقف يحول أي علقة
+    # إلى حمراء موثقة ضمن دقائق بدل الأبدية. القيم خمسة أضعاف الخضرة
+    # الموثقة فلا تلمس التشغيل السليم ولا الحكم البيئي.
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/domain
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
+
+  storage:
+    name: التخزين — Drift والترحيلات (F-002/F-011)
+    runs-on: ubuntu-latest
+    # س217 — حارس سقف المهمة (الخضرة الموثقة ~3.5 دقائق مع build_runner).
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/storage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - run: dart pub get
+      - run: dart run build_runner build --delete-conflicting-outputs
+      - run: dart analyze
+      - run: dart test
+
+  app:
+    name: الواجهة — Flutter (F-001)
+    runs-on: ubuntu-latest
+    # س217 — حارس سقف المهمة (الخضرة الموثقة ~6 دقائق للجولة كاملة،
+    # flutter test ~3 دقائق) — والعلقة تُحصَد عند السقف لا تبقى للأبد.
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: packages/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # 3.47.9 مثبتة حرفاً (س126 — درس الجولة 256): قناة stable انزلقت من
+          # 3.47.9 إلى 3.50.0 بين 2026-11-08 و2026-11-12 فأضافت 78 معلومة
+          # إهمال material.dart (بديلها material_ui) وflutter analyze يعدّ
+          # المعلومات قاتلة افتراضاً فخرج بالكود 1 — والحكم الشيفري كله
+          # (المصفوفة المحلية 357/300/239 والجولات 250-254) جرى على 3.47.9
+          # فالتثبيت يعيد بيئة الحكم الموثقة لا يغيّر المحكوم.
+          flutter-version: 3.47.9
+      - run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      # ملفات Drift المولدة (database.g.dart) غير مودعة في المستودع، ومهمة
+      # التخزين تولّدها بنفسها — الواجهة تستهلك الحزمة بمسار مباشر فلا ترى
+      # API المولد (close() وغيره) إلا بتوليدها إياه هنا قبل التحليل.
+      - name: توليد كود Drift لحزمة التخزين التي تعتمد عليها الواجهة
+        working-directory: packages/storage
+        run: |
+          dart pub get
+          dart run build_runner build --delete-conflicting-outputs
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
