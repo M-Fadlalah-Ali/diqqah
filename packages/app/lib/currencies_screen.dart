@@ -490,7 +490,7 @@ class _CurrenciesScreenState extends State<CurrenciesScreen> {
                                   const Icon(Icons.history, size: 20),
                               title: Text(r.date),
                               trailing: Text(
-                                  displayRateToBase(r.rateToBase) +
+                                  '${displayRateToBase(r.rateToBase)}'
                                       ' لكل 1 من العملة'),
                             ),
                         if (_rates != null && _rates!.isEmpty)

@@ -150,7 +150,7 @@ void main() {
       maxMoveId = idRows.last.data['id'] as int;
       if ((start ~/ chunkMoves) % 20 == 19) {
         // ignore: avoid_print
-        print('د0 البلع: ${end}/${moves.length} قيد — '
+        print('د0 البلع: $end/$moves.length قيد — '
             '${loadWatch.elapsedMilliseconds}ms');
       }
     }

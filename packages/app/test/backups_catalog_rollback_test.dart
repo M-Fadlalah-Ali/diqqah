@@ -188,7 +188,9 @@ void main() {
           Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
       if (!File(p.join(tempDir.path, 'backups', olderName))
-          .existsSync()) break;
+          .existsSync()) {
+        break;
+      }
     }
 
     expect(File(p.join(tempDir.path, 'backups', olderName)).existsSync(),

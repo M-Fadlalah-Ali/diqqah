@@ -36,7 +36,7 @@ void main() {
         child: Directionality(
           textDirection: TextDirection.rtl,
           child: DiqqahAdaptiveCenter(
-            child: Container(key: const Key('probe'), width: 100, height: 40),
+            child: SizedBox(key: const Key('probe'), width: 100, height: 40),
           ),
         ),
       ));
@@ -55,7 +55,7 @@ void main() {
         child: Directionality(
           textDirection: TextDirection.rtl,
           child: DiqqahAdaptiveCenter(
-            child: Container(key: const Key('probe'), width: 100, height: 40),
+            child: SizedBox(key: const Key('probe'), width: 100, height: 40),
           ),
         ),
       ));

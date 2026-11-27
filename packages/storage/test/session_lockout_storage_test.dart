@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:drift/drift.dart' show Value;
+
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';

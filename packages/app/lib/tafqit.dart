@@ -506,7 +506,8 @@ String _scalePart(int g, _Scale s, bool nounFollows) {
   final rest = g % 100;
   final hundreds = g ~/ 100;
   // قبل المقياس تبقى المئات مضافة دائماً: «مئتا ألف» لا «مئتان ألف».
-  final hPrefix = hundreds > 0 ? '${hundreds == 2 ? 'مئتا' : _hundreds[hundreds]}' : '';
+  final hPrefix =
+      hundreds > 0 ? (hundreds == 2 ? 'مئتا' : _hundreds[hundreds]) : '';
   if (rest == 0) {
     return hPrefix.isEmpty ? s.one : '$hPrefix ${s.one}';
   }

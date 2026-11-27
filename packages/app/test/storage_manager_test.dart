@@ -150,7 +150,9 @@ void main() {
           Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
       if (store.catalog.entriesFor(BackupScheduleKind.hourly).length ==
-          1) break;
+          1) {
+        break;
+      }
     }
     await tester.pump(const Duration(milliseconds: 200));
 

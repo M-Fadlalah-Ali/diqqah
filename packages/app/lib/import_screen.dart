@@ -241,7 +241,7 @@ class _ImportScreenState extends State<ImportScreen> {
       // بترميز UTF-8 مع BOM — القالب النصي يحمل BOM أولَه بعرف F-166.
       await file.writeAsString(csv);
       await Share.shareXFiles([XFile(file.path)],
-          text: 'قالب استيراد ${_templateLabel} — دِقَّة');
+          text: 'قالب استيراد $_templateLabel — دِقَّة');
     } catch (e) {
       await dqLog(widget.db, e, context: 'import.template');
       messenger.showSnackBar(
