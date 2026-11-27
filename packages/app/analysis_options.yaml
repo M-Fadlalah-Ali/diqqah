@@ -21,6 +21,12 @@ include: package:flutter_lints/flutter.yaml
 
 linter:
   rules:
+    # س227 — إيجابية كاذبة موثقة: '${key}_suffix' تحتاج الأقواس حتماً
+    # (بدونها يندمج المعرفان فتنكسر الدلالة — قوالب الطباعة كلها بهذا
+    # النمط) فاقتراح القاعدة يكسر الشيفرة والقاعدة معطلة حتى إصلاحها
+    # في المحلل ذاته (16 موضعاً بالجولتين، منها ما صُوب صدقاً وأُرد
+    # لأن الفاصل بين الصحيح والكاذب لا يُؤمن آلياً).
+    unnecessary_brace_in_string_interps: false
     # س227 — معايرة موثقة بأعداد جولة #462 (التفعيل بدفعات التفكيك):
     no_leading_underscores_for_local_identifiers: false
     constant_identifier_names: false

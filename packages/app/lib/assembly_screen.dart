@@ -331,7 +331,7 @@ class _AssemblyScreenState extends State<AssemblyScreen> {
                   'الناتج: ${preview.bundleLabel ?? '؟'} × '
                   '${_bundleLevelId == null
                       ? '${int.tryParse(_qty.text.trim()) ?? 0}'
-                      : '$_qtyDocEntered (بالمستوى) = $_qtyBundlesBase'}'),
+                      : '${_qtyDocEntered} (بالمستوى) = $_qtyBundlesBase'}'),
               subtitle: Text(
                   'قيمة الدخول (مجموع المكونات المسحوبة): '
                   '${formatMinorAmount(preview.totalValueMinor)} — بلا '

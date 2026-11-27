@@ -326,7 +326,7 @@ class _StorageManagerScreenState extends State<StorageManagerScreen> {
                   icon: Icons.cleaning_services,
                   value: _tempCount == 0
                       ? 'لا ملفات'
-                      : '$_tempCount ملفاً — ${_fmt(_tempBytes)}',
+                      : '${_tempCount} ملفاً — ${_fmt(_tempBytes)}',
                   hint: 'أعلام المسارات العابرة (.tmp/.restoring)',
                 ),
                 _rowCard(

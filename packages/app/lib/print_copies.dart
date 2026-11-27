@@ -101,20 +101,20 @@ Future<void> loadPrintTemplatePrefs() async {
     final prefs = await SharedPreferences.getInstance();
     for (final (key, _) in kPrintTemplateKindChoices) {
       final p = _kindPrefs[key]!;
-      p.size.value = prefs.getString('$_prefix$key_size') ?? 'a5';
-      p.landscape.value = prefs.getBool('$_prefix$key_landscape') ?? false;
-      p.delivered.value = prefs.getBool('$_prefix$key_delivered') ?? true;
+      p.size.value = prefs.getString('${_prefix}${key}_size') ?? 'a5';
+      p.landscape.value = prefs.getBool('${_prefix}${key}_landscape') ?? false;
+      p.delivered.value = prefs.getBool('${_prefix}${key}_delivered') ?? true;
       p.deliveryNotes.value =
-          prefs.getBool('$_prefix$key_delivery_notes') ?? true;
-      p.tafqit.value = prefs.getBool('$_prefix$key_tafqit') ?? true;
+          prefs.getBool('${_prefix}${key}_delivery_notes') ?? true;
+      p.tafqit.value = prefs.getBool('${_prefix}${key}_tafqit') ?? true;
       // س162: الأوزان CSV مفصولة بفواصل لاتينية أو عربية — والفاسد
       // أو الفراغ يعود null فيبقى المتساوي القائم حرفاً.
       p.weights.value =
-          parseColumnWeightsInput(prefs.getString('$_prefix$key_weights'));
+          parseColumnWeightsInput(prefs.getString('${_prefix}${key}_weights'));
       p.freeHeader.value =
-          prefs.getString('$_prefix$key_free_header') ?? '';
+          prefs.getString('${_prefix}${key}_free_header') ?? '';
       p.freeFooter.value =
-          prefs.getString('$_prefix$key_free_footer') ?? '';
+          prefs.getString('${_prefix}${key}_free_footer') ?? '';
     }
     warehouseCopyEnabled.value =
         prefs.getBool('${_prefix}wh_copy_enabled') ?? true;
@@ -227,7 +227,7 @@ void savePrintTemplateWeights(String kindKey, List<double>? weights) {
   if (p == null) return;
   p.weights.value = (weights == null || weights.isEmpty) ? null : weights;
   _persist(
-      '$_prefix$kindKey_weights',
+      '${_prefix}${kindKey}_weights',
       (weights == null || weights.isEmpty)
           ? ''
           : weights.map((w) => w.toStringAsFixed(2)).join(','));
@@ -241,10 +241,10 @@ void savePrintTemplateFreeText(String kindKey,
   final v = value.trim();
   if (isHeader) {
     p.freeHeader.value = v;
-    _persist('$_prefix$kindKey_free_header', v);
+    _persist('${_prefix}${kindKey}_free_header', v);
   } else {
     p.freeFooter.value = v;
-    _persist('$_prefix$kindKey_free_footer', v);
+    _persist('${_prefix}${kindKey}_free_footer', v);
   }
 }
 

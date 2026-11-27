@@ -68,11 +68,11 @@ void main() {
   }
 
   test('س215 (1): القاعدة الجديدة تولد بالفهارس الستة عشر من أول '
-      'إنشاء — وبإصدار v35', () async {
+      'إنشاء — وبأحدث إصدار v37', () async {
     final db = DiqqahDatabase.inMemory();
     addTearDown(db.close);
     expect(db.schemaVersion, DiqqahDatabase.schemaVersionValue);
-    expect(DiqqahDatabase.schemaVersionValue, 35);
+    expect(DiqqahDatabase.schemaVersionValue, 37);
     final names = await indexNamesOf(db);
     for (final ix in kHotDataIndexes) {
       expect(names, contains(ix),

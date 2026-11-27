@@ -2425,6 +2425,18 @@ class DiqqahDatabase extends _$DiqqahDatabase {
           iterations: passwordUpgradeIterations);
       throw StateError(generic);
     }
+    // س227 — الفحص قبل التحقق (قفل المحاولات المتدرج بموازنة توقيت
+    // س219): القفل الوحيد الذي يخرق الرسالة الموحدة س216 — فهو لا
+    // يكشف وجود حسابٍ غيبه المجهول بل حالة حسابٍ عرفه صاحبه دخولاً
+    // ويحتاج إخبار مدته المتنقية، وهذا قرار المالك الموثق.
+    final lock = await loginLockoutRemaining(user.id);
+    if (lock != null) {
+      await PasswordHasher.equalizingWorkInBackground(
+          iterations: passwordUpgradeIterations);
+      throw StateError(
+          'الدخول مقفل مؤقتاً بعد محاولات فاشلة — أعد المحاولة بعد '
+          '${loginLockoutMinutesText(lock)}');
+    }
     final verified = await verifyUserPassword(user.id, password);
     if (verified == null) {
       // س227 — الفشل يرفع عداد القفل المتدرج (المجهول أعلاه بلا
