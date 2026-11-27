@@ -94,6 +94,17 @@ void main() {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
+    // س227 (المرحلة صفر د4): البندان خلف بوابة القوائم المالية
+    // (reports.financials) يراهما صاحب الجلسة المصرَّح لها — والمدير
+    // النجمة يراهما — فالاختبار يدخل مديراً أولاً بعقد س205 كما كان
+    // (بلا جلسة البندان مخفيان بعقد الفشل المغلق).
+    if (await db.currentUserId() == null) {
+      var userId = await db.hasAnyUser()
+          ? (await db.select(db.appUsers).get()).first.id
+          : await db.createManager(
+              name: 'المالك', login: 'owner', passwordHash: 's:h');
+      await db.setCurrentUserId(userId);
+    }
 
     await tester.pumpWidget(MaterialApp(home: ReportsScreen(db: db)));
     await tester.pump();
