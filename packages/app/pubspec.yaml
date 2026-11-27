@@ -164,6 +164,9 @@ dependencies:
     path: ../domain
 
 dev_dependencies:
+  # س227 (د1): تصريح تبعية الاختبارات — الاستيراد المباشر لsqlite3
+  # قائم باختباري التشفير والمسبار (depend_on_referenced_packages).
+  sqlite3: ^2.4.0
   integration_test:
     sdk: flutter
   flutter_test:
