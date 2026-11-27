@@ -325,22 +325,35 @@ Future<String> applyRestore({
 
   // لقطة ما قبل الاستعادة — متسقة ذرياً حتى والقاعدة في منتصف عمل.
   await db.customStatement("VACUUM INTO '${_sqlString(snapshotPath)}'");
-  // F-150/D-210 P0-ج (س148): لقطة الرجوع تبقى ملف SQLite خام كما كانت —
-  // صورة الاتصال المشفر تأتي مشفرة بمفتاح الجهاز فتُنزع تشفيرتها هنا
-  // كي يستعاد زر التراجع بالمسار القائم حرفاً (تعرف النوع وترويسة
-  // SQLite بprepareRestore تقبل النص الصريح حصراً).
+  // F-150/D-210 P0-ج (س148): صورة الاتصال المشفر تأتي مشفرة بمفتاح
+  // الجهاز فتُنزع تشفيرتها أولاً ثم —
+  // س227 (المرحلة صفر د5 من خارطة طريق التقرير الاستشاري بأمر المالك
+  // «ابدأ التنفيذ»): اللقطة الناتجة تُغَلَّف فوراً بجيل النسخ v2
+  // (مفتاح البرنامج بلا كلمة — D-060) بدل نص SQLite صريح على القرص:
+  // زر التراجع بprepareRestore نفسه يعمل حرفاً (يتعرف v2 ويفكه بلا
+  // كلمة — سلوك الكتالوج والبوابة والتدوير بلا تغيير: المسح بالاسم
+  // وقيمة restore.gate كما هي) — فتُسد فتحة اللقطة النصية الشقيقة
+  // للقاعدة المشفرة بلا كسر سيناريو الرجوع.
   final snapshotKey = db.dbKeyHex;
   if (snapshotKey != null && !fileIsPlaintextSqlite(snapshotPath)) {
     await decryptImageInPlace(snapshotPath, snapshotKey);
   }
+  final snapshotSealed =
+      await BackupCipher().encrypt(await File(snapshotPath).readAsBytes());
+  final snapshotTmp = File('$snapshotPath.wrap-tmp');
+  await snapshotTmp.writeAsBytes(snapshotSealed, flush: true);
+  await snapshotTmp.rename(snapshotPath);
 
   // س-130: لقطة الصور المرافقة — طريق الرجوع يحفظ الصور ذاته (D-124).
-  // خام غير مشفرة كنسخة القاعدة نفسها: صيغة الحزمة ذاتها بلا غلاف مفتاح.
+  // س227: الحزمة مغلَّفة بالجيل ذاته v2 — _decodeImagesBlob يفك الجيل
+  // الجاري بلا كلمة فالتراجع يعمل كما كان، والصور لم تعد نصاً صريحاً
+  // بجوار نسخة القاعدة على القرص.
   if (imagesDir != null) {
     final bundle = await collectImagesBundle(imagesDir, cipher: imagesCipher);
     if (bundle != null) {
+      final sealedBundle = await BackupCipher().encrypt(bundle);
       await File(imagesSiblingPath(snapshotPath))
-          .writeAsBytes(bundle, flush: true);
+          .writeAsBytes(sealedBundle, flush: true);
     }
   }
 

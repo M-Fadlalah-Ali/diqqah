@@ -5,11 +5,26 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
 
 jobs:
+  secrets:
+    # س227 (المرحلة صفر د2 من خارطة طريق التقرير الاستشاري — بأمر المالك
+    # «ابدأ التنفيذ»): بوابة فحص الأسرار — تمسح الشجرة المسلوكة قبل أي
+    # حكم: ملف خاتم أو مفتاح خاص أو رمز وصول أو ملف بيئة = جولة حمراء
+    # برسالة معللة (بوابةٌ لا تفشل ليست بوابات) — والفحص موازٍ للمهام
+    # الثلاث فأي جولة خضراء معناها شجرة نظيفة، والاستطلاع على فرعٍ
+    # بworkflow_dispatch يفتح الجولة بلا دفع إلى main.
+    name: بوابة الأسرار (س227)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/secret_scan.py
+
   domain:
     name: المجال النقي — بلا Flutter ولا Drift (F-010)
     runs-on: ubuntu-latest

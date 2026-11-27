@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- س227 (المرحلة صفر د6): الانطلاقة بالهوية في الوضع الليلي كذلك —
+     خلفية بني الهوية العميق والكلمة الوسطة (نمط النهار بعينه فلا
+     وميض تبديل بين الانطلاقة والتطبيق). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item>
+        <color android:color="#8B5A3C" />
+    </item>
+    <item>
         <bitmap
             android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:src="@drawable/diqqah_splash_wordmark" />
+    </item>
 </layer-list>

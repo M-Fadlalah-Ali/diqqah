@@ -28,3 +28,8 @@ packages/app/windows/flutter/generated_plugin_registrant.h
 
 # ثنائيات التحقق المؤقتة — خارج المستودع دوماً (عرف b37: /home/z/my-project/verify)
 verify/
+
+# س227 (المرحلة صفر د2): ملفات الخاتم لا تعود للشجرة أبداً — التوقيع
+# من أسرار GitHub (DIQQAH_KEYSTORE_BASE64/DIQQAH_KEYSTORE_PASSWORD)
+# وبوابة فحص الأسرار تحرس عودتها (scripts/secret_scan.py).
+.github/keystore/

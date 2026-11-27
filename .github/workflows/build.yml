@@ -33,6 +33,10 @@ jobs:
         working-directory: packages/app
     steps:
       - uses: actions/checkout@v4
+      # س227 (المرحلة صفر د2): بوابة الأسرار قبل أي بناء — ملف خاتم
+      # أو رمز وصول في الشجرة = تشغيل أحمر بلا بناء (بوابةٌ لا تفشل
+      # ليست بوابات).
+      - run: python3 scripts/secret_scan.py
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -110,22 +114,32 @@ jobs:
               --dart-define=BUILD_NUMBER=$GITHUB_RUN_NUMBER
             echo "rel=app-arm64-v8a-release.apk" >> "$GITHUB_OUTPUT"
           fi
-      # Task 51: خاتم توقيع ثابت — علاج «التعارض مع حزمة حالية».
-      # آلة CI تولد خاتم debug مؤقتاً جديداً بكل تشغيل، فيرفض أندرويد
-      # تثبيت نسخة موقعة بخاتم مختلف فوق المثبتة. الخاتم الثابت مودع في
-      # هذا المستودع الخاص (رمز المالك بلا صلاحية إدارة أسرار GitHub).
-      # إن صار المستودع عاماً يوماً: تدوير الخاتم ونقله لأسرار GitHub أولاً.
-      - name: إعادة توقيع APK بالخاتم الثابت (zipalign ثم apksigner)
+      # س227 (المرحلة صفر د2 من خارطة طريق التقرير الاستشاري — بأمر
+      # المالك «ابدأ التنفيذ»): تدوير الخاتم ونقله إلى أسرار GitHub —
+      # البروتوكول الموثق أعلاه وقع فعلاً: المستودع صار عاماً والخاتم
+      # القديم وكلمة سره كانا نصاً في شجرة عامة، فجيل التوقيع الجديد
+      # يُبنى من سرّي Actions (DIQQAH_KEYSTORE_BASE64
+      # وDIQQAH_KEYSTORE_PASSWORD) بلا ملفات خاتم في الشجرة ولا في
+      # التاريخ — وملفَا الخاتم القديم أُخرجا من الشجرة والتاريخ معاً،
+      # وبوابة فحص الأسرار (scripts/secret_scan.py) تحرس عودتهما أبداً.
+      # التوقيع بخاتم جديد يعني أن التحديث فوق التثبيت القديم يبدأ
+      # بداية نظيفة (إزالة ثم تثبيت — ونسخة المالك المحلية من الخاتم
+      # الجديد في بيئة التسليم خارج المستودع).
+      - name: إعادة توقيع APK بالخاتم الثابت (من أسرار GitHub — تدوير س227)
         env:
-          KS: ${{ github.workspace }}/.github/keystore
+          KS_PASS: ${{ secrets.DIQQAH_KEYSTORE_PASSWORD }}
+          KS_B64: ${{ secrets.DIQQAH_KEYSTORE_BASE64 }}
         run: |
-          PW=$(cat "$KS/diqqah.keystore.pass.txt")
+          PW="$KS_PASS"
+          KS="$RUNNER_TEMP/diqqah-release.keystore"
+          printf '%s' "$KS_B64" | base64 -d > "$KS"
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           APK="build/app/outputs/flutter-apk/${{ steps.apk.outputs.rel }}"
           "$BT/zipalign" -f 4 "$APK" apk-aligned.apk
-          "$BT/apksigner" sign --ks "$KS/diqqah-release.keystore" \
+          "$BT/apksigner" sign --ks "$KS" \
             --ks-key-alias diqqah --ks-pass "pass:$PW" --key-pass "pass:$PW" \
             --out apk-signed.apk apk-aligned.apk
+          rm -f "$KS"
           mv apk-signed.apk "$APK"
           "$BT/apksigner" verify "$APK"
       # البند ⑤ (س168): التحقق البايتي البنائي — يقرأ الإصدار من pubspec

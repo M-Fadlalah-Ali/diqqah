@@ -430,6 +430,19 @@ class AppUsers extends Table {
       boolean().named('must_change_password')
           .withDefault(const Constant(false))();
 
+  /// س227 (المرحلة صفر د3 من خارطة طريق التقرير الاستشاري بأمر المالك
+  /// «ابدأ التنفيذ»): عداد محاولات الدخول الفاشلة وقفلها المتدرج —
+  /// صفر يعني لا فشل بعد، والحال على صف المستخدم فتنجو بموت العملية
+  /// بعقد آلة الحالتين (س212) بنمط الراية، والقفل بمستويات مغلقة
+  /// (نمط مستويات الخمول D-217) عند كل عتبة خمس محاولات.
+  IntColumn get failedLoginAttempts =>
+      integer().withDefault(const Constant(0))
+          .named('failed_login_attempts')();
+
+  /// لحظة انتهاء القفل بالميلي ثانية (epoch) — صفر يعني غير مقفل.
+  IntColumn get lockedUntil =>
+      integer().withDefault(const Constant(0)).named('locked_until')();
+
   /// اصطلاح «كل جدول» (D-055) — نفس أعمدة roles أعلاه.
   TextColumn get uuid => text()();
 
@@ -1233,7 +1246,15 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// والصناديق وأسطر الفواتير والأحداث) كلها CREATE INDEX IF NOT
   /// EXISTS آمنة التكرار أي كان مسار الوصول (onCreate زرعها سلفاً
   /// بعرف v29) — والدليل البنيوي كامل بسجل الدفعة والاختبار s215.
-  static const int schemaVersionValue = 35;
+  /// وأحدثتها س227 (المرحلة صفر بخارطة طريق التقرير الاستشاري بأمر
+  /// المالك «ابدأ التنفيذ»): v36 — عمودا قفل الدخول المتدرج
+  /// (failed_login_attempts وlocked_until) على app_users بADD COLUMN
+  /// بحرس pragma بنمط v31/v32/v34، وv37 — ترحيلة بيانات بنمط v30
+  /// حرفاً: إلحاق بوابة القوائم المالية الفرعية reports.financials
+  /// بكل دور قائم يعتمد التقارير (لا النجمة ولا أمين المستودع
+  /// المخصوص بالاسم — «تقارير المخزون حصراً» بقرار المالك) عرف
+  /// «من كان يعتمد يبقى يعتمد».
+  static const int schemaVersionValue = 37;
 
   @override
   int get schemaVersion => schemaVersionValue;
@@ -1949,6 +1970,49 @@ class DiqqahDatabase extends _$DiqqahDatabase {
             if (version == 35) {
               await _createHotDataIndexes();
             }
+            // 35→36 (ومن إصدار أدنى مباشرة): س227 (المرحلة صفر د3 —
+            // قفل محاولات الدخول المتدرج): عمودان على app_users بADD
+            // COLUMN بحرس pragma (درس v3 — آمنة التكرار أي كان مسار
+            // الوصول) فالصفوف القائمة تملأ بالافتراضي صفراً ولا إعادة
+            // بناء ولا مساس بالبيانات، والقاعدة الجديدة تولد بهما من
+            // DDL drift ذاته.
+            if (version == 36) {
+              final userCols = (await customSelect(
+                      "SELECT name FROM pragma_table_info('app_users')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!userCols.contains('failed_login_attempts')) {
+                await customStatement(
+                    'ALTER TABLE app_users ADD COLUMN '
+                    'failed_login_attempts INTEGER NOT NULL DEFAULT 0');
+              }
+              if (!userCols.contains('locked_until')) {
+                await customStatement(
+                    'ALTER TABLE app_users ADD COLUMN '
+                    'locked_until INTEGER NOT NULL DEFAULT 0');
+              }
+            }
+            // 36→37 (ومن إصدار أدنى مباشرة): س227 (المرحلة صفر د4 —
+            // بوابة القوائم المالية الفرعية): ترحيلة بيانات بنمط v30
+            // حرفاً — إلحاق reports.financials بكل دور قائم يعتمد
+            // التقارير (لا النجمة ولا أمين المستودع المخصوص بالاسم
+            // «تقارير المخزون حصراً» بقرار المالك — وحجبه بالاسم
+            // سابقة v30 بالبائع والمندوب) عرف «من كان يعتمد يبقى
+            // يعتمد» فلا يفقد محاسبٌ قائمةً بترقية البوابة، والنجمة
+            // تشمل البوابة أصلاً، والحامل لها يُسقط بNOT LIKE فآمنة
+            // التكرار أي كان مسار الوصول.
+            if (version == 37) {
+              await customStatement(
+                "UPDATE roles SET permissions = permissions "
+                "|| ',reports.financials', updated_at = ? "
+                'WHERE is_deleted = 0 AND permissions <> \'*\' '
+                "AND permissions LIKE '%reports%' "
+                "AND permissions NOT LIKE '%reports.financials%' "
+                "AND name <> 'أمين مستودع'",
+                [DateTime.now().millisecondsSinceEpoch],
+              );
+            }
           }
         },
         // F-156: التطبيق الأقدم يرفض قاعدة أحدث مخططاً برسالة «حدّث التطبيق»
@@ -2300,10 +2364,23 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     required int userId,
     required String password,
   }) async {
+    // س227 — الفحص قبل التحقق (قفل المحاولات المتدرج): المستخدم
+    // المقفل يفشل فوراً بموازنة توقيت (س219) فلا قناة توقيتية تكشف
+    // حالة القفل قبل كلفة التحقق.
+    final lock = await loginLockoutRemaining(userId);
+    if (lock != null) {
+      await PasswordHasher.equalizingWorkInBackground(
+          iterations: passwordUpgradeIterations);
+      throw StateError(
+          'الدخول مقفل مؤقتاً بعد محاولات فاشلة — أعد المحاولة بعد '
+          '${loginLockoutMinutesText(lock)}');
+    }
     final user = await verifyUserPassword(userId, password);
     if (user == null) {
+      await bumpFailedLoginAttempts(userId);
       throw StateError('كلمة المرور غير صحيحة أو المستخدم معطل');
     }
+    await resetFailedLoginAttempts(user.id);
     await setCurrentUserId(user.id);
     await recordSystemEvent(
       'session_resumed',
@@ -2332,6 +2409,10 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     final user = await (select(appUsers)
           ..where((t) => t.login.lower().equals(login.trim().toLowerCase())))
         .getSingleOrNull();
+    // س227 — الفحص قبل التحقق (قفل المحاولات المتدرج بموازنة توقيت
+    // س219): القفل الوحيد الذي يخرق الرسالة الموحدة س216 — فهو لا
+    // يكشف وجود حسابٍ غيبه المجهول بل حالة حسابٍ عرفه صاحبه دخولاً
+    // ويحتاج إخبار مدته المتنقية، وهذا قرار المالك الموثق.
     if (user == null) {
       // س219 — موازنة التوقيت: الفشل بلا حساب كان يُرد بالملي ثانية
       // بينما كلمة خاطئة بحساب قائم بثوانٍ (600,000 تكراراً) فالرسالة
@@ -2345,7 +2426,13 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       throw StateError(generic);
     }
     final verified = await verifyUserPassword(user.id, password);
-    if (verified == null) throw StateError(generic);
+    if (verified == null) {
+      // س227 — الفشل يرفع عداد القفل المتدرج (المجهول أعلاه بلا
+      // عداد فلا قفل بحساب وهمي) والرسالة الموحدة س216 باقية حرفاً.
+      await bumpFailedLoginAttempts(user.id);
+      throw StateError(generic);
+    }
+    await resetFailedLoginAttempts(verified.id);
     await setCurrentUserId(verified.id);
     await recordSystemEvent(
       'session_resumed',
@@ -2400,6 +2487,88 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     }
     await upsertMetaValue(
         sessionIdleMinutesMetaKey, minutes.toString());
+  }
+
+  // ═════════════════════════════════════════════════════════
+  // س227 (المرحلة صفر د3 من خارطة طريق التقرير الاستشاري — بأمر
+  // المالك «ابدأ التنفيذ» وباستثناء صريح لحد أدنى لكلمة المرور):
+  // قفل محاولات الدخول المتدرج بالقاعدة — الحال على صف المستخدم
+  // (app_users) فتنجو بموت العملية بعقد آلة الحالتين (س212)،
+  // والمستويات مغلقة بنمط مستويات الخمول (D-217)، والفحص قبل
+  // التحقق من الكلمة بموازنة توقيت (س219) فلا قناة تعداد
+  // توقيتية تكشف حالة القفل، وverifyUserPassword نفسه بلا مساس
+  // فبوابة الاستعادة (تستدعيه) لا يقفلها عدّاد الدخول.
+  // ═════════════════════════════════════════════════════════
+
+  /// عتبة القفل ودرجاته المغلقة — كل خمس محاولات فاشلة عتبة تقفل
+  /// بمدة مستواها من القائمة، وكل عتبة تالية ترفع المدة درجة حتى
+  /// سقف 30 دقيقة (متدرج لا نهائي التكرار).
+  static const int loginLockoutMaxAttempts = 5;
+  static const List<int> loginLockoutMinuteSteps = [1, 5, 15, 30];
+
+  /// المدة المتبقية للقفل — صفر يعني غير مقفل، والمستخدم المجهول
+  /// يعود صفراً فلا قفل لمجهول (الرسالة العامة س216 تحرسه).
+  Future<Duration?> loginLockoutRemaining(int userId) async {
+    final user = await (select(appUsers)
+          ..where((t) => t.id.equals(userId)))
+        .getSingleOrNull();
+    if (user == null) return null;
+    final remainingMs =
+        user.lockedUntil - DateTime.now().millisecondsSinceEpoch;
+    if (remainingMs <= 0) return null;
+    return Duration(milliseconds: remainingMs);
+  }
+
+  /// محاولة فاشلة — يزيد العداد ويقفل عند العتبات بمستواها المتدرج
+  /// ويسجل حدث التدقيق (login_lockout) بحمولة العدد والمدة — سجل
+  /// الأحداث ملحق فقط فالعداد على صف المستخدم حصراً.
+  Future<void> bumpFailedLoginAttempts(int userId) async {
+    final user = await (select(appUsers)
+          ..where((t) => t.id.equals(userId)))
+        .getSingleOrNull();
+    if (user == null) return;
+    final attempts = user.failedLoginAttempts + 1;
+    var lockedUntil = user.lockedUntil;
+    final level = attempts ~/ loginLockoutMaxAttempts;
+    if (attempts % loginLockoutMaxAttempts == 0 && level >= 1) {
+      final step = level - 1 < loginLockoutMinuteSteps.length
+          ? level - 1
+          : loginLockoutMinuteSteps.length - 1;
+      final lockedMinutes = loginLockoutMinuteSteps[step];
+      lockedUntil = DateTime.now().millisecondsSinceEpoch +
+          lockedMinutes * 60 * 1000;
+      await recordSystemEvent(
+        'login_lockout',
+        userId: userId,
+        payload: <String, Object?>{
+          'attempts': attempts,
+          'minutes': lockedMinutes,
+        },
+      );
+    }
+    await (update(appUsers)..where((t) => t.id.equals(userId))).write(
+        AppUsersCompanion(
+      failedLoginAttempts: Value(attempts),
+      lockedUntil: Value(lockedUntil),
+    ));
+  }
+
+  /// نجاح الدخول — يصفّر العداد والقفل معاً فلا قفل يتيم بعد نجاح.
+  Future<void> resetFailedLoginAttempts(int userId) async {
+    await (update(appUsers)..where((t) => t.id.equals(userId))).write(
+        const AppUsersCompanion(
+      failedLoginAttempts: Value(0),
+      lockedUntil: Value(0),
+    ));
+  }
+
+  /// صيغة الدقائق لرسالة القفل — عربية سليمة الجمع بتقريب صاعد.
+  static String loginLockoutMinutesText(Duration remaining) {
+    final minutes = (remaining.inSeconds / 60).ceil();
+    if (minutes <= 1) return 'دقيقة واحدة';
+    if (minutes == 2) return 'دقيقتين';
+    if (minutes <= 10) return '$minutes دقائق';
+    return '$minutes دقيقة';
   }
 
   /// نصف الاستئناف الأول بالبصمة — **للمعلق حصراً** (س213): التحقق

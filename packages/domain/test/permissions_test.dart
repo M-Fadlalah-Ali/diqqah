@@ -280,14 +280,19 @@ void main() {
   test('بوابتا وحدة المستخدمين (س211/D-216) — قدرتان منفصلتان والنجمة تشملهما', () {
     expect(subGateKeys, contains(kCreateUsersKey));
     expect(subGateKeys, contains(kDeactivateUsersKey));
-    expect(subGateKeys.last, kDeactivateUsersKey,
+    // س227 (المرحلة صفر د4): بوابة القوائم المالية آخر القائمة
+    // حرفاً بعرف D-098 — وسابقتها بوابتا المستخدمين باقيتان بعقدهما.
+    expect(subGateKeys.last, kFinancialReportsKey,
         reason: 'الجديد نهاية القائمة عرف D-098');
     expect(subGateLabels[kCreateUsersKey], 'إنشاء مستخدم جديد');
     expect(subGateLabels[kDeactivateUsersKey], 'تعطيل مستخدم وفعّله');
+    expect(subGateLabels[kFinancialReportsKey], 'القوائم المالية (دخل وميزانية)');
     // النجمة تشمل البوابتين (المدير يمسك اليدتين)
     const star = RolePermissions.all();
     expect(star.allowsSub(kCreateUsersKey), isTrue);
     expect(star.allowsSub(kDeactivateUsersKey), isTrue);
+    expect(star.allowsSub(kFinancialReportsKey), isTrue,
+        reason: 'النجمة تشمل البوابة الجديدة — المدير يرى القوائم');
     // ومن مُنح الوحدة وحدها بلا بوابة فالقراءة خالصة
     const viewer = RolePermissions('users');
     expect(viewer.allows('users'), isTrue);

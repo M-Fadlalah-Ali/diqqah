@@ -56,10 +56,45 @@ String formatMinorAmount(int amount) {
 /// (س-79..س-85). التقارير الست قراءات لحظية من المرحّل حصراً — لا جداول
 /// تجميع ولا أرقام مخزنة (D-089)، والفترات والإقفال شاشة قائمة بذاتها
 /// منها (س-85) بصلاحية الإقفال إفصاحاً بطبقة الواجهة (D-090).
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
   const ReportsScreen({super.key, required this.db});
+
+  @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  /// س227 (المرحلة صفر د4 من خارطة طريق التقرير الاستشاري — بأمر
+  /// المالك «ابدأ التنفيذ»): صلاحية القوائم المالية لصاحب الجلسة —
+  /// قراءة لحظية واحدة عند الفتح بنمط شاشة المستخدمين (لا تدفق حي
+  /// ولا مؤقتات — درس CI)، وفراغها «قيد التحميل» فالبنان مخفيان حتى
+  /// يجيب الدور (الفشل المغلق: لا كشف قبل صلاحية).
+  RolePermissions? _perms;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPermissions();
+  }
+
+  Future<void> _loadPermissions() async {
+    final session = await widget.db.currentUser();
+    RolePermissions? perms;
+    if (session != null) {
+      final role = await widget.db.roleOf(session);
+      if (role != null) perms = RolePermissions(role.permissions);
+    }
+    if (!mounted) return;
+    setState(() => _perms = perms);
+  }
+
+  /// حارسا المجال معاً (التقارير + البوابة الفرعية) — أمين المستودع
+  /// الافتراضي بلاها («بلا نقود باتاً» — تقارير المخزون حصراً)، وما
+  /// سواه يراها، والنجمة تشملها.
+  bool get _canSeeFinancials =>
+      _perms != null && roleCanSeeFinancialReports(_perms!);
 
   void _open(BuildContext context, Widget target) {
     Navigator.of(context).push(
@@ -83,25 +118,33 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('ميزان المراجعة'),
             subtitle: const Text(
                 'أرصدة الحسابات من المرحّل لحظة الطلب — ومجموعاه متوازنان'),
-            onTap: () => _open(context, _TrialBalanceView(db: db)),
+            onTap: () => _open(context, _TrialBalanceView(db: widget.db)),
           ),
           // الدفعة 33 (عاشرة م2): القوائم المالية الأساسية F-096 من
           // أنواع الحسابات و07 §1.6 — قائمة الدخل بمدى والميزانية
           // العمومية إلى تاريخ.
-          ListTile(
-            leading: const Icon(Icons.receipt_long_outlined),
-            title: const Text('قائمة الدخل'),
-            subtitle: const Text(
-                'الإيرادات والمصروفات وصافي النتيجة بمدى تاريخ — من أنواع الحسابات'),
-            onTap: () => _open(context, IncomeStatementView(db: db)),
-          ),
-          ListTile(
-            leading: const Icon(Icons.balance_outlined),
-            title: const Text('الميزانية العمومية'),
-            subtitle: const Text(
-                'الأصول والخصوم وحقوق الملكية إلى تاريخ — وبشارة المعادلة'),
-            onTap: () => _open(context, BalanceSheetView(db: db)),
-          ),
+          // س227 (المرحلة صفر د4): القائمتان خلف البوابة الفرعية
+          // reports.financials — يخفيان عمن لا يملكها (أمين المستودع
+          // الافتراضي: تقارير المخزون حصراً) ويراهما من يملكها،
+          // وبقية أقسام التقارير بوحدة التقارير العامة كما كانت.
+          if (_canSeeFinancials) ...[
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('قائمة الدخل'),
+              subtitle: const Text(
+                  'الإيرادات والمصروفات وصافي النتيجة بمدى تاريخ — من أنواع الحسابات'),
+              onTap: () =>
+                  _open(context, IncomeStatementView(db: widget.db)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.balance_outlined),
+              title: const Text('الميزانية العمومية'),
+              subtitle: const Text(
+                  'الأصول والخصوم وحقوق الملكية إلى تاريخ — وبشارة المعادلة'),
+              onTap: () =>
+                  _open(context, BalanceSheetView(db: widget.db)),
+            ),
+          ],
           _reportsSectionHeader(context, 'الدفاتر والمطابقة'),
           // س-152/D-150 (دفعة 15): دفتر اليومية — قيود المرحّل
           // بترتيب الزمن بأسطرها بفلاتر المدى والدفتر.
@@ -110,7 +153,7 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('دفتر اليومية'),
             subtitle: const Text(
                 'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
-            onTap: () => _open(context, _JournalBookView(db: db)),
+            onTap: () => _open(context, _JournalBookView(db: widget.db)),
           ),
           // الدفعة 31 (ثامنة م2): ربط المخزون بالدفتر بصرياً — ثابت
           // المطابقة D-067/F-178 معروض بالأرقام لا كلاماً (07 §3.1).
@@ -120,7 +163,7 @@ class ReportsScreen extends StatelessWidget {
             subtitle: const Text(
                 'رصيد المخزون بالقيود مقابل قيمته بالحركات — لكل صنف والإجمالي'),
             onTap: () =>
-                _open(context, LedgerReconView(db: db)),
+                _open(context, LedgerReconView(db: widget.db)),
           ),
           _reportsSectionHeader(context, 'الصناديق والذمم'),
           ListTile(
@@ -128,13 +171,13 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('تقرير الصناديق'),
             subtitle: const Text(
                 'رصيد كل صندوق بمعادلة الصندوق ذاتها — والمعطل بشارته لا يُخفى'),
-            onTap: () => _open(context, _CashBoxesView(db: db)),
+            onTap: () => _open(context, _CashBoxesView(db: widget.db)),
           ),
           ListTile(
             leading: const Icon(Icons.swap_horiz),
             title: const Text('الذمم المدينة والدائنة'),
             subtitle: const Text('صافي كل طرف — هم يدينون لنا / نحن مدينون لهم'),
-            onTap: () => _open(context, _ReceivablesPayablesView(db: db)),
+            onTap: () => _open(context, _ReceivablesPayablesView(db: widget.db)),
           ),
           // س-151/D-149 (دفعة 15): أعمار الذمم — أقرب ربح من دراسة
           // محضر الخبراء (س46/D-140): قراءة خالصة فوق الفواتير
@@ -145,7 +188,7 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('أعمار الذمم'),
             subtitle: const Text(
                 'كل طرف بمبلغه المفتوح موزعاً على فترات التأخر عن الاستحقاق'),
-            onTap: () => _open(context, _AgingView(db: db)),
+            onTap: () => _open(context, _AgingView(db: widget.db)),
           ),
           // الدفعة 34 (F-124، D-194): مراكز العملات — كل عملة حية
           // بصناديقها وفواتيرها المفتوحة ومكافئها الأساسي المخزن
@@ -156,7 +199,7 @@ class ReportsScreen extends StatelessWidget {
             subtitle: const Text(
                 'كل عملة بصناديقها وفواتيرها المفتوحة ومكافئها بالأساسية '
                 'ومآخر سعر مسجل'),
-            onTap: () => _open(context, _CurrencyPositionsView(db: db)),
+            onTap: () => _open(context, _CurrencyPositionsView(db: widget.db)),
           ),
           _reportsSectionHeader(context, 'المخزون والحركة'),
           ListTile(
@@ -164,20 +207,22 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('تقرير المخزون'),
             subtitle: const Text(
                 'الكمية والقيمة الدفترية لكل صنف — والمتوسط عرضاً حصراً'),
-            onTap: () => _open(context, InventoryView(db: db)),
+            onTap: () => _open(context, InventoryView(db: widget.db)),
           ),
           ListTile(
             leading: const Icon(Icons.trending_up),
             title: const Text('مبيعات وحركة الأصناف'),
             subtitle: const Text('بيع ومردود بيع بمدى تاريخ — والصافي مشتق لا مخزن'),
-            onTap: () => _open(context, MovementView(db: db, sales: true)),
+            onTap: () =>
+                _open(context, MovementView(db: widget.db, sales: true)),
           ),
           ListTile(
             leading: const Icon(Icons.shopping_cart_outlined),
             title: const Text('تقرير المشتريات'),
             subtitle: const Text(
                 'المستقل — شراء ومردود شراء بمدى تاريخ'),
-            onTap: () => _open(context, MovementView(db: db, sales: false)),
+            onTap: () =>
+                _open(context, MovementView(db: widget.db, sales: false)),
           ),
           _reportsSectionHeader(context, 'الإدارة'),
           ListTile(
@@ -185,7 +230,7 @@ class ReportsScreen extends StatelessWidget {
             title: const Text('الفترات والإقفال'),
             subtitle: const Text(
                 'إقفال فترة وما فيها يثبّت إلى الأبد — والفك طارئ بسبب نصي إلزامي'),
-            onTap: () => _open(context, PeriodsScreen(db: db)),
+            onTap: () => _open(context, PeriodsScreen(db: widget.db)),
           ),
         ],
       ),

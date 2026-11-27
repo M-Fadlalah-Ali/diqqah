@@ -37,5 +37,13 @@ String? dqCodeForStorageError(Object error) {
   if (root is CorruptBackupException) return 'DQ-1104';
   if (root is BackupNewerSchemaException) return 'DQ-1105';
   if (root is GfsBackupException) return 'DQ-1123';
+  // س227 (المرحلة صفر د3 — قفل محاولات الدخول المتدرج): استثناء
+  // عادي برسالة متنقية الدقائق فالمطابقة ببادئتها الحرفية الثابتة
+  // (نمط س216 باللسان الموثق — والبادئة أثبت من لسانٍ متنقل) كي
+  // لا يهب الرمز الدقيق للفاصلة الآمنة DQ-0999.
+  if (root is StateError &&
+      root.message.startsWith('الدخول مقفل مؤقتاً بعد محاولات فاشلة')) {
+    return 'DQ-1027';
+  }
   return null;
 }

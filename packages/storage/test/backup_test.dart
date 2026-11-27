@@ -186,11 +186,24 @@ void main() {
 
     // سطر الإحالة (F-154): اللقطة موجودة، مسماة بتاريخها، وتحوي بيانات
     // الجهاز القديمة — طريق الرجوع الوحيد سليم
+    // س227 (المرحلة صفر د5): اللقطة مغلَّفة بجيل النسخ v2 (مفتاح البرنامج
+    // بلا كلمة — D-060) لا نص SQLite صريح على القرص، والتحقق بمحتواها
+    // يمر بمسار زر التراجع القائم نفسه (prepareRestore يتعرف v2 ويفكه).
     expect(File(snapshotPath).existsSync(), isTrue);
     expect(p.basename(snapshotPath), startsWith('diqqah-before-restore-'));
-    final snap = sql.sqlite3.open(snapshotPath);
-    final snapSku = snap.select('SELECT sku FROM items').first.values.first;
-    snap.dispose();
+    expect(
+        BackupCipher.identify(await File(snapshotPath).readAsBytes()),
+        BackupKind.encrypted,
+        reason: 'اللقطة مغلَّفة v2 — لا نص صريح على القرص');
+    final rollback = await prepareRestore(snapshotPath,
+        appSchemaVersion: other.schemaVersion);
+    final snapSku = sql.sqlite3
+        .open(rollback.plainPath)
+        .select('SELECT sku FROM items')
+        .first
+        .values
+        .first;
+    rollback.dispose();
     expect(snapSku, 'SKU-999');
 
     // إعادة فتح جهاز الهدف — بيانات المصدر كاملة حرفاً، والهوية للجهاز

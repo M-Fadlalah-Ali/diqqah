@@ -24,6 +24,7 @@ class RoleExpectation {
   final String stored;
   final String summary;
   final bool canPostOthers;
+  final bool canSeeFinancials;
   final bool holdsReceipts;
   final bool approvesHeldReceipts;
 
@@ -34,6 +35,7 @@ class RoleExpectation {
     required this.stored,
     required this.summary,
     required this.canPostOthers,
+    required this.canSeeFinancials,
     required this.holdsReceipts,
     required this.approvesHeldReceipts,
   });
@@ -60,23 +62,26 @@ List<RoleExpectation> frozenExpectations() {
         kPostOthersInvoicesKey,
         kCreateUsersKey, // س211/D-216: النجمة تشمل البوابتين الجديدتين
         kDeactivateUsersKey,
+        kFinancialReportsKey, // س227: النجمة تشمل الجديدة كذلك
       ],
       stored: '*',
       summary: 'كل الوحدات',
       canPostOthers: true,
+      canSeeFinancials: true,
       holdsReceipts: false,
       approvesHeldReceipts: true,
     ),
     const RoleExpectation(
       role: 'محاسب',
       modules: accountantModules,
-      subs: [kPostOthersInvoicesKey],
+      subs: [kPostOthersInvoicesKey, kFinancialReportsKey],
       stored: 'parties,items,invoices,vouchers,boxes,reports,ledger,settings,'
-          'invoices.post_others',
+          'invoices.post_others,reports.financials',
       summary: 'الأطراف، الأصناف، الفواتير، السندات، الصناديق، '
           'التقارير اليومية، الدفتر المحاسبي، الإعدادات '
-          '+ ترحيل مسودات الآخرين (الفواتير)',
+          '+ ترحيل مسودات الآخرين (الفواتير)، القوائم المالية (دخل وميزانية)',
       canPostOthers: true,
+      canSeeFinancials: true,
       holdsReceipts: false,
       approvesHeldReceipts: true,
     ),
@@ -87,6 +92,9 @@ List<RoleExpectation> frozenExpectations() {
       stored: 'items,reports',
       summary: 'الأصناف، التقارير اليومية',
       canPostOthers: false,
+      // س227 (المرحلة صفر د4): تقارير المخزون حصراً — القوائم
+      // المالية خلف البوابة الفرعية ولا يملكها.
+      canSeeFinancials: false,
       holdsReceipts: false,
       approvesHeldReceipts: false,
     ),
@@ -97,6 +105,7 @@ List<RoleExpectation> frozenExpectations() {
       stored: 'parties,invoices,vouchers',
       summary: 'الأطراف، الفواتير، السندات',
       canPostOthers: false,
+      canSeeFinancials: false,
       holdsReceipts: false,
       approvesHeldReceipts: false,
     ),
@@ -107,6 +116,7 @@ List<RoleExpectation> frozenExpectations() {
       stored: 'parties,invoices,vouchers',
       summary: 'الأطراف، الفواتير، السندات',
       canPostOthers: false,
+      canSeeFinancials: false,
       holdsReceipts: true,
       approvesHeldReceipts: false,
     ),
@@ -119,6 +129,7 @@ List<RoleExpectation> frozenExpectations() {
       stored: '',
       summary: 'لا وحدات',
       canPostOthers: false,
+      canSeeFinancials: false,
       holdsReceipts: false,
       approvesHeldReceipts: false,
     ),
@@ -156,6 +167,9 @@ void main() {
 
       expect(roleCanPostOthersInvoices(perms), exp.canPostOthers,
           reason: '${exp.role}: حارسا البوابة (الوحدة + البوابة)');
+      expect(roleCanSeeFinancialReports(perms), exp.canSeeFinancials,
+          reason: '${exp.role}: حارسا القوائم المالية (س227 — '
+              'التقارير + البوابة الفرعية)');
       expect(roleHoldsReceiptsForApproval(exp.role), exp.holdsReceipts,
           reason: '${exp.role}: بوابة القبض المعلق بالاسم (س104)');
       expect(roleCanApproveHeldReceipts(exp.role, perms),

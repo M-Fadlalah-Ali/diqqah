@@ -103,7 +103,7 @@ void main() {
   });
 
   group('P0-ج: النسخ والاستعادة مع التشفير', () {
-    test('نسخة تُفك على جهاز ثانٍ بمفتاح خزنة يخالف ويلقطة الرجوع نص صريح',
+    test('نسخة تُفك على جهاز ثانٍ بمفتاح خزنة يخالف ولقطة الرجوع مغلَّفة v2',
         () async {
       final dbPath = pathOf('cross.db');
       final db = DiqqahDatabase.fileSyncClose(
@@ -128,9 +128,16 @@ void main() {
       );
       candidate.dispose();
 
-      expect(fileIsPlaintextSqlite(snapshotPath), isTrue,
-          reason: 'لقطة ما قبل الاستعادة تبقى SQLite خام كما كانت — '
-              'زر التراجع بالمسار القائم');
+      // س227 (المرحلة صفر د5): اللقطة مغلَّفة بجيل v2 لا نص SQLite
+      // صريح على القرص — والمسار القائم يعمل حرفاً: prepareRestore
+      // يتعرف v2 ويفكه بلا كلمة فزر التراجع سليم.
+      expect(fileIsPlaintextSqlite(snapshotPath), isFalse,
+          reason: 'لقطة ما قبل الاستعادة مغلَّفة v2 — لا نص صريح');
+      final rollback = await prepareRestore(snapshotPath,
+          appSchemaVersion: DiqqahDatabase.schemaVersionValue);
+      expect(rollback, isNotNull,
+          reason: 'زر التراجع بالمسار القائم — v2 مقبول حرفاً');
+      rollback.dispose();
 
       // الجهاز الثاني: خزنته مفتاح يخالف — الاستعادة تُفتح نصاً صريحاً
       // فترحَّل إلى التشفير بمفتاح خزنته هو عند أول فتح.

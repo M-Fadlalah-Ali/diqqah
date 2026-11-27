@@ -182,11 +182,16 @@ class _DeviceGateScreenState extends State<DeviceGateScreen> {
       // (اسم مجهول/معطل/كلمة خاطئة) فلا معلومات تسريب من شاشة الدخول،
       // والتفصيل الحقيقي بسجل الأخطاء المحلي بيد صاحب الجهاز (dqLog
       // بعقد أقصى جهد لا يفشل المسار).
+      // س227 (المرحلة صفر د3): استثناء واحد يخرق العامة بقرار المالك
+      // الموثق — قفل المحاولات المتدرج يعلم صاحب الحال مدة انتظاره
+      // (DQ-1027) بلسان رسالته الحرفي من التخزين، وما سواه عام.
       if (!mounted) return;
       await dqLog(widget.db, e, context: 'gate.unlock');
+      final lockout = e is StateError &&
+          e.message.startsWith('الدخول مقفل مؤقتاً بعد محاولات فاشلة');
       setState(() {
         _busy = false;
-        _error = 'بيانات الدخول غير صحيحة';
+        _error = lockout ? e.message : 'بيانات الدخول غير صحيحة';
       });
     }
   }
