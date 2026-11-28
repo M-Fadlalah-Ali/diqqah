@@ -275,7 +275,10 @@ void main() {
         .first
         .data['payload'] as String);
     expect(payload.startsWith(LogCipher.envelopePrefix), isTrue);
-    expect(await dbB.openLogText(payload), contains('settings_changed'));
+    // الحمولة فُتحت بجذر الجهاز المستقر عليه — إعادة الختم عملت حرفاً
+    // (كانت مختومة بجذر أ داخل النسخة، وdbB يفتحها بجذره هو).
+    expect(await dbB.openLogText(payload), '{"v":1}',
+        reason: 'بذرة المزامنة m4 تُقرأ بعد الاستعادة بجذر الجهاز ذاته');
     await expectLater(
       dbB.customStatement(
           "UPDATE events SET payload = 'x' WHERE id = (SELECT MIN(id) FROM events)"),
