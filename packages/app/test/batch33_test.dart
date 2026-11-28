@@ -44,7 +44,8 @@ void main() {
         find.widgetWithText(TextField, 'إلى (YYYY-MM-DD)'),
         '$year-12-31');
     await tester.pump();
-    await tester.tap(find.text('عرض'));
+    // س235: التطبيق الفوري بديبونس قصير بلا زر عرض.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -73,7 +74,8 @@ void main() {
         find.widgetWithText(TextField, 'إلى تاريخ (YYYY-MM-DD)'),
         '$year-12-31');
     await tester.pump();
-    await tester.tap(find.text('عرض'));
+    // س235: التطبيق الفوري بديبونس قصير بلا زر عرض.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));

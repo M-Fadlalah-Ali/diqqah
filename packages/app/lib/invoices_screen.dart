@@ -10,7 +10,6 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'item_images.dart';
 import 'app_theme.dart';
 import 'adaptive.dart';
-import 'calendar_prefs.dart';
 import 'dq_log.dart';
 import 'item_media.dart';
 import 'print_copies.dart';
@@ -410,36 +409,6 @@ enum InvoiceArchiveSide {
 const String kSideFilterSales = 'sales';
 const String kSideFilterPurchases = 'purchases';
 
-/// س234 (D-234 — المرحلة ب/2 من خارطة الطريق الخماسية): السطر الفعلي
-/// الصغير فوق زر اختصار التاريخ — بلا سنة قرب الشهرين (اليوم بيومه
-/// واسم شهره، والشهران باسم شهرهما حصراً بأسماء الأشهر المختارة من
-/// خيار D-231) وسنوات الزوج الأخير بأرقامها وحدها (هذا العام برقمه
-/// والسنة السابقة برقمها — سنة «كانون الأول» السابق وحده) — نقية
-/// نقية تُختبر بلا قنوات (نمط س204 عينه)، واليوم المرجعي قابل للحقن.
-String diqqahPresetSmallLine(
-  DiqqahRangePreset preset, {
-  DateTime? today,
-  DiqqahMonthNames? names,
-}) {
-  final now = today ?? DateTime.now();
-  switch (preset) {
-    case DiqqahRangePreset.today:
-      return '${now.day} ${diqqahMonthName(now.month, names: names)}';
-    case DiqqahRangePreset.thisMonth:
-      return diqqahMonthName(now.month, names: names);
-    case DiqqahRangePreset.lastMonth:
-      // آخر يوم من الشهر الماضي — قوس السنة سالك فالشهر السابق مفعّل
-      // دائماً ولو كانت السنة جديدة (يناير: كانون الأول السابق).
-      final first = DateTime(now.year, now.month, 1);
-      final lastOfPrev = first.subtract(const Duration(days: 1));
-      return diqqahMonthName(lastOfPrev.month, names: names);
-    case DiqqahRangePreset.thisYear:
-      return '${now.year}';
-    case DiqqahRangePreset.previousYear:
-      return '${now.year - 1}';
-  }
-}
-
 class InvoicesScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
@@ -485,20 +454,15 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// الآخرين (التعليق ملغى س164).
   String? _state;
 
-  /// س234 (D-234 — المرحلة ب/2 من خارطة الطريق الخماسية): الاختصار
-  /// المختار من أزرار التاريخ الخمسة — يتلون المختار، وتحرير الحقلين
-  /// يدوياً يفرغه (فلا تلوين بلا مطابقة)، والتطبيق فوري (لا زر عرض).
-  DiqqahRangePreset? _preset;
+  /// س235: شريط المدى الفوري الموحد — المصدر الواحد لأزرار التاريخ
+  /// الخمسة وحقلي من/إلى بحرسيه (التلوين والديبونس) — والمسح الشامل
+  /// يفرّغه بمفتاحه (clear) فلا تكرار تحميل.
+  final GlobalKey<DiqqahInstantRangeBarState> _rangeBarKey =
+      GlobalKey<DiqqahInstantRangeBarState>();
 
-  /// س234 (المرحلة ب/3): التطبيق الفوري — زر «عرض» رُفع فالكتابة
-  /// (البحث والمدى) تُطبَّق بتأخير قصير (نصف ثانية بلا ضغط آخر حرف)
-  /// والاختيارات الجاهزة (الفلاتر والاختصارات) لحظية.
+  /// س234 (المرحلة ب/3): ديبونس البحث — زر «عرض» رُفع فالكتابة
+  /// تُطبَّق بتأخير قصير (نصف ثانية بلا ضغط آخر حرف).
   Timer? _applyDebounce;
-
-  /// س234: حرس الملء الآلي — تطبيق الاختصار يملا الحقلين برمجياً
-  /// فيطلق مستمعيهما؛ فالحرس يمنع الاستطالة المزدوجة (ملءٌ فورّي
-  /// وحسب، لا تطبيق بعده).
-  bool _suppressFieldListener = false;
 
   /// س101: خيارات فلتر الحالة — الثلاثية المألوفة.
   static final List<(String?, String)> _stateChoices = [
@@ -572,12 +536,9 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     };
     _reload();
     _loadSession();
-    // س234 (المرحلة ب/3): التطبيق الفوري — البحث والمدى يستمعان
-    // للكتابة فيطبقانها بتأخير قصير (لا زر عرض بعد اليوم بسجل
-    // الفواتير — عقد D-234 بلسان الخطة «التطبيق الفوري»).
+    // س234 (المرحلة ب/3): التطبيق الفوري — البحث يستمع للكتابة
+    // فيطبقها بتأخير قصير (والمدى بشريطه الموحد س235).
     _search.addListener(_onSearchTyped);
-    _from.addListener(_onRangeTyped);
-    _to.addListener(_onRangeTyped);
   }
 
   @override
@@ -598,51 +559,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     });
   }
 
-  /// س234: تحرير المدى يدوياً — تأخير قصير ثم التحميل حين يصلح
-  /// الزوجان (فارغ أو تاريخ سليم — فالمدى الفاسد المؤقت بكل حرف
-  /// لا يعيد شيئاً ولا يومض أخطاء)، والتحرير يفرغ التلوين.
-  void _onRangeTyped() {
-    if (_suppressFieldListener) return;
-    _applyDebounce?.cancel();
-    _applyDebounce = Timer(const Duration(milliseconds: 500), () {
-      if (!mounted) return;
-      final f = _from.text.trim();
-      final t = _to.text.trim();
-      // الزوج كلاهما أو لا: كلاهما فارغ (بلا مدى) أو كلاهما تاريخان
-      // سليمان — والزوج الناقص أو الفاسد انتظار كتابة لا تطبيق ولا
-      // وميض أخطاء بكل حرف (حرس المدقق أول — عرف D-077).
-      final bothEmpty = f.isEmpty && t.isEmpty;
-      final fDate = f.isEmpty ? null : DateTime.tryParse(f);
-      final tDate = t.isEmpty ? null : DateTime.tryParse(t);
-      if (!bothEmpty && (fDate == null || tDate == null)) return;
-      if (_preset != null) setState(() => _preset = null);
-      _reload();
-    });
-  }
-
-  /// س234 (المرحلة ب/2): تطبيق اختصار التاريخ فوراً — يملأ الحقلين
-  /// ويتلون المختار ويحمل (المسح المزدوج محروس فوق).
-  void _applyPreset(DiqqahRangePreset preset) {
-    _applyDebounce?.cancel();
-    final (f, t) = diqqahRangeShortcutDates(preset);
-    _suppressFieldListener = true;
-    _from.text = f;
-    _to.text = t;
-    _suppressFieldListener = false;
-    setState(() => _preset = preset);
-    _reload();
-  }
 
   /// س234 (المرحلة ب/3): مسح الفلاتر — البحث والمدى والنوع والاستلام
   /// والحالة إلى سذاجتها الأولى (النوع بجهة الدخول إن دخل ببلاطة
   /// جهة) ثم التحميل — فالبداية النظيفة بضغطة واحدة بلا تفكيك يدوي.
   void _clearFilters() {
     _applyDebounce?.cancel();
-    _suppressFieldListener = true;
-    _from.clear();
-    _to.clear();
+    // س235: الشريط الموحد يفرّغ حقليه وتلوينه بلا تحميل (clear)
+    // — والشاشة تفرغ ما عندها وتحمل مرة واحدة.
+    _rangeBarKey.currentState?.clear();
     _search.clear();
-    _suppressFieldListener = false;
     setState(() {
       _kind = switch (widget.initialSide) {
         InvoiceArchiveSide.sales => kSideFilterSales,
@@ -651,7 +577,6 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       };
       _receipt = null;
       _state = null;
-      _preset = null;
     });
     _reload();
   }
@@ -959,108 +884,6 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     }
   }
 
-  /// س234 (D-234 — المرحلة ب/2): أزرار التاريخ الخمسة بسطر واحد —
-  /// فوق كل زر سطره الفعلي الصغير (اليوم والشهران بأسماء الأشهر
-  /// المختارة بلا سنة — عقد «بلا سنة قرب الشهرين» — والسنتان
-  /// بأرقامهما وحدها — «سنة كانون الأول السابق وحده»)، والمختار
-  /// معبأ بلون الثيم والبقية محددة (تلوين المحدد)، والتحرير اليدوي
-  /// للحقول يفرغ التلوين — والتمرير الأفقي عند الضيق حصراً (عريض:
-  /// صف ممتد متوازن).
-  Widget _presetButtons() {
-    final entries = <(DiqqahRangePreset, String, Key)>[
-      (
-        DiqqahRangePreset.today,
-        S.todayPreset,
-        const ValueKey('invoices_preset_today')
-      ),
-      (
-        DiqqahRangePreset.thisMonth,
-        S.thisMonthPreset,
-        const ValueKey('invoices_preset_this_month')
-      ),
-      (
-        DiqqahRangePreset.lastMonth,
-        S.lastMonthPreset,
-        const ValueKey('invoices_preset_last_month')
-      ),
-      (
-        DiqqahRangePreset.thisYear,
-        S.thisYearPreset,
-        const ValueKey('invoices_preset_this_year')
-      ),
-      (
-        DiqqahRangePreset.previousYear,
-        S.previousYearPreset,
-        const ValueKey('invoices_preset_previous_year')
-      ),
-    ];
-    Widget button(DiqqahRangePreset preset, String label, Key key) {
-      final selected = _preset == preset;
-      final buttonChild = Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-      );
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            diqqahPresetSmallLine(preset),
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 2),
-          SizedBox(
-            height: 36,
-            child: selected
-                ? FilledButton(
-                    key: key,
-                    onPressed: () => _applyPreset(preset),
-                    child: buttonChild,
-                  )
-                : OutlinedButton(
-                    key: key,
-                    onPressed: () => _applyPreset(preset),
-                    child: buttonChild,
-                  ),
-          ),
-        ],
-      );
-    }
-
-    return LayoutBuilder(builder: (context, constraints) {
-      // س234: التمرير الأفقي عند الضيق حصراً — تحت 480 عرضاً تمرُّ
-      // الأزرار أفقياً بعرض ثابت مريح، وفوقه صف ممتد متوازن.
-      final narrow = constraints.maxWidth < 480;
-      if (narrow) {
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < entries.length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
-                SizedBox(width: 104, child: button(entries[i].$1, entries[i].$2, entries[i].$3)),
-              ],
-            ],
-          ),
-        );
-      }
-      return Row(
-        children: [
-          for (var i = 0; i < entries.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-                child: button(entries[i].$1, entries[i].$2, entries[i].$3)),
-          ],
-        ],
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1128,34 +951,14 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // س234 (المرحلة ب/2): أزرار التاريخ الخمسة بسطر واحد —
-                // السطر الصغير الفعلي أعلى الزر والمختار ملون.
-                _presetButtons(),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _from,
-                        keyboardType: TextInputType.datetime,
-                        decoration: InputDecoration(
-                            labelText: S.fromDateLabel,
-                            suffixIcon:
-                                calendarPickerSuffix(context, _from)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _to,
-                        keyboardType: TextInputType.datetime,
-                        decoration: InputDecoration(
-                            labelText: S.toDateLabel,
-                            suffixIcon:
-                                calendarPickerSuffix(context, _to)),
-                      ),
-                    ),
-                  ],
+                // س235: شريط المدى الفوري الموحد — أزرار التاريخ
+                // الخمسة بسطورها الصغيرة وتلوين المختار وحقلا من/إلى
+                // بديبونسهما وحرس زواجهما (المصدر الواحد بdate_picker).
+                DiqqahInstantRangeBar(
+                  key: _rangeBarKey,
+                  from: _from,
+                  to: _to,
+                  onReload: _reload,
                 ),
                 const SizedBox(height: 8),
                 // س234 (المرحلة ب/3): الفلاتر الثلاثة بسطر واحد —

@@ -175,59 +175,6 @@ class _VouchersScreenState extends State<VouchersScreen>
   }
 }
 
-/// شريط المدى الموحد للتبويبات — نفس نمط شاشات التقارير (D-077 حرس
-/// أول برسالة المدقق قبل لمس القاعدة).
-class _RangeBar extends StatelessWidget {
-  final TextEditingController from;
-  final TextEditingController to;
-  final VoidCallback onShow;
-
-  const _RangeBar({
-    required this.from,
-    required this.to,
-    required this.onShow,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: from,
-                  keyboardType: TextInputType.datetime,
-                  decoration: InputDecoration(
-                      labelText: 'من (YYYY-MM-DD)',
-                      suffixIcon: calendarPickerSuffix(context, from)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: to,
-                  keyboardType: TextInputType.datetime,
-                  decoration: InputDecoration(
-                      labelText: 'إلى (YYYY-MM-DD)',
-                      suffixIcon: calendarPickerSuffix(context, to)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: onShow, child: const Text('عرض')),
-            ],
-          ),
-          // س204 (م02 — اختصارات المدى): رقائق ملء سريعة بلا إعادة
-          // تحميل — زر «عرض» القائم هو الفعّال بعرف D-077.
-          DiqqahRangeShortcuts(from: from, to: to),
-        ],
-      ),
-    );
-  }
-}
-
 /// بناء القائمة القرائية الموحد للتبويبات الثلاثة — رسالة المدقق تظهر
 /// لا صمتاً، والفراغ رسالة إرشاد لا شاشة خاوية (F-162 روحاً).
 Widget _tabList<T>(BuildContext context, AsyncSnapshot<List<T>> snapshot,
@@ -573,7 +520,10 @@ class _VouchersTabState extends State<_VouchersTab>
     super.build(context);
     return Column(
       children: [
-        _RangeBar(from: _from, to: _to, onShow: _reload),
+        // س235 (توحيد النمط بكلمة المالك): شريط المدى الفوري الموحد
+                    // بلا زر عرض — الخمعة وحقلا من/إلى بتطبيق فوري.
+                    DiqqahInstantRangeBar(
+                        from: _from, to: _to, onReload: _reload),
         // س104: فلتر الحالة سطراً مستقلاً — عرف درس س67: لا حشر عنصر
         // بصف فيه Expanded فتنضغط القوائم المنسدلة.
         Padding(
@@ -818,7 +768,10 @@ class _TransfersTabState extends State<_TransfersTab>
     super.build(context);
     return Column(
       children: [
-        _RangeBar(from: _from, to: _to, onShow: _reload),
+        // س235 (توحيد النمط بكلمة المالك): شريط المدى الفوري الموحد
+                    // بلا زر عرض — الخمعة وحقلا من/إلى بتطبيق فوري.
+                    DiqqahInstantRangeBar(
+                        from: _from, to: _to, onReload: _reload),
         Expanded(
           child: FutureBuilder<List<BoxTransferListRow>>(
             future: _rows,
@@ -939,7 +892,10 @@ class _AdjustmentsTabState extends State<_AdjustmentsTab>
     super.build(context);
     return Column(
       children: [
-        _RangeBar(from: _from, to: _to, onShow: _reload),
+        // س235 (توحيد النمط بكلمة المالك): شريط المدى الفوري الموحد
+                    // بلا زر عرض — الخمعة وحقلا من/إلى بتطبيق فوري.
+                    DiqqahInstantRangeBar(
+                        from: _from, to: _to, onReload: _reload),
         Expanded(
           child: FutureBuilder<List<CashAdjustmentListRow>>(
             future: _rows,

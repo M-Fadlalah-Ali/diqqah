@@ -169,7 +169,8 @@ void main() {
         find.byType(TextField).at(0), '$year-01-01');
     await tester.enterText(
         find.byType(TextField).at(1), '$year-12-31');
-    await tester.tap(find.text('عرض'));
+    // س235: زر عرض رُفع — التطبيق الفوري بديبونس قصير بعد آخر حرف.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -183,7 +184,8 @@ void main() {
         find.byType(TextField).at(0), '$year-05-10');
     await tester.enterText(
         find.byType(TextField).at(1), '$year-05-01');
-    await tester.tap(find.text('عرض'));
+    // س235: زر عرض رُفع — التطبيق الفوري بديبونس قصير بعد آخر حرف.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -194,7 +196,8 @@ void main() {
         find.byType(TextField).at(0), '$year-01-01');
     await tester.enterText(
         find.byType(TextField).at(1), '$year-01-02');
-    await tester.tap(find.text('عرض'));
+    // س235: زر عرض رُفع — التطبيق الفوري بديبونس قصير بعد آخر حرف.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
@@ -221,7 +224,8 @@ void main() {
         find.byType(TextField).at(0), '$year-01-01');
     await tester.enterText(
         find.byType(TextField).at(1), '$year-12-31');
-    await tester.tap(find.text('عرض'));
+    // س235: زر عرض رُفع — التطبيق الفوري بديبونس قصير بعد آخر حرف.
+    await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));

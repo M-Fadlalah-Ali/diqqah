@@ -1,3 +1,4 @@
+import 'dart:async' show Timer;
 import 'dart:io' show File;
 import 'dart:typed_data' show Uint8List;
 
@@ -1158,28 +1159,10 @@ class _JournalBookViewState extends State<_JournalBookView> {
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: Column(
                   children: [
+                    // س235 (توحيد النمط بكلمة المالك): النوع منسدلة
+                    // مستقلة — والمدى بشريطه الفوري الموحد أدناه.
                     Row(
                       children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _from,
-                            decoration: InputDecoration(
-                                labelText: S.fromDateArabicHint,
-                                suffixIcon:
-                                    calendarPickerSuffix(context, _from)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _to,
-                            decoration: InputDecoration(
-                                labelText: S.toDateArabicHint,
-                                suffixIcon:
-                                    calendarPickerSuffix(context, _to)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
                         Expanded(
                           child: DropdownButtonFormField<String>(
                             initialValue: _journalKind,
@@ -1200,16 +1183,13 @@ class _JournalBookViewState extends State<_JournalBookView> {
                             },
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        OutlinedButton(
-                          onPressed: _reload,
-                          child: const Text(S.viewButton),
-                        ),
                       ],
                     ),
-                    // س204 (م02 — اختصارات المدى): ملء سريع بلا إعادة
-                    // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
-                    DiqqahRangeShortcuts(from: _from, to: _to),
+                    const SizedBox(height: 8),
+                    // س235: شريط المدى الفوري الموحد — الخمسة وحقلا
+                    // من/إلى بلا زر عرض (التطبيق الفوري بديبونس قصير).
+                    DiqqahInstantRangeBar(
+                        from: _from, to: _to, onReload: _reload),
                   ],
                 ),
               ),
@@ -1487,30 +1467,10 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Column(
               children: [
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _from,
-                      decoration: InputDecoration(
-                          labelText: S.fromDateLabel,
-                          suffixIcon: calendarPickerSuffix(context, _from)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _to,
-                      decoration: InputDecoration(
-                          labelText: S.toDateLabel,
-                          suffixIcon: calendarPickerSuffix(context, _to)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
-                ]),
-                // س204 (م02 — اختصارات المدى): ملء سريع بلا إعادة
-                // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
-                DiqqahRangeShortcuts(from: _from, to: _to),
+                // س235: شريط المدى الفوري الموحد — الخمسة وحقلا
+                // من/إلى بلا زر عرض (التطبيق الفوري بديبونس قصير).
+                DiqqahInstantRangeBar(
+                    from: _from, to: _to, onReload: _reload),
               ],
             ),
           ),
@@ -1726,18 +1686,35 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
   late final TextEditingController _asOf;
   String? _rangeError;
 
+  /// س235: ديبونس التطبيق الفوري للتاريخ الأحادي.
+  Timer? _reloadDebounce;
+
   @override
   void initState() {
     super.initState();
     _asOf = TextEditingController(text: todayIsoDate());
     _future =
         widget.db.balanceSheetReport(asOfText: _asOf.text);
+    _asOf.addListener(_onAsOfTyped);
   }
 
   @override
   void dispose() {
+    _reloadDebounce?.cancel();
     _asOf.dispose();
     super.dispose();
+  }
+
+  /// س235: الكتابة تُطبَّق بتأخير قصير — والناقص أو الفاسد انتظار
+  /// كتابة لا تطبيق ولا وميض أخطاء بكل حرف (عرف D-077 بثوب الفوري).
+  void _onAsOfTyped() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      final text = _asOf.text.trim();
+      if (text.isEmpty || !isValidIsoDate(text)) return;
+      _reload();
+    });
   }
 
   void _reload() {
@@ -1762,6 +1739,9 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(children: [
+              // س235: التاريخ الأحادي بتطبيق فوري (ديبونس قصير) بلا
+              // زر عرض — وليس مدى فلا أزرار الخمسة (تفسير محدود
+              // موثق: التوحيد للفورية لا لفرض المدى على حقل واحد).
               Expanded(
                 child: TextField(
                   controller: _asOf,
@@ -1770,8 +1750,6 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
                       suffixIcon: calendarPickerSuffix(context, _asOf)),
                 ),
               ),
-              const SizedBox(width: 8),
-              FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
             ]),
           ),
           if (_rangeError != null)
@@ -2231,36 +2209,10 @@ class _MovementViewState extends State<MovementView> {
             padding: const EdgeInsets.all(12),
             child: Column(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _from,
-                        keyboardType: TextInputType.datetime,
-                        decoration: InputDecoration(
-                            labelText: S.fromDateLabel,
-                            suffixIcon:
-                                calendarPickerSuffix(context, _from)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _to,
-                        keyboardType: TextInputType.datetime,
-                        decoration: InputDecoration(
-                            labelText: S.toDateLabel,
-                            suffixIcon:
-                                calendarPickerSuffix(context, _to)),
-                      ),
-                    ),
-                  ],
-                ),
-                // س204 (م02 — اختصارات المدى): ملء سريع بلا إعادة
-                // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
-                DiqqahRangeShortcuts(from: _from, to: _to),
-                const SizedBox(height: 8),
-                FilledButton(onPressed: _run, child: const Text(S.viewButton)),
+                // س235: شريط المدى الفوري الموحد — الخمسة وحقلا
+                // من/إلى بلا زر عرض (التطبيق الفوري بديبونس قصير).
+                DiqqahInstantRangeBar(
+                    from: _from, to: _to, onReload: _run),
                 if (_rows != null)
                   _ReportActionsBar(
                     onPrint: () async {

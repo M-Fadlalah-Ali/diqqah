@@ -58,8 +58,8 @@ void main() {
     });
   });
 
-  testWidgets('م02: رقائق شريط السندات تملأ من/إلى بلا إعادة تحميل — '
-      'وعرف D-077 باقٍ فزر العرض هو الفعّال', (tester) async {
+  testWidgets('س235: أزرار السندات الخمسة تملأ من/إلى وتطبق '
+      'فوراً — بلا زر عرض', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
@@ -73,6 +73,8 @@ void main() {
 
     await tester.tap(find.text('هذا الشهر'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
 
     final expected = diqqahRangeShortcutDates(DiqqahRangePreset.thisMonth);
     final from = tester
@@ -87,12 +89,14 @@ void main() {
         .text;
     expect(from, expected.$1, reason: 'الملء بصيغة المنتقي ذاتها (س182)');
     expect(to, expected.$2);
-    // والقائمة المعروفة باقية كما كانت — الرقاقة تملأ لا تُحمّل.
-    expect(find.textContaining('سند قبض 26000001'), findsOneWidget);
+    // س235: التطبيق فوري — القائمة تعاد بمدى الزر فالسند المزروع
+    // (آذار) خارج هذا الشهر (تشرين الثاني) فلا يظهر.
+    expect(find.textContaining('سند قبض 26000001'), findsNothing,
+        reason: 'الزر يطبق لحظته: قائمة الشهر الحالي لا سند آذار فيه');
   });
 
-  testWidgets('م02: قائمة الدخل برقائقها — «هذا العام» يملأ من أول '
-      'السنة إلى اليوم', (tester) async {
+  testWidgets('س235: قائمة الدخل بأزرارها — «هذا العام» يملأ من أول '
+      'السنة إلى اليوم ويطبق فوراً', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
@@ -126,8 +130,8 @@ void main() {
     );
   });
 
-  testWidgets('م02: دفتر اليومية من قائمة التقارير برقائقها — '
-      '«اليوم» يملأ الحقلين بيوم واحد', (tester) async {
+  testWidgets('س235: دفتر اليومية من قائمة التقارير بأزراره — '
+      '«اليوم» يملأ الحقلين بيوم واحد ويطبق فوراً', (tester) async {
     final db = DiqqahDatabase.inMemorySyncClose();
     addTearDown(db.close);
     await seedKnownCycle(db);
@@ -147,12 +151,15 @@ void main() {
     expect(find.text('اليوم'), findsOneWidget);
     await tester.tap(find.text('اليوم'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     final expected = diqqahRangeShortcutDates(DiqqahRangePreset.today);
+    // س235: حقلا الشريط الموحد بوسميه الموحدين (وسما اليومية القديمان
+    // رُفعا مع صف الحقول القديم).
     expect(
       tester
           .widget<TextField>(
-              find.widgetWithText(TextField, 'من تاريخ (سنة-شهر-يوم)'))
+              find.widgetWithText(TextField, 'من (YYYY-MM-DD)'))
           .controller!
           .text,
       expected.$1,
@@ -160,7 +167,7 @@ void main() {
     expect(
       tester
           .widget<TextField>(
-              find.widgetWithText(TextField, 'إلى تاريخ (سنة-شهر-يوم)'))
+              find.widgetWithText(TextField, 'إلى (YYYY-MM-DD)'))
           .controller!
           .text,
       expected.$2,
