@@ -259,6 +259,20 @@ class InvoiceLineDraft {
   /// بنية معطلة في م1 — صفر دائماً (05: tax_rate افتراضياً 0).
   final int taxRate;
 
+  /// س237 (D-235 — المرحلة ج/السطر الحر): سطر بلا صنف — وصفه إلزامي
+  /// وسعره يدوي موجب، ولا حركة مخزون له (المحرك يتخطاه فالخطة
+  /// والمجاميع تجريانه بلا مخزون) — وitem_id فيه صفر توكيدياً.
+  final bool isFree;
+
+  /// وصف السطر الحر (إلزامي له) — وبطاقة الصنف غير الموجود تعبّئه
+  /// بالاسم المكتوب.
+  final String? description;
+
+  /// س237 (D-235 — ملاحظات السطور): ملاحظة قصيرة لكل سطر بحقل صغير
+  /// قابل للتوسيع — لا أثر لها بالقيد (أثرها المخططي البسيط مع
+  /// الترحيل الآمن: بيان سطر خالص).
+  final String? note;
+
   const InvoiceLineDraft({
     required this.itemId,
     required this.unitId,
@@ -268,6 +282,9 @@ class InvoiceLineDraft {
     this.unitPriceMinor = 0,
     this.discountMinor = 0,
     this.taxRate = 0,
+    this.isFree = false,
+    this.description,
+    this.note,
   });
 
   /// قيمة السطر قبل خصم الفاتورة الكلي بوحدة صغرى من عملة المستند —
@@ -532,6 +549,20 @@ class InvoiceLinePriceInvalid extends InvoiceValidationError {
 }
 
 /// خصم سطر سالب أو يتجاوز قيمة السطر (س-06).
+/// س237: وصف السطر الحر إلزامي (D-235 — المرحلة ج).
+class InvoiceLineDescriptionRequired extends InvoiceValidationError {
+  final int lineIndex;
+
+  const InvoiceLineDescriptionRequired(this.lineIndex);
+}
+
+/// س237: سعر السطر الحر اليدوي موجب إلزاماً (بيان بلا قيمة لا قيد له).
+class InvoiceFreeLinePriceRequired extends InvoiceValidationError {
+  final int lineIndex;
+
+  const InvoiceFreeLinePriceRequired(this.lineIndex);
+}
+
 class InvoiceLineDiscountInvalid extends InvoiceValidationError {
   final int lineIndex;
 
@@ -789,6 +820,16 @@ List<InvoiceValidationError> validateInvoiceDraftStructure(
   }
   for (var i = 0; i < draft.lines.length; i++) {
     final line = draft.lines[i];
+    // س237 (D-235): السطر الحر — وصفه إلزامي وسعره اليدوي موجب فلا
+    // سطر حر بلا بيان ولا سعر (وسائر فحوص السطر تجرى عليه كما هي).
+    if (line.isFree) {
+      if (line.description == null || line.description!.trim().isEmpty) {
+        errors.add(InvoiceLineDescriptionRequired(i));
+      }
+      if (line.unitPriceMinor <= 0) {
+        errors.add(InvoiceFreeLinePriceRequired(i));
+      }
+    }
     if (line.qtyBase <= 0) {
       errors.add(InvoiceLineQtyInvalid(i, line.qtyBase));
       continue;
@@ -824,6 +865,10 @@ List<InvoiceValidationError> validateInvoiceDraftStructure(
 /// التنفيذ حصراً؛ الواجهة حرية صياغتها (نمط س-36: رسالة واحدة أول خطأ).
 String describeInvoiceValidationError(InvoiceValidationError error) {
   switch (error) {
+    case InvoiceLineDescriptionRequired(:final lineIndex):
+      return 'وصف السطر الحر إلزامي (السطر ${lineIndex + 1})';
+    case InvoiceFreeLinePriceRequired(:final lineIndex):
+      return 'سعر السطر الحر موجب إلزاماً (السطر ${lineIndex + 1})';
     case InvoiceDateInvalid(:final dateText):
       return 'التاريخ «$dateText» ليس بتاريخ صالح (YYYY-MM-DD)';
     case InvoiceOriginalRequired():

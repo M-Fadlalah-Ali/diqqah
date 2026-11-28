@@ -1266,6 +1266,19 @@ class _ReturnPickerSheetState extends State<_ReturnPickerSheet> {
 class _LineUi {
   int? itemId;
 
+  /// س237 (D-235 — المرحلة ج): السطر الحر — بوصفه وسعره اليدوي ولا
+  /// صنف له ولا حركة مخزون (موسوم بصرياً ببطاقته).
+  bool isFree = false;
+
+  /// س237: كتابة الصنف الفورية — الاستعلام الحي بالاسم أو الرمز.
+  final TextEditingController itemQuery = TextEditingController();
+  final TextEditingController description = TextEditingController();
+  final TextEditingController note = TextEditingController();
+  final FocusNode itemFocus = FocusNode();
+
+  /// س237: ملاحظة السطر — حقل صغير قابل للتوسيع.
+  bool noteVisible = false;
+
   /// مستوى التعبئة المختار للسطر — null للوحدة الأساسية (س-10/D-031:
   /// لقطة الوحدة والعامل في السطر). تغيير الصنف يعيده للأساسية.
   int? unitLevelId;
@@ -1289,6 +1302,11 @@ class _LineUi {
     qtyFocus.dispose();
     priceFocus.dispose();
     discountFocus.dispose();
+    // س237: كتابة الصنف والوصف والملاحظة مع السطر.
+    itemQuery.dispose();
+    description.dispose();
+    note.dispose();
+    itemFocus.dispose();
   }
 }
 
@@ -1675,6 +1693,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         salesSide: _kind.isSalesSide, sinceIso: sinceIso);
     // س101: الجلسة مع القراءات الأولى — من في الدخول يحدد زرّي الحفظ.
     final session = await loadSession(widget.db);
+    // س237 (المرحلة ج — D-235): خيارا سطور الفاتورة مع القراءات
+    // الأولى — السطر الحر وملاحظات السطور.
+    final freeLineAllowed = await widget.db.invoiceFreeLineAllowed();
+    final lineNotesEnabled = await widget.db.invoiceLineNotesEnabled();
     if (!mounted) return;
     setState(() {
       _boxes = boxes;
@@ -1692,6 +1714,9 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       _stockAvail = avail;
       _reserveEnabled = reserveOn;
       _reservedQty = reserved;
+      // س237: الخياران مع أخويهما في الحالة.
+      _freeLineAllowed = freeLineAllowed;
+      _lineNotesEnabled = lineNotesEnabled;
       // الافتراضي المعقول لصاحب المنشأة: أول صندوق وأول مستودع نشط —
       // والمستودع المعين قبل قراءة المتاح (إصلاح س-119/D-114 أعلاه).
       _boxId = _boxes.isEmpty ? null : _boxes.first.boxId;
@@ -1878,6 +1903,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
 
   /// إضافة بند جديد وتركيز حقل الكمية فيه (س-109/D-110) — الإدخال
   /// بلوحة المفاتيح كاملاً بلا مسك الفأرة عند نهاية كل بند.
+
+  /// س237 (D-235 — المرحلة ج): خانتا سياسات البيع — السطر الحر
+  /// وملاحظات السطور (تُقرآن مع قراءات _load الأولى).
+  bool _freeLineAllowed = false;
+  bool _lineNotesEnabled = false;
+
   void _addLineFocused() {
     setState(() {
       _lines.add(_LineUi());
@@ -2078,23 +2109,42 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   }
 
   InvoiceDraft _buildDraft() {
+    // س237 (D-235): الأسطر الفارغة المجهزة (لا صنف ولا كمية ولا
+    // حر — سطر Enter التالي بعينه) لا تدخل المسودة متى وجد محتوى —
+    // فجهيز السطر التالي إعداد واجهة لا بند فاتورة — وبالنموذج
+    // الفارغ كله يبقى سطره فيُرفض برسالته المعهودة (س-87 كما كان).
+    final hasContent = _lines.any((l) =>
+        l.isFree ||
+        l.itemId != null ||
+        _parsed(l.qty) != 0 ||
+        _parsed(l.price) != 0);
     final lines = [
       for (final l in _lines)
-        InvoiceLineDraft(
-          itemId: l.itemId ?? 0,
-          unitId: _baseUnitIdOf(l.itemId) ?? 0,
-          // س-10 (الدفعة 30): بالتعبئة الكمية بوحدة المستوى والأساسية
-          // بعاملها واللقطة بالمستوى، وبالأساسية ما اعتاد م1 حرفاً
-          // (qty = null فتساوي qtyBase).
-          qty: l.unitLevelId == null ? null : _parsed(l.qty),
-          unitLevelId: l.unitLevelId,
-          qtyBase: _parsed(l.qty) *
-              (l.unitLevelId == null
-                  ? 1
-                  : _factorOfLevel(l.unitLevelId!)),
-          unitPriceMinor: _parsed(l.price),
-          discountMinor: _parsed(l.discount),
-        ),
+        if (!hasContent ||
+            l.isFree ||
+            l.itemId != null ||
+            _parsed(l.qty) != 0 ||
+            _parsed(l.price) != 0)
+          InvoiceLineDraft(
+            // س237: السطر الحر بلا صنف — صفر توكيدياً (المجمعات
+            // تجريه والخطة تتخطاه) ووصفه وملاحظته مع السطر.
+            itemId: l.isFree ? 0 : (l.itemId ?? 0),
+            unitId: l.isFree ? 0 : (_baseUnitIdOf(l.itemId) ?? 0),
+            // س-10 (الدفعة 30): بالتعبئة الكمية بوحدة المستوى والأساسية
+            // بعاملها واللقطة بالمستوى، وبالأساسية ما اعتاد م1 حرفاً
+            // (qty = null فتساوي qtyBase).
+            qty: l.unitLevelId == null ? null : _parsed(l.qty),
+            unitLevelId: l.unitLevelId,
+            qtyBase: _parsed(l.qty) *
+                (l.unitLevelId == null
+                    ? 1
+                    : _factorOfLevel(l.unitLevelId!)),
+            unitPriceMinor: _parsed(l.price),
+            discountMinor: _parsed(l.discount),
+            isFree: l.isFree,
+            description: l.isFree ? l.description.text : null,
+            note: l.note.text.trim().isEmpty ? null : l.note.text.trim(),
+          ),
     ];
     return InvoiceDraft(
       kind: _kind,
@@ -2750,6 +2800,169 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         : '$availLabel: $availText · $priceLabel: $priceText';
   }
 
+
+  /// س237: اقتراحات الصنف الفورية — تطابق الاسم أو الرمز احتواءً،
+  /// خمسة أولاً (بترتيب المعرف — الأقدم أسهل الوصول).
+  List<Item> _itemSuggestions(_LineUi line) {
+    final q = line.itemQuery.text.trim();
+    // الفراغ يعرض الخمسة الأوائل — فالاقتراح فوري من أول نظرة
+    // (وبضغطة على الرقاقة يثبت الصنف بلا قائمة تفتح).
+    if (q.isEmpty) return _items.take(5).toList();
+    final ql = q.toLowerCase();
+    return _items
+        .where((it) =>
+            it.name.toLowerCase().contains(ql) ||
+            it.sku.toLowerCase().contains(ql))
+        .take(5)
+        .toList();
+  }
+
+  /// س237: Enter يثبت الصنف — أعلى المطابقات، والغائب يفتح النافذة.
+  void _onItemQuerySubmitted(int index) {
+    final line = _lines[index];
+    final s = _itemSuggestions(line);
+    if (s.isNotEmpty) {
+      _fixItemLine(index, s.first);
+    } else {
+      _itemNotFoundDialog(index);
+    }
+  }
+
+  /// س237: تثبيت الصنف — ينتقل للكمية ويجهز سطراً تالياً إن كان
+  /// الأخير (D-235: Enter يثبت وينتقل ويجهز).
+  void _fixItemLine(int index, Item it) {
+    final line = _lines[index];
+    setState(() {
+      line.itemId = it.id;
+      line.unitLevelId = null;
+      line.itemQuery.clear();
+      _fillDefaultPrice(line);
+    });
+    if (index == _lines.length - 1) _addLineFocused();
+    FocusScope.of(context).requestFocus(line.qtyFocus);
+  }
+
+  /// س237: نافذة الصنف غير الموجود — عند البحث الصريح حصراً: إضافة
+  /// بطاقة صنف (الاسم معبأ) أو إدراج صنف حر (إن نافذ خيار سياسات
+  /// البيع) أو إلغاء (D-235).
+  Future<void> _itemNotFoundDialog(int index) async {
+    final line = _lines[index];
+    final typed = line.itemQuery.text.trim();
+    if (typed.isEmpty) return;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('${S.itemNotFoundTitle}: $typed'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(ctx).pop('card'),
+            child: Text(S.addNewItemCard),
+          ),
+          if (_freeLineAllowed)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(ctx).pop('free'),
+              child: Text(S.insertFreeLine),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            child: const Text(S.cancelAction),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'cancel') return;
+    if (choice == 'free') {
+      setState(() {
+        line.isFree = true;
+        line.description.text = typed;
+        line.itemId = null;
+        line.unitLevelId = null;
+        line.itemQuery.clear();
+      });
+      FocusScope.of(context).requestFocus(line.qtyFocus);
+      return;
+    }
+    await _quickItemCardDialog(index, typed);
+  }
+
+  /// س237: بطاقة الصنف السريعة — الاسم معبأ من البحث، والرمز إلزامي،
+  /// وسعر البيع اختياري — تصنع الصنف وتثبته في السطر فوراً.
+  Future<void> _quickItemCardDialog(int index, String typed) async {
+    final sku = TextEditingController();
+    final price = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.addNewItemCard),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: TextEditingController(text: typed),
+              readOnly: true,
+              decoration: const InputDecoration(labelText: S.itemNameLabel),
+            ),
+            TextField(
+              controller: sku,
+              decoration: const InputDecoration(labelText: S.itemSkuRequired),
+            ),
+            TextField(
+              controller: price,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: S.quickItemPriceLabel),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(S.cancelAction),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(S.saveAction),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || ok != true) {
+      sku.dispose();
+      price.dispose();
+      return;
+    }
+    final sale = parseGroupedInt(price.text.trim());
+    final skuText = sku.text.trim();
+    if (skuText.isEmpty) {
+      setState(() => _errors = [S.skuRequiredError]);
+      return;
+    }
+    try {
+      final firstUnit = (await widget.db.customSelect(
+              'SELECT id FROM units WHERE is_deleted = 0 ORDER BY id LIMIT 1')
+          .getSingle()).data['id'] as int;
+      final id = await widget.db.insertItem(
+        sku: skuText,
+        name: typed,
+        kind: 'good',
+        baseUnitId: firstUnit,
+        purchasePriceMinor: 0,
+        salePriceMinor: sale,
+        priceCurrencyId: 1,
+      );
+      await _load();
+      if (!mounted) return;
+      _fixItemLine(index, _items.firstWhere((it) => it.id == id));
+    } catch (e) {
+      await dqLog(widget.db, e, context: 'invoice.quick_item');
+      if (!mounted) return;
+      setState(() => _errors = ['$e${dqTag(e)}']);
+    } finally {
+      sku.dispose();
+      price.dispose();
+    }
+  }
+
   Widget _lineCard(int index) {
     final line = _lines[index];
     final unitId = _baseUnitIdOf(line.itemId);
@@ -2761,60 +2974,90 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         padding: const EdgeInsets.all(8),
         child: Column(
           children: [
-            DropdownButtonFormField<int>(
-              initialValue: line.itemId,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: S.itemLabel),
-              onTap: () {
-                // س-119/D-114: النقر على الصنف يحدّث المتاح أولاً كي
-                // لا تُعرض خريطة قديمة إن رُحّلت فاتورة والنموذج مفتوح.
-                _reloadStock();
-              },
-              items: [
-                for (final it in _items)
-                  DropdownMenuItem<int>(
-                    value: it.id,
-                    // س198 (م16 من تقرير فحص الواجهات وفق M3): خيارات
-                    // القائمة المفتوحة صارت سطرين بنيويين بلا قص —
-                    // الاسم علوية ومعلوماته (المتاح والسعر) سطراً
-                    // فرعياً — فلا يُفقد جزء من المنتاج أو السعر عند
-                    // تكبير الخط أو الأسماء الطويلة (كانت مقصوصة بحد
-                    // سطرين حفاراً). والحقل المغلق باقٍ بسطره المركب
-                    // بترتيب المالك س-108 وبحد سطرين كما جرت جولات CI
-                    // (درس RenderFlex overflowed by 16 pixels).
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '${it.sku} ${it.name}'
-                          '${it.kind == 'service' ? S.serviceSuffix : it.kind == 'bundle' ? S.assemblySuffix : ''}',
-                        ),
-                        Text(_itemSubtitle(it),
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
+            // س237 (D-235 — المرحلة ج/حقل الصنف): الكتابة الفورية
+            // داخل السطر بالاسم أو الرمز باقتراحات فورية — وEnter يثبت
+            // أعلى المطابقات وينتقل للكمية ويجهز سطراً تالياً، والصريح
+            // الغائب يفتح نافذة الصنف غير الموجود (خياراتها الثلاثة) —
+            // والبحث السريع متعدد الإدراج والباركود كما هما.
+            if (line.isFree)
+              TextField(
+                controller: line.description,
+                decoration: const InputDecoration(
+                    labelText: S.freeLineDescriptionLabel,
+                    helperText: S.freeLineBadge),
+                onSubmitted: (_) =>
+                    FocusScope.of(context).requestFocus(line.qtyFocus),
+              )
+            else if (line.itemId == null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // س237: الاقتراحات الفورية فوق الحقل لا تحته — فحقل
+                  // الصنف بقاع النموذج تجعل ما تحته خارج الطية (درس
+                  // الاختبارات: النقر على ما وراء الطية صمت لا إصابة)،
+                  // وفوقه مرئي دائماً بلا تمرير — والخمسة الأوائل مع
+                  // الفراغ فالاختيار من أول نظرة.
+                  if (_itemSuggestions(line).isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          for (final it in _itemSuggestions(line))
+                            ActionChip(
+                              label: Text(
+                                '${it.sku} ${it.name}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onPressed: () => _fixItemLine(index, it),
+                            ),
+                        ],
+                      ),
                     ),
+                  TextField(
+                    controller: line.itemQuery,
+                    decoration: const InputDecoration(
+                        // الوسم القائم «الصنف» بعينه — فالتدفق القائم
+                        // (نقرة الوسم ثم الاقتراح) يسري كما هو.
+                        labelText: S.itemLabel,
+                        helperText: S.itemSearchHelper),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _onItemQuerySubmitted(index),
                   ),
-              ],
-              selectedItemBuilder: (context) => [
-                // س198 (م16): عرض الحقل المغلق بلسان س-108 نفسه — سطر
-                // مركب «رقم الصنف – الاسم – المتاح – السعر» يلتف مقصوصاً
-                // لا يفاض، وإنما القائمة المفتوحة هي التي تُوسعت.
-                for (final it in _items)
-                  Text(
-                    '${it.sku} ${it.name}'
-                    '${it.kind == 'service' ? S.serviceSuffix : it.kind == 'bundle' ? S.assemblySuffix : ''}'
-                    ' — ${_itemSubtitle(it)}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                ],
+              )
+            else
+              InputDecorator(
+                decoration: InputDecoration(
+                  labelText: S.itemLabel,
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    tooltip: S.changeItemTooltip,
+                    icon: const Icon(Icons.close),
+                    onPressed: () => setState(() {
+                      line.itemId = null;
+                      line.unitLevelId = null;
+                      line.itemQuery.clear();
+                    }),
                   ),
-              ],
-              onChanged: (value) => setState(() {
-                line.itemId = value;
-                line.unitLevelId = null; // صنف آخر يعيد الوحدة للأساسية
-                _fillDefaultPrice(line); // س-108: السعر الافتراضي يُعبأ
-              }),
-            ),
+                ),
+                child: Text(
+                  '${_itemOf(line.itemId)!.sku} ${_itemOf(line.itemId)!.name}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            if (line.noteVisible)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: TextField(
+                  controller: line.note,
+                  decoration: const InputDecoration(
+                      labelText: S.lineNoteLabel, isDense: true),
+                ),
+              ),
             if (line.itemId != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
@@ -2979,6 +3222,17 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     ),
                   ),
                 ),
+                // س237 (D-235): ملاحظة السطر — حقل صغير قابل
+                // للتوسيع (خيار سياسات البيع).
+                if (_lineNotesEnabled)
+                  IconButton(
+                    tooltip: S.lineNoteLabel,
+                    icon: Icon(line.noteVisible
+                        ? Icons.sticky_note_2
+                        : Icons.sticky_note_2_outlined),
+                    onPressed: () => setState(
+                        () => line.noteVisible = !line.noteVisible),
+                  ),
                 IconButton(
                   tooltip: S.deleteLine,
                   icon: const Icon(Icons.delete_outline),

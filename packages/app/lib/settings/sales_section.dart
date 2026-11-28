@@ -33,6 +33,11 @@ class _SalesSectionState extends State<SalesSection> {
   /// (نمط أخيه أعلاه)، والغائب مطفأ (فحص الإنشاء القائم باقٍ).
   bool _draftOverStock = false;
 
+  /// س237 (المرحلة ج — D-235): خانتا سطور الفاتورة — السطر الحر
+  /// وملاحظات السطور (تقرؤهما شاشة التحرير فور فتحها).
+  bool _freeLine = false;
+  bool _lineNotes = false;
+
   /// س105: سقف عهدة المندوبين — يُقرأ النافذ عند الفتح (نمط العدّاد
   /// D-169)، والفراغ أو الصفر بلا سقف (سلوك س104 القائم افتراضاً).
   final _custodyCapController = TextEditingController();
@@ -56,10 +61,15 @@ class _SalesSectionState extends State<SalesSection> {
   Future<void> _loadHeldReserve() async {
     final on = await widget.db.heldInvoicesReserveQty();
     final over = await widget.db.invoiceDraftOverStock();
+    // س237 (المرحلة ج): خانتا سطور الفاتورة تُقرآن معهما.
+    final free = await widget.db.invoiceFreeLineAllowed();
+    final notes = await widget.db.invoiceLineNotesEnabled();
     if (!mounted) return;
     setState(() {
       _heldReserve = on;
       _draftOverStock = over;
+      _freeLine = free;
+      _lineNotes = notes;
     });
   }
 
@@ -104,6 +114,45 @@ class _SalesSectionState extends State<SalesSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // ── س237 (المرحلة ج — D-235): بطاقة سطور الفاتورة — خانتا
+        // سياسات البيع: السطر الحر وملاحظات السطور. ──
+        Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(S.invoiceLinesCardTitle,
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(S.freeLineSettingTitle),
+                  subtitle: Text(S.freeLineSettingBody),
+                  value: _freeLine,
+                  onChanged: (v) async {
+                    await widget.db.setInvoiceFreeLineAllowed(v);
+                    if (!mounted) return;
+                    setState(() => _freeLine = v);
+                  },
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(S.lineNotesSettingTitle),
+                  subtitle: Text(S.lineNotesSettingBody),
+                  value: _lineNotes,
+                  onChanged: (v) async {
+                    await widget.db.setInvoiceLineNotesEnabled(v);
+                    if (!mounted) return;
+                    setState(() => _lineNotes = v);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+
         // ── س164: بطاقة مسودات البيع — خيارا المنشأة معاً: الحجز
         // (س102 بمفتاحه الباقي حرفاً) صار بتابع المسودة بعد إلغاء
         // التعليق، و«مسودة أكبر من المتاح» نقطة المالك الخامسة:

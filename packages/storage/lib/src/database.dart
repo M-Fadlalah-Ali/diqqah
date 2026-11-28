@@ -1275,7 +1275,10 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// (kind نقدي/جارٍ بنكي وbank_name وaccount_number لصناديق البنوك)
   /// وجدول bank_reconciliations خالصاً لمستند التسوية البنكية بنمط
   /// cash_adjustments حرفاً (مع رصيدي الكشف والدفتري اللقطة).
-  static const int schemaVersionValue = 38;
+  /// وأحدثتها س237 (المرحلة ج D-235): v39 — ثلاثة أعمدة على
+  /// invoice_lines بADD COLUMN بحرس pragma (is_free للسطر الحر
+  /// وdescription وصفه وnote ملاحظة السطر القصيرة).
+  static const int schemaVersionValue = 39;
 
   @override
   int get schemaVersion => schemaVersionValue;
@@ -2059,6 +2062,31 @@ class DiqqahDatabase extends _$DiqqahDatabase {
                     'account_number TEXT NULL');
               }
               await _createBankReconciliationTableTx();
+            }
+            // 38→39 (ومن إصدار أدنى مباشرة): س237 (المرحلة ج D-235):
+            // أعمدة السطر الحر والملاحظة على أسطر الفواتير بحرس
+            // pragma (آمنة التكرار أي كان مسار الوصول).
+            if (version == 39) {
+              final lineCols = (await customSelect(
+                      "SELECT name FROM pragma_table_info('invoice_lines')")
+                    .get())
+                  .map((r) => r.data['name'] as String)
+                  .toSet();
+              if (!lineCols.contains('is_free')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    "is_free INTEGER NOT NULL DEFAULT 0");
+              }
+              if (!lineCols.contains('description')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    'description TEXT NULL');
+              }
+              if (!lineCols.contains('note')) {
+                await customStatement(
+                    'ALTER TABLE invoice_lines ADD COLUMN '
+                    'note TEXT NULL');
+              }
             }
           }
         },
@@ -3080,6 +3108,50 @@ class DiqqahDatabase extends _$DiqqahDatabase {
     return row?.value.trim() == '1';
   }
 
+  /// س237: هل السطر الحر نافذ؟ (يقرأه محرر الفاتورة وبوابة
+  /// «إدراج صنف حر» بنافذة الصنف غير الموجود).
+  Future<bool> invoiceFreeLineAllowed() async {
+    final row = await (select(appMeta)
+          ..where((t) => t.key.equals(freeLineAllowedMetaKey)))
+        .getSingleOrNull();
+    return row?.value.trim() == '1';
+  }
+
+  /// س237: ضبط السطر الحر — '1'/'0' حرفاً كأخوته.
+  Future<void> setInvoiceFreeLineAllowed(bool enabled) async {
+    await _setAppMetaFlag(freeLineAllowedMetaKey, enabled);
+  }
+
+  /// س237: هل ملاحظات السطور نافذة؟ (حقلها الصغير قابل للتوسيع).
+  Future<bool> invoiceLineNotesEnabled() async {
+    final row = await (select(appMeta)
+          ..where((t) => t.key.equals(lineNotesMetaKey)))
+        .getSingleOrNull();
+    return row?.value.trim() == '1';
+  }
+
+  /// س237: ضبط ملاحظات السطور — '1'/'0' حرفاً.
+  Future<void> setInvoiceLineNotesEnabled(bool enabled) async {
+    await _setAppMetaFlag(lineNotesMetaKey, enabled);
+  }
+
+  /// س237: ضبط علم app_meta موحداً بنمط أخيه حرفاً ('1'/'0').
+  Future<void> _setAppMetaFlag(String key, bool enabled) async {
+    final value = enabled ? '1' : '0';
+    final existing = await (select(appMeta)
+          ..where((t) => t.key.equals(key)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await (update(appMeta)..where((t) => t.key.equals(key)))
+          .write(AppMetaCompanion(value: Value(value)));
+    } else {
+      await into(appMeta).insert(AppMetaCompanion.insert(
+        key: key,
+        value: value,
+      ));
+    }
+  }
+
   /// ضبط الخيار — قيمته '1'/'0' حرفاً كأخوته في app_meta.
   Future<void> setHeldInvoicesReserveQty(bool enabled) async {
     final value = enabled ? '1' : '0';
@@ -3111,6 +3183,11 @@ class DiqqahDatabase extends _$DiqqahDatabase {
 
   /// مفتاح خيار حفظ مسودة فوق المتاح (س164).
   static const String draftOverStockMetaKey = 'invoices.draft_over_stock';
+
+  /// س237 (المرحلة ج — D-235): خانتا سياسات البيع — السطر الحر
+  /// وملاحظات السطور (نافذتاها بالإعدادات وتقرؤهما شاشة التحرير).
+  static const String freeLineAllowedMetaKey = 'invoices.free_line_allowed';
+  static const String lineNotesMetaKey = 'invoices.line_notes';
 
   /// القراءة المعلنة — هل يُسمح بحفظ مسودة بيع كمياتها فوق المتاح؟
   /// الغائب والفاسد مطفأً (D-169 كالغائب).
@@ -5039,6 +5116,7 @@ Future<void> _createInvoiceTables() async {
         '"created_at" INTEGER NOT NULL DEFAULT 0, '
         '"updated_at" INTEGER NOT NULL DEFAULT 0, '
         '"is_deleted" INTEGER NOT NULL DEFAULT 0)',
+    // س237 (المرحلة ج): أعمدة السطر الحر وملاحظته.
     'CREATE TABLE IF NOT EXISTS "invoice_lines" ('
         '"id" INTEGER PRIMARY KEY AUTOINCREMENT, '
         '"invoice_id" INTEGER NOT NULL, '
@@ -5053,6 +5131,9 @@ Future<void> _createInvoiceTables() async {
         '"unit_price_minor" INTEGER NOT NULL DEFAULT 0, '
         '"discount_minor" INTEGER NOT NULL DEFAULT 0, '
         '"tax_rate" INTEGER NOT NULL DEFAULT 0, '
+        '"is_free" INTEGER NOT NULL DEFAULT 0, '
+        '"description" TEXT NULL, '
+        '"note" TEXT NULL, '
         '"line_total_doc_minor" INTEGER NOT NULL DEFAULT 0, '
         '"line_total_base_minor" INTEGER NOT NULL DEFAULT 0, '
         // v13 (دفعة 12/D-131/D-132): علم التسليم والمورد المسؤول —
@@ -5600,7 +5681,8 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
     'unit_level_id, qty, '
     'qty_base, unit_price_minor, discount_minor, tax_rate, '
     'line_total_doc_minor, line_total_base_minor, uuid, delivered, '
-    'supplier_party_id, delivery_note '
+    'supplier_party_id, delivery_note, '
+    'is_free, description, note '
     'FROM invoice_lines WHERE invoice_id = ? ORDER BY id',
     variables: [Variable.withInt(invoiceId)],
   ).get();
@@ -5626,6 +5708,10 @@ Future<List<InvoiceLineDocument>> _invoiceLinesTx(int invoiceId) async {
         supplierPartyId: r.data['supplier_party_id'] as int?,
         // س-153/D-151 (دفعة 15): خانة «ملاحظة التسليم» مع السطر.
         deliveryNote: r.data['delivery_note'] as String?,
+        // س237 (المرحلة ج): الحرة الثلاثة مع السطر.
+        isFree: (r.data['is_free'] as int? ?? 0) == 1,
+        description: r.data['description'] as String?,
+        note: r.data['note'] as String?,
       ),
   ];
 }
@@ -5718,6 +5804,11 @@ InvoiceDraft _draftFromRows(InvoiceDocument inv, List<InvoiceLineDocument> lines
           unitPriceMinor: l.unitPriceMinor,
           discountMinor: l.discountMinor,
           taxRate: l.taxRate,
+          // س237: الحرة الثلاثة تعود مع المسودة — فالترحيل يعيد
+          // بناءها من الصفوف لا من الذاكرة.
+          isFree: l.isFree,
+          description: l.description,
+          note: l.note,
         ),
     ],
   );
@@ -6164,8 +6255,13 @@ Future<List<InvoiceValidationError>> _collectInvoiceErrors(
   for (var i = 0; i < draft.lines.length; i++) {
     final item = itemByLine[i];
     final line = draft.lines[i];
+    // س237 (المرحلة ج): السطر الحر بلا صنف أصلاً — فحص الصنف
+    // يخطاه وعقده البنيوية فُحصت بالمدقق (وصف وسعر يدوي موجب)،
+    // والخطة والمجاميع تجريانه بلا مخزون.
     if (item == null) {
-      errors.add(InvoiceItemNotFound(i, line.itemId));
+      if (!line.isFree) {
+        errors.add(InvoiceItemNotFound(i, line.itemId));
+      }
       continue;
     }
     final label =
@@ -6945,13 +7041,16 @@ Future<int> createInvoiceDraft(InvoiceDraft draft) async {
         'INSERT INTO invoice_lines (invoice_id, item_id, unit_id, '
         'factor_at_entry, unit_level_id, qty, qty_base, '
         'unit_price_minor, discount_minor, '
-        'tax_rate, line_total_doc_minor, line_total_base_minor, uuid, '
+        'tax_rate, is_free, description, note, '
+        'line_total_doc_minor, line_total_base_minor, uuid, '
         'created_at, updated_at, is_deleted) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
         [
           invoiceId,
-          r.line.itemId,
-          r.line.unitId,
+          // س237 (المرحلة ج): السطر الحر بلا صنف — صفر توكيدياً
+          // فالمجمعات تسري والخطة تتخطاه.
+          r.line.isFree ? 0 : r.line.itemId,
+          r.line.isFree ? 0 : r.line.unitId,
           factorAtEntry,
           r.line.unitLevelId,
           r.line.qty ?? r.line.qtyBase,
@@ -6959,6 +7058,9 @@ Future<int> createInvoiceDraft(InvoiceDraft draft) async {
           r.line.unitPriceMinor,
           r.line.discountMinor,
           r.line.taxRate,
+          r.line.isFree ? 1 : 0,
+          r.line.isFree ? (r.line.description ?? '') : null,
+          r.line.note,
           r.netDocMinor,
           r.baseMinor,
           const Uuid().v4(),
@@ -7658,7 +7760,7 @@ Future<List<UndeliveredLineRow>> undeliveredSaleLinesReport() async {
     'u.name AS unit_name, il.delivery_note AS delivery_note '
     'FROM invoice_lines il '
     'JOIN invoices inv ON inv.id = il.invoice_id '
-    'JOIN items i ON i.id = il.item_id '
+    'LEFT JOIN items i ON i.id = il.item_id '
     'JOIN units u ON u.id = il.unit_id '
     'LEFT JOIN parties p ON p.id = inv.party_id '
     'LEFT JOIN parties sp ON sp.id = il.supplier_party_id '
@@ -14323,7 +14425,11 @@ Future<List<SalesMovementRow>> salesMovementReport({
     throw ReportValidationException(errors);
   }
   final rows = await customSelect(
-    'SELECT il.item_id AS item_id, i.sku AS sku, i.name AS name, '
+    // س237 (المرحلة ج — D-235): أسطر الحرة تجمع تحت «أصناف حرة»
+    // كي تتطابق المجاميع (LEFT JOIN فلا يسقط سطر حر بالربط).
+    'SELECT il.item_id AS item_id, '
+    "COALESCE(i.sku, 'حر') AS sku, "
+    "COALESCE(i.name, 'أصناف حرة') AS name, "
     "SUM(CASE WHEN inv.kind = 'sale' "
     'THEN il.qty_base ELSE 0 END) AS qty_sold, '
     "SUM(CASE WHEN inv.kind = 'sale' "
@@ -14334,7 +14440,8 @@ Future<List<SalesMovementRow>> salesMovementReport({
     'THEN il.line_total_base_minor ELSE 0 END) AS returns_value '
     'FROM invoice_lines il '
     'JOIN invoices inv ON inv.id = il.invoice_id '
-    'JOIN items i ON i.id = il.item_id '
+    // س237: ربط أيسر فأسطر الحرة (بلا صنف) تجمع ولا تسقط.
+    'LEFT JOIN items i ON i.id = il.item_id '
     "WHERE inv.state <> 'draft' AND inv.is_deleted = 0 "
     'AND il.is_deleted = 0 '
     'AND inv.invoice_date >= ?1 AND inv.invoice_date <= ?2 '
@@ -17241,6 +17348,12 @@ class InvoiceLineDocument {
   final int lineTotalBaseMinor;
   final String uuid;
 
+  /// س237 (المرحلة ج — D-235): السطر الحر — بلا صنف فوصفه بيانه،
+  /// وملاحظته القصيرة بيان سطر خالص.
+  final bool isFree;
+  final String? description;
+  final String? note;
+
   /// س-137/D-131: مربع «مستلم» — غير محدد افتراضاً لكل سطر جديد،
   /// والتحديد يُحفظ فوراً بقاعدة البيانات.
   final bool delivered;
@@ -17272,6 +17385,10 @@ class InvoiceLineDocument {
     this.delivered = false,
     this.supplierPartyId,
     this.deliveryNote,
+    // س237 (المرحلة ج): الحرة الثلاثة مع سطر المستند.
+    this.isFree = false,
+    this.description,
+    this.note,
   });
 }
 

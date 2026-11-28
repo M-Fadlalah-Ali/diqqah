@@ -580,6 +580,26 @@ abstract final class S {
   static const String splashStageSetupCheck = 'فحص التهيئة';
   static const String splashStageUpgradeSnapshot =
       'لقطة الأمان قبل ترقية المخطط';
+  // ===== سطور الفاتورة (س237 — المرحلة ج D-235) =====
+  static const String addNewItemCard = 'إضافة بطاقة صنف';
+  static const String changeItemTooltip = 'تغيير الصنف';
+  static const String freeLineBadge = 'سطر حر — بلا صنف ولا حركة مخزون';
+  static const String freeLineDescriptionLabel = 'وصف السطر الحر (إلزامي)';
+  static const String freeLineSettingBody = 'سطر بوصف وسعر يدوي بلا صنف ولا حركة مخزون — يدخل من نافذة الصنف غير الموجود عند البحث الصريح';
+  static const String freeLineSettingTitle = 'السطر الحر بالفواتير';
+  static const String insertFreeLine = 'إدراج صنف حر';
+  static const String invoiceLinesCardTitle = 'سطور الفاتورة';
+  static const String itemNotFoundTitle = 'الصنف غير موجود';
+  static const String itemSearchHelper = 'اكتب ثم Enter لتثبيت أعلى المطابقات — أو اختر من الاقتراحات';
+  static const String itemSearchLabel = 'الصنف — اكتب الاسم أو الرمز';
+  static const String itemSkuRequired = 'رمز الصنف (إلزامي)';
+  static const String lineNoteLabel = 'ملاحظة السطر';
+  static const String lineNotesSettingBody = 'ملاحظة قصيرة لكل سطر بحقل صغير قابل للتوسيع — بيان سطر خالص لا أثر له بالقيد';
+  static const String lineNotesSettingTitle = 'ملاحظات السطور بالفواتير';
+  static const String quickItemPriceLabel = 'سعر البيع (بوحدة صغرى)';
+  static const String salePriceInvalid = 'سعر البيع موجب إلزاماً';
+  static const String skuRequiredError = 'رمز الصنف إلزامي';
+
   // ===== البنوك (س236 — د10) =====
   static const String bankAccountNumberLabel = 'رقم الحساب (اختياري)';
   static const String bankKindLabel = 'جارٍ بنكي';
