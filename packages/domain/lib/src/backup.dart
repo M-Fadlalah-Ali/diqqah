@@ -342,7 +342,7 @@ class BackupCipher {
     out.add(recBox.mac.bytes);
     out.add(recBox.cipherText);
     if (withLog) {
-      out.add(await _packLogRecord(logRootKey!, dek));
+      out.add(await _packLogRecord(logRootKey, dek));
     }
     out.add(dataBox.nonce);
     out.add(dataBox.cipherText);
@@ -542,7 +542,7 @@ class BackupCipher {
     out.add(recBox.mac.bytes);
     out.add(recBox.cipherText);
     if (withLog) {
-      out.add(await _packLogRecord(logRootKey!, dek));
+      out.add(await _packLogRecord(logRootKey, dek));
     }
     out.add(dataBox.nonce);
     out.add(dataBox.cipherText);

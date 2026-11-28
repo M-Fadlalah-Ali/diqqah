@@ -279,13 +279,13 @@ void main() {
     await expectLater(
       dbB.customStatement(
           "UPDATE events SET payload = 'x' WHERE id = (SELECT MIN(id) FROM events)"),
-      throwsA(isA<Exception>(),
-          reason: 'حاجز الإلحاق معاد إنشاؤه بعد الختم (DQ-1119)'),
+      throwsA(isA<Exception>()),
+      reason: 'حاجز الإلحاق معاد إنشاؤه بعد الختم (DQ-1119)',
     );
     // ولقطة الرجوع v5 بجذر ب — التراجع يعمل بمفتاح خزنة ب صامتاً
     // وبالجذر المستقر عليه (الجذر ذاته فلا ختم جديد).
-    final snapshots = await Directory(tempDir.path)
-        .list()
+    final snapshots = Directory(tempDir.path)
+        .listSync()
         .whereType<File>()
         .where((f) => p.basename(f.path).startsWith('diqqah-before-restore'))
         .toList();

@@ -531,8 +531,8 @@ String? _rawP3LogSalt(Database raw) {
           "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta'")
       .isNotEmpty;
   if (!hasMeta) return null;
-  final rows =
-      raw.select('SELECT value FROM app_meta WHERE key = ?', [p3LogSaltMetaKey]);
+  final rows = raw.select('SELECT value FROM app_meta WHERE key = ?',
+      [DiqqahDatabase.p3LogSaltMetaKey]);
   if (rows.isEmpty) return null;
   final value = rows.first[0] as String?;
   if (value == null || value.isEmpty) return null;
