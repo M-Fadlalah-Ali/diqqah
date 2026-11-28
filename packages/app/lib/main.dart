@@ -207,15 +207,44 @@ class _AppGateState extends State<AppGate> {
         // اللقطة تسبق مساسها فأي فشل لاحق يبقى قابلاً للاسترجاع.
         await snapshotBeforeUpgrade(
             dbPath, DiqqahDatabase.schemaVersionValue);
+        // د11 الجزء الثاني (س230/D-225): جذر سجلات الأحداث والأخطاء
+        // من خزنة الجهاز — يُحمل **قبل** فتح القاعدة فالترحيلات نفسها
+        // تختتم بالجذر (v28 تختم القائمة الموجودة عند الترقية) وأول
+        // كتابة بعدها. فشل الخزنة = الجذر الإرثي المضمّن انخفاضاً
+        // موثقاً (يُسجل بالسجل بعد الفتح لا يُسقط الافتتاح — نمط مواد
+        // النسخ عينه: أمن النسخ لا يحبس الباب).
+        stage = 'حمل جذر السجلات من الخزنة';
+        Object? logRootFailure;
+        List<int>? liveLogRoot;
+        try {
+          liveLogRoot = await LogRootVault().loadOrCreate();
+        } catch (e) {
+          logRootFailure = e;
+        }
         stage = 'فتح قاعدة البيانات وترقية المخطط';
         // F-150/D-210 P0-ب (س148): خزنة الجهاز تُمرّر للفتح — المفتاح
         // العشوائي 256-bit يُحمل/يُولد من الخزنة (Keystore/DPAPI) ويُرحَّل
         // النص الصريح للمثبتين فوق حزم سابقة عند أول فتح (لقطة preenc
         // ثم VACUUM INTO ثم rekey ثم إعادة تسمية — فشل آمن بأي خطوة).
-        db = DiqqahDatabase(filePath: dbPath, keyVault: SecureStorageKeyVault());
+        db = DiqqahDatabase(
+            filePath: dbPath,
+            keyVault: SecureStorageKeyVault(),
+            logRootKey: liveLogRoot);
         // د-197: تسخين الاتصال هنا حصراً كي يقع تحميل المفتاح والترحيل
         // والتشفير تحت حرس هذه المرحلة بلا استثناء صامت لاحق.
         await db.customStatement('SELECT 1');
+        // س230: خزنة الجذر الفاشلة تُسجل بصوت عالٍ — والافتتاح يكمل
+        // بالجذر الإرثي المضمّن (انخفاض موثق لا صمت).
+        if (logRootFailure != null) {
+          try {
+            await db.logError(
+                code: 'DQ-1125',
+                message: 'فشل حمل جذر السجلات من الخزنة — بقيت السجلات '
+                    'بالجذر الإرثي المضمّن (انخفاض موثق): '
+                    '$logRootFailure',
+                context: 'bootstrap');
+          } catch (_) {}
+        }
         // F-150/D-210 P1-ب (س149): مفتاح الملفات المصاحبة من خزنة الجهاز
         // (KEC مستقل عن مفتاح القاعدة) تحت حرس الافتتاح ذاته، ثم ترحيل
         // الصور النص الصريح القائمة دفعة واحدة — فشل ملف لا يوقف
@@ -422,10 +451,11 @@ class _AppGateState extends State<AppGate> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                  'نسخك الجديدة (جيل الخزنة v4) تُفك على هذا الجهاز '
-                  'تلقائياً — وعلى جهاز آخر بهذا الرمز فقط. اكتبه ورقياً '
-                  'الآن واحفظه خارج الجهاز: فقد الخزنة بلا رمز يعني '
-                  'الرجوع لنسخك القديمة.\n'
+                  'نسخك الجديدة بجيل الخزنة تُفك على هذا الجهاز '
+                  'تلقائياً — وعلى جهاز آخر بهذا الرمز فقط (أو بكلمة '
+                  'المرور للمقفلة منها). اكتبه ورقياً الآن واحفظه خارج '
+                  'الجهاز: فقد الخزنة بلا رمز يعني الرجوع لنسخك '
+                  'القديمة.\n'
                   'يبقى الرمز قابلاً للعرض من الإعدادات متى شئت.'),
               const SizedBox(height: 12),
               SelectableText(keys.recoveryCode,

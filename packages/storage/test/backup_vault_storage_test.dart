@@ -196,4 +196,188 @@ void main() {
     expect(refused.ok, isFalse);
     expect(refused.reason, contains('v4'));
   });
+
+  // ── س230 (د11 الجزء الثاني — سفر جذر السجلات وإعادة الختم) ─────────
+
+  // جذور سجلات الأجهزة — مستقلة عن جذور النسخ أعلاه (فصل النطاقات).
+  final logRootA =
+      List<int>.generate(32, (i) => (i * 5 + 41) % 256);
+  final logRootB =
+      List<int>.generate(32, (i) => (i * 19 + 71) % 256);
+  final vaultB = BackupVaultKeys(rootKey: rootB, recoveryCode: code);
+
+  test('س230: بانية القاعدة بجذر السجلات — الختم بجذر الجهاز والقراءة '
+      'الإرثية للإرثي معاً (DQ-1108 حارس)', () async {
+    final aPath = p.join(tempDir.path, 'rootA.db');
+    final dbA = DiqqahDatabase(filePath: aPath, logRootKey: logRootA);
+    await dbA.customStatement('SELECT 1');
+    await dbA.recordSystemEvent('settings_changed', payload: {'k': 'س230'});
+    final row = (await dbA
+            .customSelect('SELECT payload FROM events ORDER BY id')
+            .get())
+        .first
+        .data['payload'] as String;
+    expect(row.startsWith(LogCipher.envelopePrefix), isTrue,
+        reason: 'ختم بجذر الجهاز — البادئة حاضرة');
+    // الجهاز ذاته يفتح — والجذر الآخر لا يفتح (وسم GCM حاكم).
+    expect(await dbA.openLogText(row), contains('س230'));
+    final salt = await dbA.p3LogSalt();
+    await expectLater(
+      LogCipher(logRootB).open(row, salt),
+      throwsA(isA<LogCipherIntegrityException>()),
+    );
+    await dbA.close();
+  });
+
+  test('س230: سفر الجذر عبر الأجهزة وإعادة الختم بجذر المستقر عليه — '
+      'بذرة المزامنة تُقرأ بعد الاستعادة حرفاً (الخلاف المحسوم بد11)',
+      () async {
+    // الجهاز أ: قاعدة بسجلات مختومة بجذره، ونسخة v5 يحمل الجذر معها.
+    final aPath = p.join(tempDir.path, 'deviceA.db');
+    final dbA = DiqqahDatabase(filePath: aPath, logRootKey: logRootA);
+    await dbA.customStatement('SELECT 1');
+    await dbA.recordSystemEvent('settings_changed', payload: {'v': 1});
+    final target = p.join(tempDir.path, 'a-v5.dqk');
+    await backupTo(dbA, target,
+        vaultKeys: vaultA, logRootKey: logRootA, cipher: cipher);
+    expect(
+        BackupCipher.encryptedVersion(await File(target).readAsBytes()),
+        BackupCipher.vaultLogFormatVersion);
+    await dbA.close();
+
+    // الجهاز ب (قاعدة الاختبار القائمة): يستعيد بالرمز (بلا مفتاح خزنة
+    // أ) — والجذر المسافر يُستخرج مع النص.
+    final candidate = await prepareRestore(
+      target,
+      recoveryCode: code,
+      localLogRootKey: logRootB,
+      appSchemaVersion: DiqqahDatabase.schemaVersionValue,
+      cipher: cipher,
+    );
+    expect(candidate.logRootKey, equals(logRootA),
+        reason: 'سجل السجلات يسافر تحت DEK ويُستخرج عند الفك');
+    await applyRestore(
+      db: db,
+      candidate: candidate,
+      currentDbPath: dbPath,
+      vaultKeys: vaultB,
+      logRootKey: logRootB,
+    );
+    candidate.dispose();
+
+    // القاعدة المستعادة على ب: سجلاتها مختومة بجذر ب الآن — تُقرأ هنا
+    // (بذرة المزامنة m4 حية)، والحواجز معادة الإنشاء (إلحاق محكوم).
+    final dbB = DiqqahDatabase(filePath: dbPath, logRootKey: logRootB);
+    await dbB.customStatement('SELECT 1');
+    final payload = ((await dbB
+            .customSelect('SELECT payload FROM events ORDER BY id')
+            .get())
+        .first
+        .data['payload'] as String);
+    expect(payload.startsWith(LogCipher.envelopePrefix), isTrue);
+    expect(await dbB.openLogText(payload), contains('settings_changed'));
+    await expectLater(
+      dbB.customStatement(
+          "UPDATE events SET payload = 'x' WHERE id = (SELECT MIN(id) FROM events)"),
+      throwsA(isA<Exception>(),
+          reason: 'حاجز الإلحاق معاد إنشاؤه بعد الختم (DQ-1119)'),
+    );
+    // ولقطة الرجوع v5 بجذر ب — التراجع يعمل بمفتاح خزنة ب صامتاً
+    // وبالجذر المستقر عليه (الجذر ذاته فلا ختم جديد).
+    final snapshots = await Directory(tempDir.path)
+        .list()
+        .whereType<File>()
+        .where((f) => p.basename(f.path).startsWith('diqqah-before-restore'))
+        .toList();
+    expect(snapshots, isNotEmpty);
+    final snapBlob = await snapshots.first.readAsBytes();
+    expect(BackupCipher.encryptedVersion(snapBlob),
+        BackupCipher.vaultLogFormatVersion,
+        reason: 'اللقطة تُغلَّف بخزنة الجهاز مع الجذر المسافر (v5)');
+    final rollback = await prepareRestore(
+      snapshots.first.path,
+      vaultRootKey: rootB,
+      localLogRootKey: logRootB,
+      appSchemaVersion: DiqqahDatabase.schemaVersionValue,
+      cipher: cipher,
+    );
+    expect(rollback.logRootKey, equals(logRootB));
+    rollback.dispose();
+    await dbB.close();
+  });
+
+  test('س230: الجذر الواحد يتخطى الختم — سجلات الجهاز ذاته لا تُمس بايتاً',
+      () async {
+    final aPath = p.join(tempDir.path, 'same.db');
+    final dbA = DiqqahDatabase(filePath: aPath, logRootKey: logRootA);
+    await dbA.customStatement('SELECT 1');
+    await dbA.recordSystemEvent('user_login', payload: {'n': 1});
+    final before = ((await dbA
+            .customSelect('SELECT payload FROM events ORDER BY id')
+            .get())
+        .first
+        .data['payload'] as String);
+    final target = p.join(tempDir.path, 'same-v5.dqk');
+    await backupTo(dbA, target,
+        vaultKeys: vaultA, logRootKey: logRootA, cipher: cipher);
+    final candidate = await prepareRestore(
+      target,
+      vaultRootKey: rootA,
+      localLogRootKey: logRootA,
+      appSchemaVersion: DiqqahDatabase.schemaVersionValue,
+      cipher: cipher,
+    );
+    await applyRestore(
+      db: dbA,
+      candidate: candidate,
+      currentDbPath: aPath,
+      vaultKeys: vaultA,
+      logRootKey: logRootA,
+    );
+    candidate.dispose();
+    final dbAgain = DiqqahDatabase(filePath: aPath, logRootKey: logRootA);
+    await dbAgain.customStatement('SELECT 1');
+    final after = ((await dbAgain
+            .customSelect('SELECT payload FROM events ORDER BY id')
+            .get())
+        .first
+        .data['payload'] as String);
+    expect(after, equals(before),
+        reason: 'جذر النسخة = جذر الجهاز فلا ختم — البايتات كما وُلدت');
+    await dbAgain.close();
+  });
+
+  test('س230: سجلات بجذر مجهول لا يسافر تُرفض قبل أي لمس للقاعدة الحية '
+      '(روح F-013) — وبجذر جهازها تمر', () async {
+    // نسخة v4 (محاكاة 0.279: الجذر لم يكن يسافر) من قاعدة مختومة بجذر أ.
+    final aPath = p.join(tempDir.path, 'orphan.db');
+    final dbA = DiqqahDatabase(filePath: aPath, logRootKey: logRootA);
+    await dbA.customStatement('SELECT 1');
+    await dbA.recordSystemEvent('settings_changed', payload: {'o': 1});
+    final target = p.join(tempDir.path, 'orphan-v4.dqk');
+    await backupTo(dbA, target, vaultKeys: vaultA, cipher: cipher);
+    await dbA.close();
+    // على جهاز آخر (جذر ب محلي): لا جذر مسافر بالملف — رفض صريح واحد.
+    await expectLater(
+      prepareRestore(
+        target,
+        vaultRootKey: rootA,
+        localLogRootKey: logRootB,
+        appSchemaVersion: DiqqahDatabase.schemaVersionValue,
+        cipher: cipher,
+      ),
+      throwsA(isA<CorruptBackupException>().having(
+          (e) => e.message, 'message', contains('لا تُفتح'))),
+    );
+    // وعلى الجهاز ذاته (جذره المحلي جذر أ): السجلات تُقرأ فتمر.
+    final ok = await prepareRestore(
+      target,
+      vaultRootKey: rootA,
+      localLogRootKey: logRootA,
+      appSchemaVersion: DiqqahDatabase.schemaVersionValue,
+      cipher: cipher,
+    );
+    expect(ok.logRootKey, isNull, reason: 'v4 لا يحمل سجل سجلات');
+    ok.dispose();
+  });
 }

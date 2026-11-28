@@ -95,4 +95,65 @@ void main() {
         reason: 'HKDF سريع أصلاً والذاكرة تحفظ النداء لا الصواب');
     expect(k1.length, 32);
   });
+
+  // ── س230 (د11 الجزء الثاني — جذر الجهاز من الخزنة) ──────────────
+
+  // جذر سجلات هذا الجهاز — 32 بايتة مستقلة عن جذر النسخ (عقد الفصل).
+  final deviceRoot = List<int>.generate(32, (i) => (i * 5 + 41) % 256);
+  final otherRoot = List<int>.generate(32, (i) => (i * 17 + 3) % 256);
+
+  test('س230: مشفر بجذر الجهاز — ختم وفك بجذره حرفاً', () async {
+    final deviceCipher = LogCipher(deviceRoot);
+    const text = '{"entity":"move","amount":9001,"ملاحظة":"بجذر الجهاز"}';
+    final sealed = await deviceCipher.seal(text, salt);
+    expect(await deviceCipher.open(sealed, salt), text);
+  });
+
+  test('س230: القراءة الإرثية — الجذر المضمّن يبقى قارئاً لسجلات ما قبل '
+      'س230 (عقد دائم)، وجذر الجهاز يقرأ القديمة والإرثية معاً',
+      () async {
+    final legacySealed = await LogCipher().seal('سجل قديم إرثي', salt);
+    // جذر الجهاز يفتح ما ختمه الإرثي المضمّن — القراءة الإرثية حرفاً.
+    final deviceCipher = LogCipher(deviceRoot);
+    expect(await deviceCipher.open(legacySealed, salt), 'سجل قديم إرثي');
+    // والإرثي يفتح ما ختمه هو، وجهازٌ آخر بجذره لا يفتحه (وسم GCM حاكم).
+    expect(await LogCipher().open(legacySealed, salt), 'سجل قديم إرثي');
+    final sealedElsewhere = await LogCipher(otherRoot).seal('جذر آخر', salt);
+    await expectLater(
+      deviceCipher.open(sealedElsewhere, salt),
+      throwsA(isA<LogCipherIntegrityException>()),
+    );
+  });
+
+  test('س230: openWithRoots — جذور مرشحة بالترتيب والإرثي أخيراً، ونفادها '
+      'استثناء سلامة واحد', () async {
+    final deviceCipher = LogCipher(deviceRoot);
+    final sealedByDevice = await deviceCipher.seal('بجذر هذا الجهاز', salt);
+    final legacySealed = await LogCipher().seal('بالإرثي المضمّن', salt);
+    // جذر النسخة أولاً ثم جذر هذا الجهاز ثم الإرثي — كلا السجلين يُفتح.
+    expect(
+        await LogCipher()
+            .openWithRoots(sealedByDevice, salt, [deviceRoot, otherRoot]),
+        'بجذر هذا الجهاز');
+    expect(await LogCipher().openWithRoots(legacySealed, salt, [otherRoot]),
+        'بالإرثي المضمّن',
+        reason: 'الإرثي يُجرَّب أخيراً دائماً — عقد القراءة الإرثية');
+    // النص الخام يمر كما هو بالتوافق الرجعي ذاته.
+    expect(await LogCipher().openWithRoots('خام', salt, [deviceRoot]), 'خام');
+    // نفاد الجذور كلها = استثناء سلامة واحد صريح.
+    final sealedOther = await LogCipher(otherRoot).seal('جذر غريب', salt);
+    await expectLater(
+      LogCipher().openWithRoots(sealedOther, salt, [deviceRoot]),
+      throwsA(isA<LogCipherIntegrityException>()),
+    );
+  });
+
+  test('س230: باني الجذر يرفض المبتور والشاذ بصوت عالٍ — لا مشفر بمفتاح '
+      'ناقص', () {
+    expect(() => LogCipher([1, 2, 3]), throwsA(isA<ArgumentError>()));
+    expect(() => LogCipher(List<int>.filled(16, 7)), throwsA(isA<ArgumentError>()));
+    // والجذر الصحيح 32 بايتة يُقبل، والغائب = الإرثي المضمّن (انخفاض موثق).
+    expect(LogCipher(deviceRoot), isNotNull);
+    expect(LogCipher(), isNotNull);
+  });
 }

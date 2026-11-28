@@ -1093,6 +1093,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   factory DiqqahDatabase(
       {String filePath = 'diqqah.db',
       DatabaseKeyVault? keyVault,
+      List<int>? logRootKey,
       int passwordUpgradeIterations = PasswordHasher.secureIterations}) {
     late final DiqqahDatabase db;
     db = DiqqahDatabase._crypto(LazyDatabase(() async {
@@ -1109,18 +1110,26 @@ class DiqqahDatabase extends _$DiqqahDatabase {
       // حتى إعادة التسمية الأخيرة، والشاشة الحارسة تعرض الخطأ.
       await migratePlainToEncrypted(filePath, keyHex);
       return _openCipherInBackground(filePath, keyHex);
-    }), passwordUpgradeIterations: passwordUpgradeIterations);
+    }),
+        passwordUpgradeIterations: passwordUpgradeIterations,
+        logRootKey: logRootKey);
     return db;
   }
 
   DiqqahDatabase._crypto(QueryExecutor executor,
-      {this.passwordUpgradeIterations = PasswordHasher.secureIterations})
-      : super(executor);
+      {this.passwordUpgradeIterations = PasswordHasher.secureIterations,
+      List<int>? logRootKey})
+      : _p3LogCipher = LogCipher(logRootKey),
+        super(executor);
 
   /// للاختبارات: قاعدة في الذاكرة — لا أثر على ملف المستخدم أبداً.
+  /// س230: [logRootKey] جذر سجلات الجهاز للاتصال (لاختبارات الخزنة) —
+  /// والغائب الجذر الإرثي المضمّن.
   DiqqahDatabase.inMemory(
-      {int passwordUpgradeIterations = PasswordHasher.secureIterations})
+      {int passwordUpgradeIterations = PasswordHasher.secureIterations,
+      List<int>? logRootKey})
       : passwordUpgradeIterations = passwordUpgradeIterations,
+        _p3LogCipher = LogCipher(logRootKey),
         super(NativeDatabase.memory());
 
   /// اتصال اختباري بإغلاق التدفقات فوراً بلا مؤقتات — الخيار الموثق في
@@ -1137,13 +1146,15 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   /// فتبقى مخزنة التدفقات المخصصة هنا هي الفاعلة.
   factory DiqqahDatabase.inMemorySyncClose(
           {int passwordUpgradeIterations =
-              PasswordHasher.secureIterations}) =>
+              PasswordHasher.secureIterations,
+          List<int>? logRootKey}) =>
       DiqqahDatabase._syncClose(
           DatabaseConnection(
             NativeDatabase.memory(),
             closeStreamsSynchronously: true,
           ),
-          passwordUpgradeIterations: passwordUpgradeIterations);
+          passwordUpgradeIterations: passwordUpgradeIterations,
+          logRootKey: logRootKey);
 
   /// س217 (توأم الاختبار للملف الحقيقي — درس الجولة #436): مصنعية
   /// اختبارية لمسارات الملف الحقيقي (النسخ والاستعادة والتشفير) بمحرك
@@ -1172,6 +1183,7 @@ class DiqqahDatabase extends _$DiqqahDatabase {
   factory DiqqahDatabase.fileSyncClose(
       {String filePath = 'diqqah.db',
       DatabaseKeyVault? keyVault,
+      List<int>? logRootKey,
       int passwordUpgradeIterations = PasswordHasher.secureIterations}) {
     late final DiqqahDatabase db;
     db = DiqqahDatabase._syncClose(DatabaseConnection(
@@ -1188,13 +1200,17 @@ class DiqqahDatabase extends _$DiqqahDatabase {
         return NativeDatabase(File(filePath), setup: cipherSetupFor(keyHex));
       }),
       closeStreamsSynchronously: true,
-    ), passwordUpgradeIterations: passwordUpgradeIterations);
+    ),
+        passwordUpgradeIterations: passwordUpgradeIterations,
+        logRootKey: logRootKey);
     return db;
   }
 
   DiqqahDatabase._syncClose(DatabaseConnection connection,
-      {this.passwordUpgradeIterations = PasswordHasher.secureIterations})
-      : super(connection);
+      {this.passwordUpgradeIterations = PasswordHasher.secureIterations,
+      List<int>? logRootKey})
+      : _p3LogCipher = LogCipher(logRootKey),
+        super(connection);
 
   /// D-197 (دفعة التحصين الافتتاحي — س96): إصدار المخطط الثابت الوحيد —
   /// يقرأه المتجدد والفتح واللقطة الأمانة (snapshotBeforeUpgrade) من
@@ -8208,7 +8224,14 @@ static const String p3LogSaltMetaKey = 'p3_log_salt';
 
 /// p3: مشفر السجلات الوحيد — الجذر والسياق والذاكرة بداخله
 /// (منبع واحد لا تكرار، عرف المنبع الموحد الموثق).
-final LogCipher _p3LogCipher = LogCipher();
+///
+/// د11 الجزء الثاني (س230/D-225): الجذر بجذر الجهاز من الخزنة —
+/// يُحقن من بواني القاعدة ([logRootKey]: الإنتاج يحمله من LogRootVault
+/// بخزنة الجهاز عند الافتتاح قبل أي ترحيلة أو كتابة، والاختبارات
+/// بجذورها الخاصة)، وغائبه الجذر الإرثي المضمّن انخفاضاً موثقاً
+/// (نمط مواد النسخ عينه) — ختماً وقراءةً كالقائم قبل س230، والقراءة
+/// الإرثية تبقى بجذرها المضمّن إلى الأبد (LogCipher.open).
+final LogCipher _p3LogCipher;
 
 /// p3: ملح هذه القاعدة — يُزرع أول نداء (randomblob بالSQL) ويُقرأ
 /// بعده؛ الغائب يُزرع والقائم يُعاد كما هو (آمن التكرار).
@@ -8276,17 +8299,39 @@ Future<void> _sealLegacyLogRows() async {
   }
 }
 
+/// p3/س230 (د11 الجزء الثاني): عبارات سقوط حواجز السجلين — منبع واحد
+/// تستهلكه ترحيلات drift (بالأصناف أدناه) ومسار إعادة ختم السجلات
+/// الخام بالنسخ الاحتياطية (sqlite3 خام بapplyRestore) فلا تفرّق
+/// كلمتان عن الحاجز ذاته مهما تعددت الواجهات.
+static const List<String> logGuardsDropSql = [
+  'DROP TRIGGER IF EXISTS trg_events_no_update',
+  'DROP TRIGGER IF EXISTS trg_events_no_delete',
+  'DROP TRIGGER IF EXISTS trg_error_log_no_update',
+  'DROP TRIGGER IF EXISTS trg_error_log_no_delete',
+];
+
+/// p3/س230: عبارات إنشاء حاجزي الإلحاق الرباعي — المنبع الموحد ذاته
+/// (الرسائل برموز خريطة الأخطاء DQ-1119..DQ-1122 حرفاً).
+static const List<String> logGuardsCreateSql = [
+  'CREATE TRIGGER IF NOT EXISTS trg_events_no_update '
+      'BEFORE UPDATE ON events BEGIN '
+      "SELECT RAISE(ABORT, 'سجل الأحداث إلحاقي — التعديل مرفوض (DQ-1119)'); END",
+  'CREATE TRIGGER IF NOT EXISTS trg_events_no_delete '
+      'BEFORE DELETE ON events BEGIN '
+      "SELECT RAISE(ABORT, 'سجل الأحداث إلحاقي — الحذف مرفوض (DQ-1120)'); END",
+  'CREATE TRIGGER IF NOT EXISTS trg_error_log_no_update '
+      'BEFORE UPDATE ON error_log BEGIN '
+      "SELECT RAISE(ABORT, 'سجل الأخطاء إلحاقي — التعديل مرفوض (DQ-1121)'); END",
+  'CREATE TRIGGER IF NOT EXISTS trg_error_log_no_delete '
+      'BEFORE DELETE ON error_log BEGIN '
+      "SELECT RAISE(ABORT, 'سجل الأخطاء إلحاقي — الحذف مرفوض (DQ-1122)'); END",
+];
+
 /// p3: سقوط الحواجز — تستدعيها الترحيلة قبل الختم (الوصول الهجين:
 /// حاجزٌ من جلسة سابقة لا يسد ختم القائمة) وبناة الحاجز أولاً
 /// (نمط س107: الدروب قبل CREATE فالإعادة تعريف موثقة لا تخمين).
 Future<void> _dropLogGuards() async {
-  const statements = <String>[
-    'DROP TRIGGER IF EXISTS trg_events_no_update',
-    'DROP TRIGGER IF EXISTS trg_events_no_delete',
-    'DROP TRIGGER IF EXISTS trg_error_log_no_update',
-    'DROP TRIGGER IF EXISTS trg_error_log_no_delete',
-  ];
-  for (final sql in statements) {
+  for (final sql in logGuardsDropSql) {
     await customStatement(sql);
   }
 }
@@ -8300,21 +8345,7 @@ Future<void> _dropLogGuards() async {
 /// أولاً بنمط س107 الموثق (إعادة تعريف موثقة لا تخمين) ثم الإنشاء.
 Future<void> _createLogGuards() async {
   await _dropLogGuards();
-  const statements = <String>[
-    'CREATE TRIGGER IF NOT EXISTS trg_events_no_update '
-        'BEFORE UPDATE ON events BEGIN '
-        "SELECT RAISE(ABORT, 'سجل الأحداث إلحاقي — التعديل مرفوض (DQ-1119)'); END",
-    'CREATE TRIGGER IF NOT EXISTS trg_events_no_delete '
-        'BEFORE DELETE ON events BEGIN '
-        "SELECT RAISE(ABORT, 'سجل الأحداث إلحاقي — الحذف مرفوض (DQ-1120)'); END",
-    'CREATE TRIGGER IF NOT EXISTS trg_error_log_no_update '
-        'BEFORE UPDATE ON error_log BEGIN '
-        "SELECT RAISE(ABORT, 'سجل الأخطاء إلحاقي — التعديل مرفوض (DQ-1121)'); END",
-    'CREATE TRIGGER IF NOT EXISTS trg_error_log_no_delete '
-        'BEFORE DELETE ON error_log BEGIN '
-        "SELECT RAISE(ABORT, 'سجل الأخطاء إلحاقي — الحذف مرفوض (DQ-1122)'); END",
-  ];
-  for (final sql in statements) {
+  for (final sql in logGuardsCreateSql) {
     await customStatement(sql);
   }
 }

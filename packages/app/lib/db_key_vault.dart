@@ -171,3 +171,47 @@ class VaultBackupKeys {
     await _box.write(_revealedKey, '1');
   }
 }
+
+/// خزنة جذر السجلات — د11 الجزء الثاني (س230/D-225): جذر عشوائي
+/// 256-bit لكل جهاز يولَّد بخزنة الجهاز عند أول تشغيل (Keystore
+/// أندرويد / DPAPI ويندوز — بذات افتراضات مفتاح القاعدة P0-ب س148)
+/// ويُعطى لمشفر السجلات (DiqqahDatabase.logRootKey) فيُختم به سجلان
+/// الأحداث والأخطاء، ويسافر مغلَّفاً بالنسخة (سجل نوع 4 تحت DEK)
+/// مع إعادة ختم السجلات بجذر الجهاز المستقر عليه عند الاستعادة —
+/// مستقل عن جذر النسخ بقرار الفصل الموثق (فصل النطاقات من الجذر لا
+/// من الاشتقاق حصراً — عقد LogCipher القائم).
+class LogRootVault {
+  /// مفتاح التخزين — لاحقة .v1 تهيئ جيلاً للإدارة المستقبلية (نمط
+  /// BackupSecretsStore/VaultBackupKeys عينه).
+  static const String _rootKey = 'diqqah.log.root.v1';
+
+  final SecureSecretsBox _box;
+  LogRootVault({SecureSecretsBox? box})
+      : _box = box ?? SecureSecretsBoxImpl();
+
+  /// الجذر الحاضر أو المولَّد — أول تشغيل يولد ويكتب فوراً قبل أي
+  /// ختم (فشل الكتابة يرمي بصوت عالٍ فلا جذر بلا خزنة — نمط س148)،
+  /// والقائم يُعاد كما هو (آمن التكرار).
+  Future<List<int>> loadOrCreate() async {
+    final existing = await _box.read(_rootKey);
+    if (existing != null && existing.isNotEmpty) {
+      return dbKeyFromHex(existing);
+    }
+    final root = generateDbKey();
+    await _box.write(_rootKey, dbKeyHexOf(root));
+    return root;
+  }
+}
+
+/// الجذر الحي لمشفر السجلات — تحميل أو توليد من خزنة الجهاز، وفشلها
+/// يعيد null فيبقى الجذر الإرثي المضمّن (انخفاض موثق بنمط مواد النسخ
+/// عينه: أحداث مختومة إرثياً تُقرأ على أي جهاز، والنسخ بجيلها القائم).
+/// مستدعى الافتتاح (main.dart) والكتابة (مركز النسخ/الإعدادات) —
+/// لا خزنة بلا صوت ولا قناة غائبة تفسر استثناءها هنا.
+Future<List<int>?> loadLiveLogRootOrNull() async {
+  try {
+    return await LogRootVault().loadOrCreate();
+  } catch (_) {
+    return null;
+  }
+}

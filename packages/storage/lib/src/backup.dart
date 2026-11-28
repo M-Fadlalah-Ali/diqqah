@@ -53,6 +53,13 @@ import 'file_encryption.dart';
 /// على الجهاز ذاته) وسجل رمز الاسترداد (الفتح على أي جهاز آخر —
 /// N-005 يلتئم بالرمز بلا كسر). غياب القفل والمواد معاً = v2 بمفتاح
 /// البرنامج (انخفاض موثق لا صمت — نمط عرف س149 ذاته بالخزنة الفاشلة).
+///
+/// د11 الجزء الثاني (س230/D-225): [logRootKey] جذر سجلات هذا الجهاز
+/// من خزنته — حاضراً ترفع النسخة وملف صورها إلى جيل السجل الرابع
+/// (v6 مع قفل / v5 بلا قفل): سجل نوع 4 تحت DEK يحمل الجذر فسجلات
+/// النسخة تسافر معها وتُقرأ عبر الأجهزة، وغائباً تعود النسخة بجيلها
+/// القائم (v3/v4) بعقد الانخفاض الموثق (أحداث مختومة إرثياً فلا
+/// سجل لها — والقارئ الجديد يفتح الأجيال كلها).
 Future<String> backupTo(
   DiqqahDatabase db,
   String targetPath, {
@@ -62,6 +69,7 @@ Future<String> backupTo(
   Directory? imagesDir,
   BackupLock? lock,
   BackupVaultKeys? vaultKeys,
+  List<int>? logRootKey,
   ImageFileCipher? imagesCipher,
 }) async {
   final temp = File('$targetPath.tmp');
@@ -108,6 +116,9 @@ Future<String> backupTo(
         ? vaultKeys.rootKey
         : null;
     final vaultRecovery = vaultKeys?.recoveryCode;
+    // د11 الجزء الثاني (س230): الجذر الحي يعبر العزل كالقفل بعينه —
+    // بايتات خام فحسب، والنسخة تُرفع لجيل السجل الرابع إن حضر.
+    final logRoot = logRootKey;
     final (hash, out) = await Isolate.run(() async {
       final hash = sha256HexOf(bytes);
       if (!encrypted) return (hash, List<int>.from(bytes));
@@ -118,13 +129,15 @@ Future<String> backupTo(
           bytes,
           password: lockPassword,
           recoveryCode: lockRecovery,
+          logRootKey: logRoot,
         );
       } else if (vaultRoot != null && vaultRecovery != null) {
-        // د11: بلا قفل وماللخزنة حاضرة — جيل الخزنة v4.
+        // د11: بلا قفل وماللخزنة حاضرة — جيل الخزنة v4 (أو v5 بالجذر).
         encryptedOut = await resolved.encryptVaulted(
           bytes,
           vaultRootKey: vaultRoot,
           recoveryCode: vaultRecovery,
+          logRootKey: logRoot,
         );
       } else {
         // انخفاض v2 موثق أعلاه (مواد غائبة/ناقصة).
@@ -150,12 +163,14 @@ Future<String> backupTo(
                   bundle,
                   password: lock.password,
                   recoveryCode: lock.recoveryCode,
+                  logRootKey: logRootKey,
                 )
               : vaultKeys != null
                   ? await resolved.encryptVaulted(
                       bundle,
                       vaultRootKey: vaultKeys.rootKey,
                       recoveryCode: vaultKeys.recoveryCode,
+                      logRootKey: logRootKey,
                     )
                   : await resolved.encrypt(bundle))
           : bundle;
@@ -180,6 +195,11 @@ class RestoreCandidate {
   /// فجوة صامتة أبداً.
   final bool hasImages;
 
+  /// س230 (د11 الجزء الثاني): جذر سجلات الأحداث والأخطاء المحمول
+  /// بالنسخة (سجل نوع 4 تحت DEK بأجيال v5/v6 — null بغيرها) —
+  /// يستهلكه التنفيذ بإعادة الختم بجذر الجهاز المستقر عليه.
+  final List<int>? logRootKey;
+
   /// ملفات الصور المحمولة داخل النسخة (مسار نسبي، بايتات) — مستخرجة
   /// إلى الذاكرة قبل أي لمس للقاعدة الحية (فحص قبل استبدال). والكمية
   /// محدودة بناتج المحرك (30..60KB للأصل) فالاحتفاظ بالذاكرة مقبول.
@@ -191,6 +211,7 @@ class RestoreCandidate {
     this.schemaVersion, {
     this.hasImages = false,
     this.imagesFiles = const [],
+    this.logRootKey,
   });
 
   void dispose() {
@@ -220,47 +241,42 @@ class RestoreCandidate {
 /// [vaultRootKey] مفتاح خزنة هذا الجهاز: حاضراً يُفك صامتاً (نفس
 /// الجهاز)، وغائباً يُطلب رمز الاسترداد المكتوب (جهاز آخر — فسيناريو
 /// N-005 يلتئم بالرمز بلا كسر). v1/v2/v3 بمساراتها القائمة حرفاً.
+///
+/// د11 الجزء الثاني (س230/D-225): القارئ الموحد decryptAny بكل
+/// الأجيل (v1..v6) — ومع النص يُستخرج **جذر سجلات النسخة** إن حمله
+/// الملف (v5/v6) فيحمله المرشّح للختم بجذر هذا الجهاز عند التنفيذ،
+/// و[localLogRootKey] جذر سجلات هذا الجهاز (لقطة الرجوع على الجهاز
+/// ذاته تُقرأ به) يُستعمل معه في تحقق السجلات أدناه: كل غلاف مختوم
+/// لا يُفتح بجذوره (جذر النسخة ثم جذر الجهاز ثم الإرثي المضمّن)
+/// رفض صريح قبل أي لمس للقاعدة الحية (روح F-013) — فلا تنكسر
+/// بذرة المزامنة m4 بعد الاستعادة بلا صوت.
 Future<RestoreCandidate> prepareRestore(
   String backupPath, {
   String? password,
   String? recoveryCode,
   List<int>? vaultRootKey,
+  List<int>? localLogRootKey,
   required int appSchemaVersion,
   BackupCipher? cipher,
 }) async {
   final resolvedCipher = cipher ?? BackupCipher();
   final blob = await File(backupPath).readAsBytes();
   final List<int> plain;
+  List<int>? logRootKey;
   switch (BackupCipher.identify(blob)) {
     case BackupKind.plainSqlite:
       plain = blob;
       break;
     case BackupKind.encrypted:
-      final ver = BackupCipher.encryptedVersion(blob);
-      if (ver == BackupCipher.lockedFormatVersion) {
-        // الجيل المقفل: كلمة المرور أو رمز الاسترداد حصراً.
-        plain = await resolvedCipher.decryptLocked(
-          blob,
-          password: password,
-          recoveryCode: recoveryCode,
-        );
-      } else if (ver == BackupCipher.vaultFormatVersion) {
-        // د11: جيل الخزنة — مفتاح الجهاز صامتاً أو رمز الاسترداد.
-        plain = await resolvedCipher.decryptVaulted(
-          blob,
-          vaultRootKey: vaultRootKey,
-          recoveryCode: recoveryCode,
-        );
-      } else if (ver == BackupCipher.formatVersion) {
-        // الجيل الجاري: مفتاح البرنامج — بلا أي كلمة (D-060)
-        plain = await resolvedCipher.decrypt(blob);
-      } else if (password == null || password.isEmpty) {
-        throw const CorruptBackupException(
-            'النسخة من الجيل القديم المحمي بكلمة مرور — '
-            'أدخلها في حقل كلمة المرور ثم أعد المحاولة');
-      } else {
-        plain = await resolvedCipher.decryptWithPassword(blob, password);
-      }
+      // س230: القارئ الموحد — منبع واحد للأجيال الستة بموادها.
+      final (decrypted, carriedLogRoot) = await resolvedCipher.decryptAny(
+        blob,
+        password: password,
+        recoveryCode: recoveryCode,
+        vaultRootKey: vaultRootKey,
+      );
+      plain = decrypted;
+      logRootKey = carriedLogRoot;
       break;
     case BackupKind.unknown:
       throw const CorruptBackupException(
@@ -289,6 +305,11 @@ Future<RestoreCandidate> prepareRestore(
     if (version > appSchemaVersion) {
       throw BackupNewerSchemaException(version);
     }
+    // س230 (د11 الجزء الثاني): تحقق سجلات الأحداث والأخطاء قبل أي
+    // لمس للقاعدة الحية — لا فجوة صامتة وبذرة المزامنة لا تنكسر
+    // بعد الاستعادة بصمت (التفصيل بالمساعدة أدناه).
+    await _verifyBackupLogRows(sqlite,
+        logRootKey: logRootKey, localLogRootKey: localLogRootKey);
     closeSqlite();
     // س-130 (دفعة 10): ملف الصور المجاور إن وُجد يُفحص ويُفك **قبل**
     // أي لمس للقاعدة الحية — فاسد يرفض الاستعادة كلها لا يُسكَت
@@ -297,11 +318,16 @@ Future<RestoreCandidate> prepareRestore(
     var hasImages = false;
     var imagesFiles = const <(String, List<int>)>[];
     if (await sibling.exists()) {
+      // س230: مفتاح الخزنة يُمرَّر هنا أيضاً — توثيق المساعدة «نفس مواد
+      // ملف القاعدة عينها» صار حرفياً: نسخ v4/v5 بصور تُفك صامتة على
+      // الجهاز ذاته (كانت تسأل الرمز — ورطة س229 كامنة يسدها هذا
+      // التمرير في نفس المسار).
       imagesFiles = await _decodeImagesBlob(
         await sibling.readAsBytes(),
         resolvedCipher,
         password: password,
         recoveryCode: recoveryCode,
+        vaultRootKey: vaultRootKey,
       );
       hasImages = imagesFiles.isNotEmpty;
     }
@@ -311,6 +337,7 @@ Future<RestoreCandidate> prepareRestore(
       version,
       hasImages: hasImages,
       imagesFiles: imagesFiles,
+      logRootKey: logRootKey,
     );
   } catch (e) {
     closeSqlite();
@@ -355,6 +382,7 @@ Future<String> applyRestore({
   Directory? imagesDir,
   String? sourcePath,
   BackupVaultKeys? vaultKeys,
+  List<int>? logRootKey,
   ImageFileCipher? imagesCipher,
 }) async {
   // D-054: معرّف الجهاز المستقر عليه يُلتقط قبل الغلق — قد يُولد الآن
@@ -396,6 +424,7 @@ Future<String> applyRestore({
           snapshotPlain,
           vaultRootKey: vaultKeys.rootKey,
           recoveryCode: vaultKeys.recoveryCode,
+          logRootKey: logRootKey,
         )
       : await BackupCipher().encrypt(snapshotPlain);
   final snapshotTmp = File('$snapshotPath.wrap-tmp');
@@ -415,6 +444,7 @@ Future<String> applyRestore({
               bundle,
               vaultRootKey: vaultKeys.rootKey,
               recoveryCode: vaultKeys.recoveryCode,
+              logRootKey: logRootKey,
             )
           : await resolved.encrypt(bundle);
       await File(imagesSiblingPath(snapshotPath))
@@ -470,6 +500,12 @@ Future<String> applyRestore({
       stmt.dispose();
       gateStmt.dispose();
     }
+    // س230 (د11 الجزء الثاني — الخلاف المحسوم بد11): إعادة ختم سجلات
+    // الأحداث والأخطاء بجذر هذا الجهاز بعد الاستبدال — جذر النسخة
+    // يفتح (والإرثي المضمّن قارئاً دائماً) وجذر الجهاز يختم فبذرة
+    // المزامنة m4 تُقرأ بعد الاستعادة حرفاً (التفصيل بالمساعدة).
+    await _resealLogRoots(raw,
+        sourceLogRoot: candidate.logRootKey, targetLogRoot: logRootKey);
   } finally {
     raw.dispose();
   }
@@ -485,6 +521,184 @@ Future<String> applyRestore({
     );
   }
   return snapshotPath;
+}
+
+/// س230 (د11 الجزء الثاني): ملح سجلات النسخة من القاعدة الخام
+/// (app_meta — المفتاح نفسه p3LogSaltMetaKey) — null إن غاب الجدول
+/// أو المفتاح أو القيمة (ما قبل v28 بلا سجلات مختومة أصلاً).
+String? _rawP3LogSalt(Database raw) {
+  final hasMeta = raw.select(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_meta'")
+      .isNotEmpty;
+  if (!hasMeta) return null;
+  final rows =
+      raw.select('SELECT value FROM app_meta WHERE key = ?', [p3LogSaltMetaKey]);
+  if (rows.isEmpty) return null;
+  final value = rows.first[0] as String?;
+  if (value == null || value.isEmpty) return null;
+  return value;
+}
+
+/// س230 (د11 الجزء الثاني): تحقق سجلات النسخة قبل أي لمس للقاعدة الحية
+/// (روح F-013) — كل غلاف مختوم بسجلي الأحداث والأخطاء يجب أن يُفتح
+/// بجذوره المرشحة: جذر النسخة المحمول بالملف (v5/v6) ثم جذر هذا
+/// الجهاز (لقطة رجوع تُستعاد على الجهاز ذاته) ثم الإرثي المضمّن
+/// (قارئاً دائماً — LogCipher.openWithRoots يجرّبه أخيراً حصراً).
+/// سجل لا يُفتح بها جميعاً = نسخة مهربة أو تالفة فرفض صريح واحد
+/// قبل أي استبدال — لا فجوة صامتة تنكسر بها بذرة المزامنة m4
+/// بعد الاستعادة بصمت.
+Future<void> _verifyBackupLogRows(
+  Database raw, {
+  List<int>? logRootKey,
+  List<int>? localLogRootKey,
+}) async {
+  final salt = _rawP3LogSalt(raw);
+  if (salt == null) return; // ما قبل v28: لا سجلات مختومة أصلاً.
+  final checker = LogCipher();
+  final roots = <List<int>?>[logRootKey, localLogRootKey];
+  Future<void> openOrReject(String envelope) async {
+    try {
+      // الغرض الفتح حصراً — وسم GCM حاكم والناتج يُهمل.
+      await checker.openWithRoots(envelope, salt, roots);
+    } on LogCipherIntegrityException {
+      throw const CorruptBackupException(
+          'سجلات النسخة لا تُفتح بمفاتيحها — الملف غير سليم');
+    }
+  }
+
+  if (raw.select(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'")
+      .isNotEmpty) {
+    for (final row in raw.select('SELECT id, payload FROM events')) {
+      final payload = row['payload'] as String?;
+      if (payload == null ||
+          !payload.startsWith(LogCipher.envelopePrefix)) {
+        continue;
+      }
+      await openOrReject(payload);
+    }
+  }
+  if (raw.select(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='error_log'")
+      .isNotEmpty) {
+    for (final row
+        in raw.select('SELECT id, message, context FROM error_log')) {
+      final message = row['message'] as String?;
+      if (message != null && message.startsWith(LogCipher.envelopePrefix)) {
+        await openOrReject(message);
+      }
+      final context = row['context'] as String?;
+      if (context != null && context.startsWith(LogCipher.envelopePrefix)) {
+        await openOrReject(context);
+      }
+    }
+  }
+}
+
+/// س230 (د11 الجزء الثاني — الخلاف المحسوم بد11): إعادة ختم سجلات
+/// الأحداث والأخطاء بجذر هذا الجهاز بعد الاستعادة — جذر النسخة
+/// المحمول (أو الإرثي المضمّن قارئاً دائماً) يفتح، وجذر الجهاز
+/// المستقر عليه يختم، فبذرة المزامنة m4 تُقرأ بعد الاستعادة حرفاً.
+/// سقوط الحواجز ثم الختم ثم إنشاؤها بنمط الترحيلات القائم (س107:
+/// الدروب قبل CREATE فالإعادة تعريف موثقة) — والسجل بلا بادئة (ما
+/// قبل v28 داخل قاعدة ملحة — شاذ نادر) يُترك كما هو (يفتحه المرور
+/// الصريح)، والجذر الواحد (جذر النسخة = جذر الجهاز — كلاهما الإرثي
+/// بالغائبين) يتخطى الختم كله فلا عمل بلا أثر على الجهاز ذاته.
+Future<void> _resealLogRoots(
+  Database raw, {
+  required List<int>? sourceLogRoot,
+  required List<int>? targetLogRoot,
+}) async {
+  final salt = _rawP3LogSalt(raw);
+  if (salt == null) return; // ما قبل v28: تُختمها ترحيلة v28 عند الفتح.
+  if (_sameRoot(sourceLogRoot, targetLogRoot)) return; // الجذر ذاته.
+  final opener = LogCipher();
+  final sealer = LogCipher(targetLogRoot);
+  // جذور الفتح بالترتيب: جذر النسخة المحمول (v5/v6) ثم الجذر الهدف —
+  // نسخة خام أو لقطة رجوع على الجهاز ذاته تحمل سجلات مختومة بجذره
+  // المحلي (لا سجل جذر بالملف الخام) — ثم الإرثي المضمّن أخيراً دائماً.
+  final sourceRoots = <List<int>?>[sourceLogRoot, targetLogRoot];
+  for (final sql in DiqqahDatabase.logGuardsDropSql) {
+    raw.execute(sql);
+  }
+  try {
+    if (raw.select(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'")
+        .isNotEmpty) {
+      final rows = raw.select('SELECT id, payload FROM events');
+      if (rows.isNotEmpty) {
+        final update =
+            raw.prepare('UPDATE events SET payload = ? WHERE id = ?');
+        try {
+          for (final row in rows) {
+            final payload = row['payload'] as String?;
+            if (payload == null ||
+                !payload.startsWith(LogCipher.envelopePrefix)) {
+              continue;
+            }
+            final opened =
+                await opener.openWithRoots(payload, salt, sourceRoots);
+            update.execute([await sealer.seal(opened, salt), row['id']]);
+          }
+        } finally {
+          update.dispose();
+        }
+      }
+    }
+    if (raw.select(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='error_log'")
+        .isNotEmpty) {
+      final rows = raw.select('SELECT id, message, context FROM error_log');
+      if (rows.isNotEmpty) {
+        final update = raw.prepare(
+            'UPDATE error_log SET message = ?, context = ? WHERE id = ?');
+        try {
+          for (final row in rows) {
+            final message = row['message'] as String?;
+            final context = row['context'] as String?;
+            final oldMessage = (message != null &&
+                    message.startsWith(LogCipher.envelopePrefix))
+                ? message
+                : null;
+            final oldContext = (context != null &&
+                    context.startsWith(LogCipher.envelopePrefix))
+                ? context
+                : null;
+            if (oldMessage == null && oldContext == null) continue;
+            update.execute([
+              oldMessage == null
+                  ? message
+                  : await sealer
+                      .seal(await opener.openWithRoots(oldMessage, salt, sourceRoots), salt),
+              oldContext == null
+                  ? context
+                  : await sealer
+                      .seal(await opener.openWithRoots(oldContext, salt, sourceRoots), salt),
+              row['id'],
+            ]);
+          }
+        } finally {
+          update.dispose();
+        }
+      }
+    }
+  } finally {
+    for (final sql in DiqqahDatabase.logGuardsCreateSql) {
+      raw.execute(sql);
+    }
+  }
+}
+
+/// س230: تطابق جذور بايتاتياً — الغائبان معاً (كلاهما الإرثي
+/// المضمّن) متطابقان فلا ختم لعمل بلا أثر.
+bool _sameRoot(List<int>? a, List<int>? b) {
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// D-053: تبنّي ملف قاعدة الجيل السابق — أول فتح بعد التحديث يعيد
@@ -740,12 +954,14 @@ Future<int> replaceImagesDir(
   return files.length;
 }
 
-/// فك غلاف ملف صور (مشفر بمفتاح البرنامج أو مقفل v3 أو خام مضغوط) —
+/// فك غلاف ملف صور (مشفر بمفتاح البرنامج أو مقفل أو خام مضغوط) —
 /// أي شكل غريب رفض آمن واحد (فحص قبل أي لمس — F-013 روحاً).
 /// P1-أ (س149): ملف الصور المقفل يُفك بكلمة المرور أو رمز الاسترداد
 /// ذاتيهما اللذين فكا ملف القاعدة (نفس مواد prepareRestore).
 /// د11 (س229): وملف الصور بجيل الخزنة v4 يُفك بمفتاح هذا الجهاز
 /// أو برمز الاسترداد — نفس مواد ملف القاعدة عينها.
+/// س230 (د11 الجزء الثاني): القارئ الموحد decryptAny — الأجيل كلها
+/// (وv5/v6 بسجل السجلات حاضرة) بمواد ملف القاعدة ذاتها.
 Future<List<(String, List<int>)>> _decodeImagesBlob(
   List<int> blob,
   BackupCipher cipher, {
@@ -756,23 +972,14 @@ Future<List<(String, List<int>)>> _decodeImagesBlob(
   List<int> plain;
   switch (BackupCipher.identify(blob)) {
     case BackupKind.encrypted:
-      final ver = BackupCipher.encryptedVersion(blob);
-      if (ver == BackupCipher.lockedFormatVersion) {
-        plain = await cipher.decryptLocked(
-          blob,
-          password: password,
-          recoveryCode: recoveryCode,
-        );
-      } else if (ver == BackupCipher.vaultFormatVersion) {
-        plain = await cipher.decryptVaulted(
-          blob,
-          vaultRootKey: vaultRootKey,
-          recoveryCode: recoveryCode,
-        );
-      } else {
-        // ملفات الصور من الجيل الجاري حصراً — مفتاح البرنامج بلا كلمة.
-        plain = await cipher.decrypt(blob);
-      }
+      // س230: الجذر المحمول يسافر بالنسخة لا بصورها — يُتجاهل هنا.
+      final (decoded, _) = await cipher.decryptAny(
+        blob,
+        password: password,
+        recoveryCode: recoveryCode,
+        vaultRootKey: vaultRootKey,
+      );
+      plain = decoded;
       break;
     case BackupKind.plainSqlite:
       throw const CorruptBackupException(

@@ -790,14 +790,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('رمز استرداد الخزنة (جيل v4)'),
+        title: const Text('رمز استرداد الخزنة'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-                'يفك نسخ الجيل الرابع على جهاز آخر غير هذا: ثبّت التطبيق '
-                'ثم اكتب هذا الرمز بحقل كلمة المرور عند الاستعادة.\n'
+                'يفك نسخ الجيل الرابع والخامس على جهاز آخر غير هذا — '
+                'والمقفلة (v3/v6) بالكلمة أو هذا الرمز: ثبّت التطبيق '
+                'ثم اكتب الرمز بحقل كلمة المرور عند الاستعادة.\n'
                 'اكتبه ورقياً خارج الجهاز — نسخ هذا الجهاز تُفك صامتة بلا '
                 'أي رمز.'),
             const SizedBox(height: 12),
@@ -904,6 +905,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // v3 المقفل، ومفتاح الصور يفك الملفات المشفرة عند الجمع.
       // د11 (س229): وبلا قلم ومواد الخزنة حاضرة = جيل v4 (فتح صامت
       // هنا وبرمز الاسترداد على جهاز آخر — N-005 يلتئم).
+      // د11 الجزء الثاني (س230): والجذر الحي حاضراً يرتفع الجيل إلى
+      // السجل الرابع (v6 مع القفل / v5 بلا) فتسافر سجلات القاعدة معها.
+      final liveLogRoot = await loadLiveLogRootOrNull();
       await backupTo(
         widget.db,
         target,
@@ -913,6 +917,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         lock: _encryptBackup ? _backupLock : null,
         vaultKeys:
             _encryptBackup && _backupLock == null ? _vaultKeys : null,
+        logRootKey: _encryptBackup ? liveLogRoot : null,
         imagesCipher: ItemImagesStore.cipher,
       );
       // تكليف 2026-11-13: تبنّي النسخة اليدوية بالكتالوج الجانبي —
@@ -934,11 +939,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? 'ملف واحد للقاعدة كاملة — غير مشفرة'
                   : _backupLock != null
                       ? 'ملف واحد للقاعدة كاملة — مقفلة بكلمة مرورك '
-                          '(جيل v3): تُفك بكلمة المرور أو رمز الاسترداد '
+                          '(جيل ${liveLogRoot != null ? 'v6' : 'v3'}): '
+                          'تُفك بكلمة المرور أو رمز الاسترداد '
                           'على أي جهاز'
                       : _vaultKeys != null
                           ? 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح هذا '
-                              'الجهاز (جيل v4): تُفك هنا صمتاً وبرمز '
+                              'الجهاز (جيل ${liveLogRoot != null ? 'v5' : 'v4'}): '
+                              'تُفك هنا صمتاً وبرمز '
                               'الاسترداد على جهاز آخر'
                           : 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح '
                               'البرنامج (جيل v2): تُفتح داخل التطبيق نفسه '
@@ -1049,13 +1056,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // وعلى جهاز آخر يكتب المالك رمز الاسترداد بالحقل ذاته.
       final typed = _restorePassword.text.isEmpty ? null : _restorePassword.text;
       final stored = typed == null ? await _secrets.loadLock() : null;
-      final storedVault = typed == null ? await _tryLoadVault() : null;
+      // س230: مواد خزنة هذا الجهاز تُحل دائماً — كلمة المستخدم للمصدر
+      // لا للقطة الرجوع: اللقطة تُغلَّف بخزنة الجهاز ذاته (v5 بالجذر)
+      // فتسافر سجلاتها معها ويعمل التراجع على أي جهاز بالرمز.
+      final storedVault = await _tryLoadVault();
+      final liveLogRoot = await loadLiveLogRootOrNull();
       try {
         candidate = await prepareRestore(
           path,
           password: typed ?? stored?.password,
           recoveryCode: typed ?? stored?.recoveryCode,
           vaultRootKey: storedVault?.rootKey,
+          localLogRootKey: liveLogRoot,
           appSchemaVersion: widget.db.schemaVersion,
         );
       } on BackupCipherException {
@@ -1067,6 +1079,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           password: typed,
           recoveryCode: typed,
           vaultRootKey: storedVault?.rootKey,
+          localLogRootKey: liveLogRoot,
           appSchemaVersion: widget.db.schemaVersion,
         );
       }
@@ -1120,6 +1133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           currentDbPath: widget.dbPath,
           imagesDir: currentImages,
           vaultKeys: storedVault,
+          logRootKey: liveLogRoot,
           imagesCipher: ItemImagesStore.cipher,
         );
       } finally {

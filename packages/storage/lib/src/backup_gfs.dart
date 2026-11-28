@@ -66,6 +66,13 @@ class ScannedSnapshotRow {
 /// **بجيل الخزنة v4** (سجل مفتاح الخزنة هنا صامتاً + سجل الرمز على أي
 /// جهاز آخر)، والتحقق الحي يفك بمفتاح الخزنة ذاته. غيابه بلا قفل =
 /// انخفاض v2 موثق لا صمت (نمط عرف س149 نفسه).
+///
+/// د11 الجزء الثاني (س230/D-225): [loadLogRoot] مصدر جذر سجلات هذا
+/// الجهاز من خزنته — حاضراً تُرفع النسخ الجديدة إلى جيل السجل
+/// الرابع (v6 مع قفل / v5 بلا قفل) فيسافر الجذر بها، وغائباً تُكتب
+/// بجيلها القائم بعقد الانخفاض الموثق. التحقيقان يفكان الأجيل كلها
+/// (decryptAny) فلا يحتاجان الجذر — مفتاح الخزنة حاضر النسخ الحية
+/// حصراً.
 class GfsBackupStore {
   final Directory backupsDir;
   final Directory dbDir;
@@ -74,6 +81,7 @@ class GfsBackupStore {
   final String appVersion;
   final Future<BackupLock?> Function()? loadLock;
   final Future<BackupVaultKeys?> Function()? loadVaultKeys;
+  final Future<List<int>?> Function()? loadLogRoot;
   final ImageFileCipher? imagesCipher;
 
   BackupCatalog catalog = BackupCatalog();
@@ -86,6 +94,7 @@ class GfsBackupStore {
     required this.appVersion,
     this.loadLock,
     this.loadVaultKeys,
+    this.loadLogRoot,
     this.imagesCipher,
   });
 
@@ -99,6 +108,7 @@ class GfsBackupStore {
     required String appVersion,
     Future<BackupLock?> Function()? loadLock,
     Future<BackupVaultKeys?> Function()? loadVaultKeys,
+    Future<List<int>?> Function()? loadLogRoot,
     ImageFileCipher? imagesCipher,
   }) async {
     final store = GfsBackupStore._(
@@ -109,6 +119,7 @@ class GfsBackupStore {
       appVersion: appVersion,
       loadLock: loadLock,
       loadVaultKeys: loadVaultKeys,
+      loadLogRoot: loadLogRoot,
       imagesCipher: imagesCipher,
     );
     await backupsDir.create(recursive: true);
@@ -188,7 +199,9 @@ class GfsBackupStore {
           plain = blob;
         case BackupKind.encrypted:
           final ver = BackupCipher.encryptedVersion(blob);
-          if (ver == BackupCipher.lockedFormatVersion) {
+          final locked = ver == BackupCipher.lockedFormatVersion ||
+              ver == BackupCipher.lockedLogFormatVersion;
+          if (locked) {
             final lock = await loadLock?.call();
             if (lock == null) {
               return const GfsVerifyOutcome(
@@ -196,13 +209,16 @@ class GfsBackupStore {
                   state: BackupVerifyState.failed,
                   reason: 'نسخة مقفلة بكلمة مرور ولا أسرار محمّلة للتحقق');
             }
+            // س230: القارئ الموحد — المقفلة v3/v6 بأسرار القفل ذاتها
+            // (وسجل السجلات إن حضر يسافر ولا يُستهلك هنا).
             plain = Uint8List.fromList(await BackupCipher().decryptLocked(
               blob,
               password: lock.password,
               recoveryCode: lock.recoveryCode,
             ));
-          } else if (ver == BackupCipher.vaultFormatVersion) {
-            // د11: جيل الخزنة — يُفك بمفتاح هذا الجهاز حصراً هنا
+          } else if (ver == BackupCipher.vaultFormatVersion ||
+              ver == BackupCipher.vaultLogFormatVersion) {
+            // د11: جيل الخزنة (v4/v5) — بمفتاح هذا الجهاز حصراً هنا
             // (التحقق الحي مسألة الجهاز ذاته؛ ورمز الاسترداد مسار
             // الاستعادة اليدوية لا التحقيق الدوري).
             final vault = await loadVaultKeys?.call();
@@ -210,7 +226,8 @@ class GfsBackupStore {
               return const GfsVerifyOutcome(
                   ok: false,
                   state: BackupVerifyState.failed,
-                  reason: 'نسخة بجيل الخزنة v4 ولا مواد خزنة محمّلة للتحقق');
+                  reason: 'نسخة بجيل الخزنة (v4/v5) ولا مواد خزنة '
+                      'محمّلة للتحقق');
             }
             plain = Uint8List.fromList(await BackupCipher().decryptVaulted(
               blob,
@@ -266,7 +283,8 @@ class GfsBackupStore {
           plain = blob;
         case BackupKind.encrypted:
           final ver = BackupCipher.encryptedVersion(blob);
-          if (ver == BackupCipher.lockedFormatVersion) {
+          if (ver == BackupCipher.lockedFormatVersion ||
+              ver == BackupCipher.lockedLogFormatVersion) {
             final lock = await loadLock?.call();
             if (lock == null) {
               return GfsVerifyOutcome(
@@ -274,19 +292,22 @@ class GfsBackupStore {
                   state: BackupVerifyState.failed,
                   reason: 'نسخة مقفلة ولا أسرار محمّلة للتحقق');
             }
+            // س230: القارئ الموحد — v3/v6 بأسرار القفل ذاتها.
             plain = Uint8List.fromList(await BackupCipher().decryptLocked(
               blob,
               password: lock.password,
               recoveryCode: lock.recoveryCode,
             ));
-          } else if (ver == BackupCipher.vaultFormatVersion) {
-            // د11: جيل الخزنة — بمفتاح هذا الجهاز حصراً هنا كذلك.
+          } else if (ver == BackupCipher.vaultFormatVersion ||
+              ver == BackupCipher.vaultLogFormatVersion) {
+            // د11: جيل الخزنة (v4/v5) — بمفتاح هذا الجهاز حصراً هنا كذلك.
             final vault = await loadVaultKeys?.call();
             if (vault == null) {
               return GfsVerifyOutcome(
                   ok: false,
                   state: BackupVerifyState.failed,
-                  reason: 'نسخة بجيل الخزنة v4 ولا مواد خزنة محمّلة للتحقق');
+                  reason: 'نسخة بجيل الخزنة (v4/v5) ولا مواد خزنة '
+                      'محمّلة للتحقق');
             }
             plain = Uint8List.fromList(await BackupCipher().decryptVaulted(
               blob,
@@ -368,6 +389,9 @@ class GfsBackupStore {
     final lock = await loadLock?.call();
     final vaultKeys =
         lock == null ? await loadVaultKeys?.call() : null;
+    // س230 (د11 الجزء الثاني): الجذر الحي — حاضر يرفع النسخة إلى جيل
+    // السجل الرابع (v6 مع القفل / v5 بلا) فتسافر سجلاتها معها.
+    final logRoot = await loadLogRoot?.call();
     final sha = await backupTo(
       db,
       target,
@@ -376,6 +400,7 @@ class GfsBackupStore {
       imagesDir: imagesDir,
       lock: lock,
       vaultKeys: vaultKeys,
+      logRootKey: logRoot,
       imagesCipher: imagesCipher,
     );
     // التحقق بطبقة النوع: الساعية سريعة والبقية كاملة (ق-ن4).

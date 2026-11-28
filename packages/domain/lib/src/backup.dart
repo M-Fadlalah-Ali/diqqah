@@ -41,6 +41,19 @@ import 'setup.dart';
 /// المضمّن يبقى **قارئاً حصراً** لنسخ v2 القديمة، والمقفلة v3 تبقى
 /// v3 بلا سجل مفتاح خزنة عمداً (علة v3 ذاتها: الكلمة فوق قفل مفتوح
 /// لا معنى لها).
+///
+/// د11 الجزء الثاني (س230/D-225 — مفاتيح السجلات، إغلاق ما تبقى من
+/// G-02): جذر سجلات الأحداث والأخطاء ينتقل من المضمّن بالشيفرة إلى
+/// خزنة الجهاز (جذر عشوائي 256-bit لكل جهاز بنمط p3 ذاته)، ويُغلق
+/// المضمّن قارئاً إرثياً حصراً (سجلات ما قبل س230 مقروءة للأبد —
+/// عقد القراءة الإرثية عينه الموثق بمفتاح البرنامج). **وسفر الجذر
+/// عبر الأجهزة**: النسخة تحمل سجلاً رابعاً نوع 4 تحت DEK — جذر
+/// السجلات مُشفَّراً بمفتاح الملف العشوائي — فمن يملك فك النسخة
+/// (مفتاح جهازه أو الرمز أو كلمة القفل) يملك فك سجلاتها، ومع
+/// الاستعادة يُعاد ختم السجلات بجذر الجهاز المستقر عليه فبذرة
+/// المزامنة m4 تُقرأ بعد الاستعادة حرفاً. الأجيال الجديدة: v5
+/// (الخزنة + سجل السجلات) وv6 (المقفلة + سجل السجلات) — والقديمة
+/// v1..v4 تُقرأ حرفاً بعقدها القائم.
 class BackupCipher {
   /// ترويسة النسخة المشفرة — «DIQQENC» (D-053: التسمية الموحدة).
   static final List<int> magic = utf8.encode('DIQQENC');
@@ -65,6 +78,20 @@ class BackupCipher {
   /// v1/v2/v3 (خيار المواد بجهاز القارئ).
   static const int vaultFormatVersion = 4;
 
+  /// إصدار جيل الخزنة بحامل مفتاح السجلات (س230 — د11 الجزء الثاني):
+  /// سجلا الخزنة (مفتاح الجهاز + الرمز) **وسجل رابع نوع 4** يحمل جذر
+  /// سجلات الجهاز مشفراً بDEK الملف — يُكتب حين يحضر الجذر، وغيابه
+  /// يعيد الكتابة v4 بعقد الانخفاض الموثق (أحداث مختومة إرثياً فلا
+  /// سجل لها) — ويُقرأ مع كل الأجيال.
+  static const int vaultLogFormatVersion = 5;
+
+  /// إصدار الجيل المقفل بحامل مفتاح السجلات (س230): سجلا القفل
+  /// (الكلمة + الرمز) وسجل رابع نوع 4 تحت DEK — المقفلة حاضرةَ
+  /// الجذر تُكتب v6 (سجلاتها مسافرة معها فتُقرأ عبر الأجهزة) وغائبته
+  /// تعود v3 حرفاً. لولا هذا السجل لكسر جيل الخزنة للسجلات استعادة
+  /// المقفلة على جهاز آخر — علة مؤجلة حُسمت من يوم الجذر.
+  static const int lockedLogFormatVersion = 6;
+
   /// إصدار الجيل القديم بكلمة المرور (أيام D-050) — للقراءة حصراً.
   static const int legacyFormatVersion = 1;
 
@@ -83,6 +110,16 @@ class BackupCipher {
   /// نوع سجل تغليف DEK بمفتاح الخزنة بجيل v4 (د11): جذر الجهاز
   /// العشوائي من خزنته — الفتح الصامت على الجهاز ذاته حصراً.
   static const int _recVaultKey = 3;
+
+  /// نوع سجل مفتاح السجلات (س230 — د11 الجزء الثاني): جذر سجلات
+  /// الجهاز (32 بايتة) مشفراً بDEK الملف نفسه — لا يُشتق من نص
+  /// فلا ملح، والمفتاح عشوائي لكل ملف فلا إعادة استخدام: نونس (12)
+  /// + وسم GCM (16) + جذر مشفر (32) = 60 بايتة بعد بايتة النوع.
+  static const int _recLogKey = 4;
+
+  /// طول سجل مفتاح السجلات: النوع (1) + النونس (12) + الوسم (16) +
+  /// الجذر المشفر (32) = 61 بايتة ثابتة (بلا ملح — الشرح أعلاه).
+  static const int _logRecordLen = 1 + _nonceLen + _macLen + _dekLen;
 
   /// طول سجل التغليف الواحد: النوع (1) + الملح (16) + النونس (12) +
   /// وسم GCM (16) + DEK المشفر (32) = 77 بايتة ثابتة.
@@ -117,18 +154,24 @@ class BackupCipher {
       : _aes = AesGcm.with256bits(),
         _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
 
-  /// هل النسخة المقفلة v3 (تحتاج كلمة مرور أو رمز استرداد لفكها)؟ —
-  /// نداء قبل prepareRestore كي يمرّر المستدعى أسرار الخزنة أو يطلبها.
-  static bool needsUnlock(List<int> blob) =>
-      identify(blob) == BackupKind.encrypted &&
-      encryptedVersion(blob) == lockedFormatVersion;
+  /// هل النسخة مقفلة (v3 — أو v6 بسجل السجلات س230) وتحتاج كلمة
+  /// مرور أو رمز استرداد لفكها؟ — نداء قبل prepareRestore كي يمرّر
+  /// المستدعى أسرار الخزنة أو يطلبها.
+  static bool needsUnlock(List<int> blob) {
+    if (identify(blob) != BackupKind.encrypted) return false;
+    final ver = encryptedVersion(blob);
+    return ver == lockedFormatVersion || ver == lockedLogFormatVersion;
+  }
 
-  /// هل النسخة من جيل الخزنة v4 (د11)؟ — تُفك هنا بمفتاح هذا الجهاز
-  /// صامتاً، وعلى جهاز آخر برمز الاسترداد المطبوع مرة واحدة: النداء
-  /// قبل prepareRestore كي يمرر المستدعى مفتاح خزنته أو يطلب الرمز.
-  static bool isVaulted(List<int> blob) =>
-      identify(blob) == BackupKind.encrypted &&
-      encryptedVersion(blob) == vaultFormatVersion;
+  /// هل النسخة من جيل الخزنة (v4 — أو v5 بسجل السجلات س230)؟ — تُفك
+  /// هنا بمفتاح هذا الجهاز صامتاً، وعلى جهاز آخر برمز الاسترداد
+  /// المطبوع مرة واحدة: النداء قبل prepareRestore كي يمرر المستدعى
+  /// مفتاح خزنته أو يطلب الرمز.
+  static bool isVaulted(List<int> blob) {
+    if (identify(blob) != BackupKind.encrypted) return false;
+    final ver = encryptedVersion(blob);
+    return ver == vaultFormatVersion || ver == vaultLogFormatVersion;
+  }
 
   /// يميز نوع الملف دون أي فك: مشفرة / SQLite خام / مجهول.
   static BackupKind identify(List<int> blob) {
@@ -247,13 +290,18 @@ class BackupCipher {
   // تعمل. وسم GCM في كل سجل هو المُحقّق: خاطئ = رفض السجل لا القبول.
   // ═══════════════════════════════════════════════════════════════
 
-  /// يكتب نسخة مقفلة (v3): البيانات بمفتاح عشوائي لكل ملف، والمفتاح
-  /// مغلّف بسجلين — كلمة المستخدم ورمز الاسترداد — بلا سجل مفتاح
-  /// البرنامج عمداً (توثيق الصنف: الكلمة فوق قفل مفتوح لا معنى لها).
+  /// يكتب نسخة مقفلة (v3 — أو v6 بسجل السجلات س230): البيانات بمفتاح
+  /// عشوائي لكل ملف، والمفتاح مغلّف بسجلين — كلمة المستخدم ورمز
+  /// الاسترداد — بلا سجل مفتاح البرنامج عمداً (توثيق الصنف: الكلمة
+  /// فوق قفل مفتوح لا معنى لها). و[logRootKey] الحاضر (س230 — د11
+  /// الجزء الثاني) يكتب سجلاً رابعاً نوع 4 يحمل جذر سجلات الجهاز تحت
+  /// DEK فنسخة جهاز آخر تُستعاد بسجلاتها حية — وغيابه يعيد الكتابة
+  /// v3 بعقد الانخفاض الموثق (أحداث مختومة إرثياً فلا سجل لها).
   Future<List<int>> encryptLocked(
     List<int> plain, {
     required String password,
     required String recoveryCode,
+    List<int>? logRootKey,
     Random? rng,
   }) async {
     final dek = _random(_dekLen, rng);
@@ -279,8 +327,10 @@ class BackupCipher {
     );
     final out = BytesBuilder();
     out.add(magic);
-    out.addByte(lockedFormatVersion);
-    out.addByte(2); // سجلان حصراً: الكلمة والرمز.
+    final withLog = logRootKey != null && logRootKey.isNotEmpty;
+    out.addByte(
+        withLog ? lockedLogFormatVersion : lockedFormatVersion);
+    out.addByte(2); // سجلا التغليف حصراً: الكلمة والرمز.
     out.addByte(_recPassword);
     out.add(pwSalt);
     out.add(pwBox.nonce);
@@ -291,17 +341,39 @@ class BackupCipher {
     out.add(recBox.nonce);
     out.add(recBox.mac.bytes);
     out.add(recBox.cipherText);
+    if (withLog) {
+      out.add(await _packLogRecord(logRootKey!, dek));
+    }
     out.add(dataBox.nonce);
     out.add(dataBox.cipherText);
     out.add(dataBox.mac.bytes);
     return out.toBytes();
   }
 
-  /// يفك نسخة مقفلة v3 — بالمواد المتاحة: كلمة المرور و/أو رمز
-  /// الاسترداد. كل سجل يُجرَّب بمادته المطابقة ووسم GCM حاكم؛ أول فك
-  /// ناجح لـDEK يفتح البيانات. لا مواد = رسالة الطلب، وكل المواد
-  /// خاطئة = رفض واحد صريح قبل أي لمس للقاعدة (روح F-013).
-  Future<List<int>> decryptLocked(
+  /// بايتات سجل مفتاح السجلات (س230): النوع 4 + نونس + وسم + الجذر
+  /// مشفراً بDEK الملف — البطاقة الموحدة لكاتبين v5/v6 وقارئ الأجيال.
+  Future<List<int>> _packLogRecord(
+      List<int> logRootKey, List<int> dek) async {
+    final box = await _aes.encrypt(
+      logRootKey,
+      secretKey: SecretKeyData(Uint8List.fromList(dek)),
+      nonce: _aes.newNonce(),
+    );
+    final out = BytesBuilder();
+    out.addByte(_recLogKey);
+    out.add(box.nonce);
+    out.add(box.mac.bytes);
+    out.add(box.cipherText);
+    return out.toBytes();
+  }
+
+  /// يفك نسخة مقفلة (v3 — أو v6 بسجل السجلات س230) — بالمواد المتاحة:
+  /// كلمة المرور و/أو رمز الاسترداد. كل سجل يُجرّب بمادته المطابقة ووسم
+  /// GCM حاكم؛ أول فك ناجح لـDEK يفتح البيانات وسجل السجلات تحته.
+  /// لا مواد = رسالة الطلب، وكل المواد خاطئة = رفض واحد صريح قبل أي
+  /// لمس للقاعدة (روح F-013). يعاد (النص الصريح، جذر سجلات النسخة —
+  /// null بجيل v3 الذي لا يحمله).
+  Future<(List<int>, List<int>?)> decryptLockedWithLogRoot(
     List<int> blob, {
     String? password,
     String? recoveryCode,
@@ -310,18 +382,19 @@ class BackupCipher {
       throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
     }
     final version = encryptedVersion(blob);
-    if (version != lockedFormatVersion) {
+    if (version != lockedFormatVersion && version != lockedLogFormatVersion) {
       throw BackupCipherException(version == formatVersion
           ? 'هذه نسخة بمفتاح البرنامج — تُفتح مباشرة بلا كلمة مرور'
-          : version == vaultFormatVersion
-              ? 'هذه نسخة من جيل الخزنة (v4) — تُفك بمفتاح هذا الجهاز '
+          : version == vaultFormatVersion || version == vaultLogFormatVersion
+              ? 'هذه نسخة من جيل الخزنة (v4/v5) — تُفك بمفتاح هذا الجهاز '
                   'أو برمز الاسترداد'
               : 'إصدار تنسيق غير معروف: $version');
     }
-    final (dataOffset, records) = _readWrapRecords(
+    final (dataOffset, records, logRecord) = _readWrapRecords(
       blob,
       allowedKinds: const {_recPassword, _recRecovery},
-      structureError: 'بنية النسخة المقفلة تالف — الملف غير سليم',
+      expectLogRecord: version == lockedLogFormatVersion,
+      structureError: 'بنية النسخة المقفلة تالفة — الملف غير سليم',
       kindError: 'نوع سجل غير معروف بالنسخة المقفلة — الملف غير سليم',
     );
     final dek = await _unwrapDek(records,
@@ -334,9 +407,50 @@ class BackupCipher {
                   'الاسترداد ثم أعد المحاولة'
               : 'كلمة المرور أو رمز الاسترداد خاطئ — تحقق ثم أعد المحاولة');
     }
-    // قسم البيانات بعد السجلات مباشرة: نونس (12) ← نص مشفر ← وسم (16).
-    return _decryptTail(
-        blob, dataOffset, dek, 'فك التشفير فشل — الملف تالف');
+    final logRoot = logRecord == null
+        ? null
+        : await _unpackLogRecord(logRecord, dek);
+    // قسم البيانات بعد السجلات (وسجل السجلات إن حضر): نونس (12) ← نص
+    // مشفر ← وسم (16).
+    return (
+      await _decryptTail(
+          blob, dataOffset, dek, 'فك التشفير فشل — الملف تالف'),
+      logRoot,
+    );
+  }
+
+  /// يفك نسخة مقفلة إلى نصها الصريح حصراً — المفوّض بالقديم (س149)
+  /// حرفاً، والجذر المحمول يُطلب من [decryptLockedWithLogRoot] (س230).
+  Future<List<int>> decryptLocked(
+    List<int> blob, {
+    String? password,
+    String? recoveryCode,
+  }) async {
+    final (plain, _) = await decryptLockedWithLogRoot(blob,
+        password: password, recoveryCode: recoveryCode);
+    return plain;
+  }
+
+  /// فك سجل مفتاح السجلات (س230) من أجزائه بDEK الملف — الجذر
+  /// 32 بايتة حصراً (بنية الشاذة رفض كامل لا تخمين صامت).
+  Future<List<int>> _unpackLogRecord(
+      ({List<int> nonce, List<int> mac, List<int> cipherText}) rec,
+      SecretKey dek) async {
+    final List<int> root;
+    try {
+      root = await _aes.decrypt(
+        SecretBox(rec.cipherText, nonce: rec.nonce, mac: Mac(rec.mac)),
+        secretKey: dek,
+      );
+    } on SecretBoxAuthenticationError {
+      throw const BackupCipherException(
+          'بنية سجل السجلات تالفة — الملف غير سليم');
+    }
+    if (root.length != _dekLen) {
+      throw const BackupCipherException(
+          'بنية سجل السجلات تالفة — الملف غير سليم');
+    }
+    return root;
   }
 
   /// تجربة سجلات التغليف بالمواد المتاحة — أول DEK يفك بوسم GCM سليم
@@ -385,6 +499,7 @@ class BackupCipher {
     List<int> plain, {
     required List<int> vaultRootKey,
     required String recoveryCode,
+    List<int>? logRootKey,
     Random? rng,
   }) async {
     final dek = _random(_dekLen, rng);
@@ -410,8 +525,12 @@ class BackupCipher {
     );
     final out = BytesBuilder();
     out.add(magic);
-    out.addByte(vaultFormatVersion);
-    out.addByte(2); // سجلان حصراً: مفتاح الخزنة ورمز الاسترداد.
+    // س230 (د11 الجزء الثاني): الجذر الحاضر يرفع الجيل إلى v5 بسجل
+    // رابع نوع 4 يحمل جذر السجلات تحت DEK — والغائب يبقي v4 حرفاً
+    // (انخفاض موثق: أحداث مختومة إرثياً فلا سجل لها بالملف).
+    final withLog = logRootKey != null && logRootKey.isNotEmpty;
+    out.addByte(withLog ? vaultLogFormatVersion : vaultFormatVersion);
+    out.addByte(2); // سجلا التغليف حصراً: مفتاح الخزنة ورمز الاسترداد.
     out.addByte(_recVaultKey);
     out.add(vaultSalt);
     out.add(vaultBox.nonce);
@@ -422,18 +541,22 @@ class BackupCipher {
     out.add(recBox.nonce);
     out.add(recBox.mac.bytes);
     out.add(recBox.cipherText);
+    if (withLog) {
+      out.add(await _packLogRecord(logRootKey!, dek));
+    }
     out.add(dataBox.nonce);
     out.add(dataBox.cipherText);
     out.add(dataBox.mac.bytes);
     return out.toBytes();
   }
 
-  /// يفك نسخة جيل الخزنة v4 — بالمواد المتاحة: مفتاح خزنة هذا الجهاز
-  /// (الجهاز ذاته يفتح صامتاً) و/أو رمز الاسترداد (جهاز آخر). كل سجل
+  /// يفك نسخة جيل الخزنة (v4 — أو v5 بسجل السجلات س230) — بالمواد المتاحة: مفتاح خزنة هذا الجهاز
+  /// (الجهاز ذاته يفتح صامتاً) و/أو رمز الاسترداد (جهاز آخر) — ويعاد مع
+  /// النص جذر سجلات النسخة (null بجيل v4 الذي لا يحمله).
   /// يُجرَّب بمادته ووسم GCM حاكم؛ أول فك ناجح لـDEK يفتح البيانات —
   /// لا مواد = رسالة الطلب بلسان الجيل، وكل المواد خاطئة = رفض واحد
   /// صريح قبل أي لمس للقاعدة (روح F-013 عينها).
-  Future<List<int>> decryptVaulted(
+  Future<(List<int>, List<int>?)> decryptVaultedWithLogRoot(
     List<int> blob, {
     List<int>? vaultRootKey,
     String? recoveryCode,
@@ -442,16 +565,18 @@ class BackupCipher {
       throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
     }
     final version = encryptedVersion(blob);
-    if (version != vaultFormatVersion) {
-      throw BackupCipherException(version == lockedFormatVersion
-          ? 'هذه نسخة مقفلة بكلمة مرور — تُفك بالكلمة أو رمز الاسترداد'
-          : version == formatVersion
-              ? 'هذه نسخة بمفتاح البرنامج — تُفتح مباشرة بلا كلمة مرور'
-              : 'إصدار تنسيق غير معروف: $version');
+    if (version != vaultFormatVersion && version != vaultLogFormatVersion) {
+      throw BackupCipherException(
+          version == lockedFormatVersion || version == lockedLogFormatVersion
+              ? 'هذه نسخة مقفلة بكلمة مرور — تُفك بالكلمة أو رمز الاسترداد'
+              : version == formatVersion
+                  ? 'هذه نسخة بمفتاح البرنامج — تُفتح مباشرة بلا كلمة مرور'
+                  : 'إصدار تنسيق غير معروف: $version');
     }
-    final (dataOffset, records) = _readWrapRecords(
+    final (dataOffset, records, logRecord) = _readWrapRecords(
       blob,
       allowedKinds: const {_recVaultKey, _recRecovery},
+      expectLogRecord: version == vaultLogFormatVersion,
       structureError: 'بنية نسخة الخزنة تالفة — الملف غير سليم',
       kindError: 'نوع سجل غير معروف بنسخة الخزنة — الملف غير سليم',
     );
@@ -464,24 +589,87 @@ class BackupCipher {
       final hasVault = vaultRootKey != null && vaultRootKey.isNotEmpty;
       final hasCode = recoveryCode != null && recoveryCode.isNotEmpty;
       throw BackupCipherException(!hasVault && !hasCode
-          ? 'النسخة من جيل الخزنة (v4) — تُفك هنا بمفتاح هذا الجهاز '
+          ? 'النسخة من جيل الخزنة (v4/v5) — تُفك هنا بمفتاح هذا الجهاز '
               'وبرمز الاسترداد على جهاز آخر — أدخل الرمز ثم أعد المحاولة'
           : 'مفتاح الخزنة لا يطابق والرمز المدخل خاطئ — تحقق ثم أعد المحاولة');
     }
-    return _decryptTail(
-        blob, dataOffset, dek, 'فك التشفير فشل — الملف تالف');
+    final logRoot = logRecord == null
+        ? null
+        : await _unpackLogRecord(logRecord, dek);
+    return (
+      await _decryptTail(
+          blob, dataOffset, dek, 'فك التشفير فشل — الملف تالف'),
+      logRoot,
+    );
   }
 
-  /// قراءة سجلات التغليف المشتركة بين الجيلين المقفل (v3) والخزنة
-  /// (v4 — د11) — منبع واحد لا تكرار: كل سجل 77 بايتة (النوع 1 +
-  /// الملح 16 + النونس 12 + وسم GCM 16 + DEK مغلَّفاً 32)، والعدّاد
-  /// بعد بايتة الإصدار، والأنواع المقبولة بمعرفة الجيل المستدعي.
-  /// يعاد (إزاحة قسم البيانات، السجلات) — وأي بنية ناقصة أو نوع شاذ
-  /// رفض كامل (لا تخمين صامت) برسالة الجيل المستدعي.
-  (int, List<(int, List<int>, List<int>, List<int>, List<int>)>)
+  /// يفك نسخة جيل الخزنة إلى نصها الصريح حصراً — مفوّض س229 حرفاً،
+  /// والجذر المحمول يُطلب من [decryptVaultedWithLogRoot] (س230).
+  Future<List<int>> decryptVaulted(
+    List<int> blob, {
+    List<int>? vaultRootKey,
+    String? recoveryCode,
+  }) async {
+    final (plain, _) = await decryptVaultedWithLogRoot(blob,
+        vaultRootKey: vaultRootKey, recoveryCode: recoveryCode);
+    return plain;
+  }
+
+  /// فك موحد بكل الأجيال بالمواد المتاحة (س230 — منبع واحد للمستدعين
+  /// الأربعة: الاستعادة وملف الصور وتحقيقَي المستودع): v1 بكلمة
+  /// المرور حصراً، v2 بمفتاح البرنامج، المقفلة v3/v6 بالكلمة أو
+  /// الرمز، وخزنة v4/v5 بمفتاح هذا الجهاز أو الرمز — ويعاد مع النص
+  /// جذر سجلات النسخة إن حمله الملف (v5/v6) وإلا null. لا مواد
+  /// للجيل الطالب = رسالة طلبه بلسانه، والمواد الخاطئة = رفض واحد
+  /// صريح (وسم GCM حاكم) لا صمت ولا تخمين جيل.
+  Future<(List<int>, List<int>?)> decryptAny(
+    List<int> blob, {
+    String? password,
+    String? recoveryCode,
+    List<int>? vaultRootKey,
+  }) async {
+    if (identify(blob) != BackupKind.encrypted) {
+      throw const BackupCipherException('الملف ليس نسخة مشفرة أصلاً');
+    }
+    switch (encryptedVersion(blob)) {
+      case legacyFormatVersion:
+        if (password == null || password.isEmpty) {
+          throw const BackupCipherException(
+              'النسخة من الجيل القديم المحمي بكلمة مرور — '
+              'أدخلها في حقل كلمة المرور ثم أعد المحاولة');
+        }
+        return (await decryptWithPassword(blob, password), null);
+      case formatVersion:
+        return (await decrypt(blob), null);
+      case lockedFormatVersion:
+      case lockedLogFormatVersion:
+        return await decryptLockedWithLogRoot(blob,
+            password: password, recoveryCode: recoveryCode);
+      case vaultFormatVersion:
+      case vaultLogFormatVersion:
+        return await decryptVaultedWithLogRoot(blob,
+            vaultRootKey: vaultRootKey, recoveryCode: recoveryCode);
+      default:
+        throw BackupCipherException(
+            'إصدار تنسيق غير معروف: ${encryptedVersion(blob)}');
+    }
+  }
+
+  /// قراءة سجلات التغليف المشتركة بين الجيلين المقفل (v3/v6) والخزنة
+  /// (v4/v5 — د11 وس230) — منبع واحد لا تكرار: كل سجل 77 بايتة
+  /// (النوع 1 + الملح 16 + النونس 12 + وسم GCM 16 + DEK مغلَّفاً 32)،
+  /// والعدّاد بعد بايتة الإصدار، والأنواع المقبولة بمعرفة الجيل
+  /// المستدعي. [expectLogRecord] (س230) يجعل سجل مفتاح السجلات
+  /// (نوع 4، 61 بايتة) واجباً بعد سجلات التغليف قبل قسم البيانات.
+  /// يعاد (إزاحة قسم البيانات، السجلات، أجزاء سجل السجلات إن حضر)
+  /// — وأي بنية ناقصة أو نوع شاذ رفض كامل (لا تخمين صامت) برسالة
+  /// الجيل المستدعي.
+  (int, List<(int, List<int>, List<int>, List<int>, List<int>)>,
+          ({List<int> nonce, List<int> mac, List<int> cipherText})?)
       _readWrapRecords(
     List<int> blob, {
     required Set<int> allowedKinds,
+    required bool expectLogRecord,
     required String structureError,
     required String kindError,
   }) {
@@ -507,7 +695,27 @@ class BackupCipher {
       records.add((kind, salt, nonce, mac, wrapped));
       i += _recordLen;
     }
-    return (i, records);
+    // سجل مفتاح السجلات (س230 — د11 الجزء الثاني) بأجيال v5/v6 بعد
+    // سجلات التغليف حصراً: النوع (1) + نونس (12) + وسم (16) + جذر
+    // مشفر (32) = 61 بايتة، قبل قسم البيانات مباشرة.
+    ({List<int> nonce, List<int> mac, List<int> cipherText})? logRecord;
+    if (expectLogRecord) {
+      if (i + _logRecordLen > blob.length - _nonceLen - _macLen) {
+        throw BackupCipherException(structureError);
+      }
+      if (blob[i] != _recLogKey) {
+        throw BackupCipherException(kindError);
+      }
+      logRecord = (
+        nonce: blob.sublist(i + 1, i + 1 + _nonceLen),
+        mac: blob.sublist(
+            i + 1 + _nonceLen, i + 1 + _nonceLen + _macLen),
+        cipherText: blob.sublist(
+            i + 1 + _nonceLen + _macLen, i + _logRecordLen),
+      );
+      i += _logRecordLen;
+    }
+    return (i, records, logRecord);
   }
 
   /// قسم البيانات بعد سجلات التغليف مباشرة: نونس (12) ← نص مشفر ←

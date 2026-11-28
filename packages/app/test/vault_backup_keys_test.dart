@@ -74,4 +74,66 @@ void main() {
     // الراية بالخزنة لا بالذاكرة، فلا تعود الطباعة كل إقلاع.
     expect(await VaultBackupKeys(box: box).recoveryRevealed(), isTrue);
   });
+
+  // ── س230 (د11 الجزء الثاني — خزنة جذر السجلات) ──────────────────
+
+  test('س230: LogRootVault يولد الجذر 32 بايتة مرة واحدة ويثبت عبر '
+      'المخازن (الجهاز ذاته)', () async {
+    final box = _MemoryBox();
+    final store = LogRootVault(box: box);
+    final first = await store.loadOrCreate();
+    expect(first, hasLength(32));
+    final second = await LogRootVault(box: box).loadOrCreate();
+    expect(second, equals(first),
+        reason: 'الجذر ثابت بالخزنة فالسجلات تُقرأ عبر الإقلاعات');
+    // والمفتاح باسمه المستقل عن مفاتيح النسخ (فصل النطاقات).
+    expect(box.data.containsKey('diqqah.log.root.v1'), isTrue);
+    expect(box.data.containsKey('diqqah.backup.root.v1'), isFalse);
+  });
+
+  test('س230: الجذر عشوائي لكل جهاز — صندوقان (جهازان) لا يشتركان',
+      () async {
+    final a = await LogRootVault(box: _MemoryBox()).loadOrCreate();
+    final b = await LogRootVault(box: _MemoryBox()).loadOrCreate();
+    expect(a, isNot(equals(b)));
+  });
+
+  test('س230: الخزنة الفاشلة تعيد null من المفوّض الحي — الجذر الإرثي '
+      'المضمّن انخفاضاً موثقاً (المفوّض بصندوق محقون لا قناة الإنتاج)',
+      () async {
+    final failing = _ThrowingBox();
+    try {
+      await LogRootVault(box: failing).loadOrCreate();
+      fail('الصندوق الرافض يرمي — لا جذر بلا خزنة (نمط س148)');
+    } on StateError {
+      // الصوت العالي عقد المخزن — والمفوّض الحي يبتلعه ويعيد null.
+    }
+    expect(await _failingLiveLogRootOrNull(failing), isNull,
+        reason: 'فشل الخزنة = null فالجذر الإرثي المضمّن قارئاً وخاتماً');
+    // والصندوق السليم يعيد جذر 32 بايتة (المسار الحقيقي بالخزنة).
+    expect(await LogRootVault(box: _MemoryBox()).loadOrCreate(),
+        hasLength(32));
+  });
+}
+
+/// صندوق يرمي دائماً — محاكاة خزنة الجهاز الفاشلة.
+class _ThrowingBox implements SecureSecretsBox {
+  @override
+  Future<String?> read(String key) async => throw StateError('خزنة غائبة');
+
+  @override
+  Future<void> write(String key, String value) async =>
+      throw StateError('خزنة غائبة');
+
+  @override
+  Future<void> delete(String key) async => throw StateError('خزنة غائبة');
+}
+
+/// المفوّض الحي بصندوق محقون — اختبار مسار الفشل بلا قناة الإنتاج.
+Future<List<int>?> _failingLiveLogRootOrNull(SecureSecretsBox box) async {
+  try {
+    return await LogRootVault(box: box).loadOrCreate();
+  } catch (_) {
+    return null;
+  }
 }

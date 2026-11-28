@@ -11,22 +11,22 @@ import 'package:diqqah_app/backup_center.dart' show kAppVersion;
 import 'package:diqqah_app/settings_screen.dart' show diqqahVersionLine;
 
 void main() {
-  test('س215 (القيمة انتقلت بس229): الترميز الموحد 0.279.0+79 — pubspec '
+  test('س215 (القيمة انتقلت بس230): الترميز الموحد 0.280.0+80 — pubspec '
       'وكتالوج الإصدار معاً حرفاً (حارس ⑤ — والتثبيت الصلب انتقل إليه '
       'من s213 بنمط انتقاله)', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final line = pubspec
         .split('\n')
         .firstWhere((l) => l.startsWith('version:'));
-    expect(line, 'version: 0.279.0+79');
-    expect(kAppVersion, '0.279.0+79');
+    expect(line, 'version: 0.280.0+80');
+    expect(kAppVersion, '0.280.0+80');
   });
 
   test('س215: سطر العرض بالبادئة المُشعرة — بنمط نسخ الإصدار الموثقة '
       '(بايتات المرجع كما هي والتحول أرقام الإصدار حصراً بس216)',
       () {
-    expect(diqqahVersionLine('0.278', ''), 'دِقَّة v.0.278');
-    expect(diqqahVersionLine('0.278', '78'), 'دِقَّة v.0.278',
+    expect(diqqahVersionLine('0.279', ''), 'دِقَّة v.0.279');
+    expect(diqqahVersionLine('0.279', '79'), 'دِقَّة v.0.279',
         reason: 'لاحقة البناء لا تُعرض — versionCode لا نصاً');
   });
 

@@ -78,19 +78,25 @@ Future<bool> runRestoreFlow(
     // الجهاز صامتاً كذلك — ونسخة جهاز آخر يُطلب رمزها بحوار الطلب
     // (الحقل يقبل الكلمة أو الرمز — بوسم GCM حاكم).
     BackupLock? stored;
-    BackupVaultKeys? storedVault;
     if (password == null || password.isEmpty) {
       try {
         stored = await BackupSecretsStore().loadLock();
       } catch (_) {
         stored = null;
       }
-      try {
-        storedVault = await VaultBackupKeys().load();
-      } catch (_) {
-        storedVault = null;
-      }
     }
+    // س230 (د11 الجزء الثاني): مواد خزنة هذا الجهاز تُحل دائماً — كلمة
+    // المستخدم المكتوبة للمصدر لا للقطة الرجوع (اللقطة تُغلَّف بخزنة
+    // الجهاز ذاته — v5 بالجذر الحي — فتسافر سجلاتها ويعمل التراجع)،
+    // والجذر الحي لتحقق سجلات النسخة وإعادة ختمها بجذر الجهاز بعد
+    // الاستعادة (خاتماً لا قارئاً فقط).
+    BackupVaultKeys? storedVault;
+    try {
+      storedVault = await VaultBackupKeys().load();
+    } catch (_) {
+      storedVault = null;
+    }
+    final liveLogRoot = await loadLiveLogRootOrNull();
     RestoreCandidate candidate;
     try {
       candidate = await prepareRestore(
@@ -98,11 +104,12 @@ Future<bool> runRestoreFlow(
         password: password ?? stored?.password,
         recoveryCode: password ?? stored?.recoveryCode,
         vaultRootKey: storedVault?.rootKey,
+        localLogRootKey: liveLogRoot,
         appSchemaVersion: DiqqahDatabase.schemaVersionValue,
       );
     } on BackupCipherException {
       if (password != null && password.isNotEmpty) rethrow;
-      // نسخة جهاز آخر (v4 أو v3 مقفلة) — طلب الرمز/الكلمة بحوار
+      // نسخة جهاز آخر (v4/v5 أو مقفلة v3/v6) — طلب الرمز/الكلمة بحوار
       // واحد ثم إعادة المحاولة بها حصراً لا فوق أسرار الخزنة.
       final typed = await _promptRestoreSecret(context);
       if (typed == null || typed.isEmpty) rethrow;
@@ -111,6 +118,7 @@ Future<bool> runRestoreFlow(
         password: typed,
         recoveryCode: typed,
         vaultRootKey: storedVault?.rootKey,
+        localLogRootKey: liveLogRoot,
         appSchemaVersion: DiqqahDatabase.schemaVersionValue,
       );
     }
@@ -122,6 +130,7 @@ Future<bool> runRestoreFlow(
         imagesDir: Directory(imagesDirFor(dbPath)),
         sourcePath: backupPath,
         vaultKeys: storedVault,
+        logRootKey: liveLogRoot,
         imagesCipher: ItemImagesStore.cipher,
       );
       // تدوير لقطات ما قبل الاستعادة (آخر 5) مع تثبيت مثبت النافذة
@@ -172,11 +181,11 @@ Future<bool> runRestoreFlow(
   }
 }
 
-/// د11 (س229/D-225 الجزء الأول): حوار طلب سر فك نسخة من جهاز آخر —
-/// نسخة الخزنة v4 من غير هذا الجهاز أو مقفلة v3 بلا أسرار محلية:
-/// حقل واحد يقبل رمز الاسترداد أو كلمة المرور (كلتاهما تُجرّبان
-/// بوسم GCM حاكم بprepareRestore) — والإلغاء يرمي الأصل فتظهر
-/// رسالته الصريحة لا صمتاً ولا أثراً.
+/// د11 (س229/D-225 الجزء الأول وس230 للثاني): حوار طلب سر فك نسخة من
+/// جهاز آخر — نسخة الخزنة (v4/v5) من غير هذا الجهاز أو مقفلة (v3/v6)
+/// بلا أسرار محلية: حقل واحد يقبل رمز الاسترداد أو كلمة المرور
+/// (كلتاهما تُجرّبان بوسم GCM حاكم بprepareRestore) — والإلغاء يرمي
+/// الأصل فتظهر رسالته الصريحة لا صمتاً ولا أثراً.
 Future<String?> _promptRestoreSecret(BuildContext context) {
   final controller = TextEditingController();
   return showDialog<String>(

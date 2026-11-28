@@ -110,13 +110,18 @@ void main() {
     await File(legacyPath).writeAsBytes(legacyBlob, flush: true);
     expect(BackupCipher.encryptedVersion(legacyBlob), 1);
 
-    // بلا كلمة مرور: توجيه صريح لمسار الجيل القديم — قبل أي لمس للقاعدة
+    // بلا كلمة مرور: توجيه صريح لمسار الجيل القديم — قبل أي لمس للقاعدة.
+    // س230: القارئ الموحد decryptAny يرمي BackupCipherException (لا
+    // CorruptBackupException) برسالة الجيل القديم نفسها — فبوابة
+    // الاستعادة تعرض حوار طلب السر فيدخل المالك كلمة v1 به (تحسين
+    // مسار د11 الجزء الأول عينه — الحقل يقبل الكلمة أو الرمز).
     await expectLater(
       () async {
         final c = await prepareRestore(legacyPath, appSchemaVersion: db.schemaVersion);
         c.dispose();
       }(),
-      throwsA(isA<CorruptBackupException>()),
+      throwsA(isA<BackupCipherException>()
+          .having((e) => e.message, 'message', contains('الجيل القديم'))),
     );
 
     // بكلمتها: تُقرأ وتستكمل كل الفحوص — التزام القراءة الدائم
