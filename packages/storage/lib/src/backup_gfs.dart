@@ -60,6 +60,12 @@ class ScannedSnapshotRow {
 /// بالواجهة) — النسخ الجديدة تُكتب v3 مقفلة إن وُجد القفل، والتحقق
 /// الحي للنسخ المقفلة يفك بأسراره ذاتها؛ و[imagesCipher] مفتاح الجهاز
 /// لملفات الصور الحية في الجمع. فارغاهما = السلوك القائم v2/الخام حرفاً.
+///
+/// د11 (س229/D-225 الجزء الأول): [loadVaultKeys] مصدر مواد مفاتيح الخزنة
+/// (جذر عشوائي لكل جهاز + رمز الاسترداد) — بلا قفل تُكتب النسخ الجديدة
+/// **بجيل الخزنة v4** (سجل مفتاح الخزنة هنا صامتاً + سجل الرمز على أي
+/// جهاز آخر)، والتحقق الحي يفك بمفتاح الخزنة ذاته. غيابه بلا قفل =
+/// انخفاض v2 موثق لا صمت (نمط عرف س149 نفسه).
 class GfsBackupStore {
   final Directory backupsDir;
   final Directory dbDir;
@@ -67,6 +73,7 @@ class GfsBackupStore {
   final int schemaVersion;
   final String appVersion;
   final Future<BackupLock?> Function()? loadLock;
+  final Future<BackupVaultKeys?> Function()? loadVaultKeys;
   final ImageFileCipher? imagesCipher;
 
   BackupCatalog catalog = BackupCatalog();
@@ -78,6 +85,7 @@ class GfsBackupStore {
     required this.schemaVersion,
     required this.appVersion,
     this.loadLock,
+    this.loadVaultKeys,
     this.imagesCipher,
   });
 
@@ -90,6 +98,7 @@ class GfsBackupStore {
     required int schemaVersion,
     required String appVersion,
     Future<BackupLock?> Function()? loadLock,
+    Future<BackupVaultKeys?> Function()? loadVaultKeys,
     ImageFileCipher? imagesCipher,
   }) async {
     final store = GfsBackupStore._(
@@ -99,6 +108,7 @@ class GfsBackupStore {
       schemaVersion: schemaVersion,
       appVersion: appVersion,
       loadLock: loadLock,
+      loadVaultKeys: loadVaultKeys,
       imagesCipher: imagesCipher,
     );
     await backupsDir.create(recursive: true);
@@ -191,6 +201,21 @@ class GfsBackupStore {
               password: lock.password,
               recoveryCode: lock.recoveryCode,
             ));
+          } else if (ver == BackupCipher.vaultFormatVersion) {
+            // د11: جيل الخزنة — يُفك بمفتاح هذا الجهاز حصراً هنا
+            // (التحقق الحي مسألة الجهاز ذاته؛ ورمز الاسترداد مسار
+            // الاستعادة اليدوية لا التحقيق الدوري).
+            final vault = await loadVaultKeys?.call();
+            if (vault == null) {
+              return const GfsVerifyOutcome(
+                  ok: false,
+                  state: BackupVerifyState.failed,
+                  reason: 'نسخة بجيل الخزنة v4 ولا مواد خزنة محمّلة للتحقق');
+            }
+            plain = Uint8List.fromList(await BackupCipher().decryptVaulted(
+              blob,
+              vaultRootKey: vault.rootKey,
+            ));
           } else if (ver == BackupCipher.formatVersion) {
             plain = Uint8List.fromList(
                 await BackupCipher().decrypt(blob));
@@ -253,6 +278,19 @@ class GfsBackupStore {
               blob,
               password: lock.password,
               recoveryCode: lock.recoveryCode,
+            ));
+          } else if (ver == BackupCipher.vaultFormatVersion) {
+            // د11: جيل الخزنة — بمفتاح هذا الجهاز حصراً هنا كذلك.
+            final vault = await loadVaultKeys?.call();
+            if (vault == null) {
+              return GfsVerifyOutcome(
+                  ok: false,
+                  state: BackupVerifyState.failed,
+                  reason: 'نسخة بجيل الخزنة v4 ولا مواد خزنة محمّلة للتحقق');
+            }
+            plain = Uint8List.fromList(await BackupCipher().decryptVaulted(
+              blob,
+              vaultRootKey: vault.rootKey,
             ));
           } else {
             plain = Uint8List.fromList(await BackupCipher().decrypt(blob));
@@ -325,7 +363,11 @@ class GfsBackupStore {
     final target = p.join(backupsDir.path, fileName);
     // P1-أ/P1-ب (س149): أسرار القفل ومفتاح الصور تُحل عند الإنشاء —
     // قفل موجود = النسخة وملف صورها بجيل v3 المقفل.
+    // د11 (س229): بلا قفل ومواد خزنة حاضرة = جيل v4 (الأولوية
+    // v3 ثم v4 ثم v2 — انخفاض v2 موثق لا صمت).
     final lock = await loadLock?.call();
+    final vaultKeys =
+        lock == null ? await loadVaultKeys?.call() : null;
     final sha = await backupTo(
       db,
       target,
@@ -333,6 +375,7 @@ class GfsBackupStore {
       includeImages: includeImages,
       imagesDir: imagesDir,
       lock: lock,
+      vaultKeys: vaultKeys,
       imagesCipher: imagesCipher,
     );
     // التحقق بطبقة النوع: الساعية سريعة والبقية كاملة (ق-ن4).

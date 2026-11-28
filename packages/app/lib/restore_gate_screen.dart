@@ -74,12 +74,21 @@ Future<bool> runRestoreFlow(
     // كلتاهما تُجرّبان). v1/v2 بمساريهما القديمين حرفاً. قراءة الخزنة
     // الفاشلة (قناة غائبة بالاختبارات) = بلا أسرار — فشل الفك اللاحق
     // يعرض رسالته الصريحة لا استثناء خزنة يطغى عليه.
+    // د11 (س229/D-225 الجزء الأول): وجيل الخزنة v4 يُفك بمفتاح هذا
+    // الجهاز صامتاً كذلك — ونسخة جهاز آخر يُطلب رمزها بحوار الطلب
+    // (الحقل يقبل الكلمة أو الرمز — بوسم GCM حاكم).
     BackupLock? stored;
+    BackupVaultKeys? storedVault;
     if (password == null || password.isEmpty) {
       try {
         stored = await BackupSecretsStore().loadLock();
       } catch (_) {
         stored = null;
+      }
+      try {
+        storedVault = await VaultBackupKeys().load();
+      } catch (_) {
+        storedVault = null;
       }
     }
     RestoreCandidate candidate;
@@ -88,14 +97,20 @@ Future<bool> runRestoreFlow(
         backupPath,
         password: password ?? stored?.password,
         recoveryCode: password ?? stored?.recoveryCode,
+        vaultRootKey: storedVault?.rootKey,
         appSchemaVersion: DiqqahDatabase.schemaVersionValue,
       );
     } on BackupCipherException {
-      if (password == null || password.isEmpty) rethrow;
+      if (password != null && password.isNotEmpty) rethrow;
+      // نسخة جهاز آخر (v4 أو v3 مقفلة) — طلب الرمز/الكلمة بحوار
+      // واحد ثم إعادة المحاولة بها حصراً لا فوق أسرار الخزنة.
+      final typed = await _promptRestoreSecret(context);
+      if (typed == null || typed.isEmpty) rethrow;
       candidate = await prepareRestore(
         backupPath,
-        password: password,
-        recoveryCode: password,
+        password: typed,
+        recoveryCode: typed,
+        vaultRootKey: storedVault?.rootKey,
         appSchemaVersion: DiqqahDatabase.schemaVersionValue,
       );
     }
@@ -106,6 +121,7 @@ Future<bool> runRestoreFlow(
         currentDbPath: dbPath,
         imagesDir: Directory(imagesDirFor(dbPath)),
         sourcePath: backupPath,
+        vaultKeys: storedVault,
         imagesCipher: ItemImagesStore.cipher,
       );
       // تدوير لقطات ما قبل الاستعادة (آخر 5) مع تثبيت مثبت النافذة
@@ -154,6 +170,53 @@ Future<bool> runRestoreFlow(
   } finally {
     // المجدول يعود مع الإقلاع الجديد — إيقافٌ صريح أعلاه فيبدأ من جديد.
   }
+}
+
+/// د11 (س229/D-225 الجزء الأول): حوار طلب سر فك نسخة من جهاز آخر —
+/// نسخة الخزنة v4 من غير هذا الجهاز أو مقفلة v3 بلا أسرار محلية:
+/// حقل واحد يقبل رمز الاسترداد أو كلمة المرور (كلتاهما تُجرّبان
+/// بوسم GCM حاكم بprepareRestore) — والإلغاء يرمي الأصل فتظهر
+/// رسالته الصريحة لا صمتاً ولا أثراً.
+Future<String?> _promptRestoreSecret(BuildContext context) {
+  final controller = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('سر فك النسخة'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+              'هذه النسخة من جهاز آخر أو مقفلة بكلمة مرور — أدخل رمز '
+              'الاسترداد المطبوع عند أول تشغيل (أو كلمة المرور '
+              'للمقفلة) ثم أعد المحاولة.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'رمز الاسترداد أو كلمة المرور',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (v) => Navigator.of(context).pop(v),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(controller.text),
+          child: const Text('فك النسخة'),
+        ),
+      ],
+    ),
+  ).then((v) {
+    controller.dispose();
+    return v;
+  });
 }
 
 /// شاشة البوابة ذاتها.

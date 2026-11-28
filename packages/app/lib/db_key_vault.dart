@@ -1,6 +1,7 @@
 import 'dart:typed_data' show Uint8List;
 
-import 'package:diqqah_domain/diqqah_domain.dart' show BackupLock;
+import 'package:diqqah_domain/diqqah_domain.dart'
+    show BackupCipher, BackupLock, BackupVaultKeys;
 import 'package:diqqah_storage/diqqah_storage.dart'
     show DatabaseKeyVault, dbKeyFromHex, dbKeyHexOf, generateDbKey;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -111,5 +112,62 @@ class BackupSecretsStore {
   Future<void> clearLock() async {
     await _box.delete(_passKey);
     await _box.delete(_recoveryKey);
+  }
+}
+
+/// مفاتيح نسخ الخزنة — د11 (س229/D-225 الجزء الأول بكلمة المالك
+/// «ابدأ د11»): جذر عشوائي 256-bit لكل جهاز يولَّد في خزنة الجهاز عند
+/// أول تشغيل (Keystore أندرويد / DPAPI ويندوز — بذات افتراضات P0-ب
+/// س148)، ومعه رمز استرداد بنمط v3 القائم يُطبع مرة واحدة عند أول
+/// تشغيل (ويبقى قابلاً للعرض من الخزنة بعرف الصدق ذاته). النسخ غير
+/// المقفلة تُكتب بجيل v4: تُفك هنا صامتاً بمفتاح هذا الجهاز، وعلى أي
+/// جهاز آخر برمز الاسترداد — فسيناريو «فتح النسخة على أي جهاز» (N-005)
+/// يلتئم بالرمز بلا كسر (خلاف المحضر الاستشاري المحسوم بد11).
+class VaultBackupKeys {
+  /// مفاتيح التخزين — لاحقة .v1 تهيئ جيلاً للإدارة المستقبلية (نمط
+  /// BackupSecretsStore عينه).
+  static const String _rootKey = 'diqqah.backup.root.v1';
+  static const String _recoveryKey = 'diqqah.backup.recovery.v1';
+  static const String _revealedKey = 'diqqah.backup.recovery.shown.v1';
+
+  final SecureSecretsBox _box;
+  VaultBackupKeys({SecureSecretsBox? box})
+      : _box = box ?? SecureSecretsBoxImpl();
+
+  /// المواد القائمة — null إن غاب أحد السرّين أو نقص (مواد نصفية لا
+  /// تُعاد: النسخ تُكتب v4 بالجذر والرمز معاً أو تنخفض v2 موثقة).
+  Future<BackupVaultKeys?> load() async {
+    final root = await _box.read(_rootKey);
+    final recovery = await _box.read(_recoveryKey);
+    if (root == null || root.isEmpty) return null;
+    if (recovery == null || recovery.isEmpty) return null;
+    return BackupVaultKeys(
+        rootKey: dbKeyFromHex(root), recoveryCode: recovery);
+  }
+
+  /// المواد حاضرة أو مولَّدة — أول تشغيل: توليد الجذر العشوائي
+  /// (256-bit بنمط مفتاح القاعدة ذاته) والرمز (بنمط v3 حرفاً) وحفظهما
+  /// فوراً قبل أي نسخة تُكتب بهما؛ والقائمان يُعادان كما هما (آمن
+  /// التكرار — الجذر ثابت فالنسخ تُقرأ عبر الإقلاعات).
+  Future<BackupVaultKeys> loadOrCreate() async {
+    final existing = await load();
+    if (existing != null) return existing;
+    final root = generateDbKey();
+    final recovery = BackupCipher.generateRecoveryCode();
+    await _box.write(_rootKey, dbKeyHexOf(root));
+    await _box.write(_recoveryKey, recovery);
+    return BackupVaultKeys(rootKey: root, recoveryCode: recovery);
+  }
+
+  /// هل طُبع الرمز مرة واحدة عند أول تشغيل؟ — الراية بالخزنة ذاتها
+  /// (لا بshared_preferences: سرٌّ فلا يخرج من الخزنة).
+  Future<bool> recoveryRevealed() async {
+    final flag = await _box.read(_revealedKey);
+    return flag != null && flag == '1';
+  }
+
+  /// وسم الطباعة الواحدة — بعد حوار «سجّلته» حصراً فلا يعود تلقائياً.
+  Future<void> markRecoveryRevealed() async {
+    await _box.write(_revealedKey, '1');
   }
 }

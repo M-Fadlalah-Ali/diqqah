@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- س229 (توحيد الانطلاقة بالعمل الفني الجديد): واجهة الانطلاقة
+         بأندرويد 12+ (API 31+) — النظام يعرض الأيقونة فوق خلفية
+         انطلاقة افتراضية فاتحة فيخالف الأيقونة الفحمية الجديدة:
+         هنا الخلفية الفحمية ذاتها (diqqah_launch_bg = 30,30,30
+         خلفية العمل الفني) فالأيقونة تجلس على خلفيتها الطبيعية —
+         وبعد النظام يجلس الإطار على windowBackground ذاته
+         (launch_background بطبقتيه) فالانطلاقة وجه واحد من أول
+         إطار للنظام حتى أول إطار فلاتر. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/diqqah_launch_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

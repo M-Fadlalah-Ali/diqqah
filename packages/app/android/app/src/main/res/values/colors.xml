@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- س229 (توحيد الانطلاقة بالعمل الفني الجديد): لون خلفية
+         الانطلاقة الفحمي (30,30,30) — خلفية العمل الفني الديواني
+         ذاتها (icon-master بس228). مورد قولوني واحد لكل مستخدميه:
+         launch_background بطبقتيه وواجهة أندرويد 12+ (values-v31). -->
+    <color name="diqqah_launch_bg">#1E1E1E</color>
+</resources>

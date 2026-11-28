@@ -169,6 +169,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _lockPass1 = TextEditingController();
   final _lockPass2 = TextEditingController();
 
+  // ── د11 (س229/D-225 الجزء الأول): مواد مفاتيح الخزنة — جذر الجهاز
+  // العشوائي ورمز الاسترداد المطبوع مرة واحدة: بلا قفل تُكتب النسخ
+  // الجديدة بجيل v4 (تُفك هنا صامتاً وبرمز الاسترداد على جهاز آخر).
+  // فشل قراءة الخزنة = بلا مواد فتنخفض النسخ v2 موثقة (عرف س149 عينه).
+  final VaultBackupKeys _vaultStore = VaultBackupKeys();
+  BackupVaultKeys? _vaultKeys;
+
   /// المستخدم الحالي بحملة البطاقة — فحص حضور الجلسة حصراً بعد
   /// س212 (البلاطة والكلمة انتقلا إلى بوابة الجهاز فلا منسدلة هنا).
   AppUser? _currentUser;
@@ -212,6 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadIdleMinutes();
     _loadSession();
     _loadBackupLock();
+    _loadVaultKeys();
   }
 
   /// س213 (D-217): قراءة المدة النافذة عند الفتح وبعد كل استعادة.
@@ -234,6 +242,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (!mounted) return;
     setState(() => _backupLock = lock);
+  }
+
+  /// د11: مواد الخزنة عند الفتح — تولَّد إن غابت (أول تشغيل بهذه
+  /// الشاشة أو قبل أول نسخة) فبطاقة الرمز تظهر فوراً، وقراءتها الفاشلة
+  /// (قناة غائبة بالاختبارات) = بلا مواد فتنخفض النسخ v2 موثقة (نمط
+  /// _loadBackupLock عينه — صامتة لا تكسر الافتتاح).
+  Future<void> _loadVaultKeys() async {
+    BackupVaultKeys? keys;
+    try {
+      keys = await _vaultStore.loadOrCreate();
+    } catch (_) {
+      keys = null;
+    }
+    if (!mounted) return;
+    setState(() => _vaultKeys = keys);
   }
 
   /// تكليف 2026-11-13 §7: جلسة القارئ — بوابة بطاقة النسخ المجدولة
@@ -748,15 +771,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// إزالة القفل: النسخ الجديدة تعود لجيل v2 بمفتاح البرنامج —
-  /// والمقفلة القائمة تبقى بكلمتها ورمزها (تُفك بهما لا بشيء من هنا).
+  /// د11: قراءة الخزنة عند الاستعادة — استدعاء حي لا لقطة (نمط loadLock
+  /// بالمستودع): فاشلة = null فمسار الجيل يطلب الرمز المكتوب.
+  Future<BackupVaultKeys?> _tryLoadVault() async {
+    try {
+      return await _vaultStore.load();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// د11: عرض رمز استرداد الخزنة — يعيد طباعته عند الطلب (أما الطباعة
+  /// التلقائية فمرة واحدة عند أول تشغيل من جذر الإقلاع — main.dart)،
+  /// بعرف الصدق ذاته: يبقى قابلاً للعرض والنسخ من هنا دائماً.
+  Future<void> _viewVaultRecoveryCode() async {
+    final keys = _vaultKeys;
+    if (keys == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('رمز استرداد الخزنة (جيل v4)'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'يفك نسخ الجيل الرابع على جهاز آخر غير هذا: ثبّت التطبيق '
+                'ثم اكتب هذا الرمز بحقل كلمة المرور عند الاستعادة.\n'
+                'اكتبه ورقياً خارج الجهاز — نسخ هذا الجهاز تُفك صامتة بلا '
+                'أي رمز.'),
+            const SizedBox(height: 12),
+            SelectableText(keys.recoveryCode,
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.bold,
+                    letterSpacing: 1.5)),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(
+                  ClipboardData(text: keys.recoveryCode));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('نُسخ الرمز للحافظة')),
+              );
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('نسخ'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('حسناً'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// إزالة القفل: النسخ الجديدة تعود لجيل الخزنة v4 (مفتاح هذا الجهاز
+  /// ورمز الاسترداد) — والمقفلة القائمة تبقى بكلمتها ورمزها (تُفك بهما
+  /// لا بشيء من هنا).
   Future<void> _clearBackupLock() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('إزالة قفل النسخ؟'),
         content: const Text(
-            'النسخ الجديدة تُكتب بمفتاح البرنامج (جيل v2) كما قبل القفل. '
+            'النسخ الجديدة تُكتب بمفتاح هذا الجهاز (جيل الخزنة v4): '
+            'تُفك هنا صمتاً وبرمز الاسترداد على جهاز آخر. '
             'النسخ المقفلة القائمة تبقى بكلمة مرورها ورمز استردادها '
             'ولا تتأثر بشيء.'),
         actions: [
@@ -820,6 +902,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // كما وُلد لا يُلمس (VACUUM INTO/س-01) فلا انتفاخ ولا كسر ذرية.
       // P1-أ/P1-ب (س149): قفل الخزنة موجود = النسخة وملف صورها بجيل
       // v3 المقفل، ومفتاح الصور يفك الملفات المشفرة عند الجمع.
+      // د11 (س229): وبلا قلم ومواد الخزنة حاضرة = جيل v4 (فتح صامت
+      // هنا وبرمز الاسترداد على جهاز آخر — N-005 يلتئم).
       await backupTo(
         widget.db,
         target,
@@ -827,6 +911,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         includeImages: includeImages,
         imagesDir: Directory(imagesDirFor(widget.dbPath)),
         lock: _encryptBackup ? _backupLock : null,
+        vaultKeys:
+            _encryptBackup && _backupLock == null ? _vaultKeys : null,
         imagesCipher: ItemImagesStore.cipher,
       );
       // تكليف 2026-11-13: تبنّي النسخة اليدوية بالكتالوج الجانبي —
@@ -850,8 +936,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? 'ملف واحد للقاعدة كاملة — مقفلة بكلمة مرورك '
                           '(جيل v3): تُفك بكلمة المرور أو رمز الاسترداد '
                           'على أي جهاز'
-                      : 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح البرنامج — '
-                          'تُفتح داخل التطبيق نفسه فحسب على أي جهاز'),
+                      : _vaultKeys != null
+                          ? 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح هذا '
+                              'الجهاز (جيل v4): تُفك هنا صمتاً وبرمز '
+                              'الاسترداد على جهاز آخر'
+                          : 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح '
+                              'البرنامج (جيل v2): تُفتح داخل التطبيق نفسه '
+                              'فحسب على أي جهاز'),
               const SizedBox(height: 8),
               // س-129: تصريح محتوى النسخة بالصور لا صمت أبداً.
               Text(hasImagesFile
@@ -954,23 +1045,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // (نفس الجهاز يفتح صامتاً) — وفشلها أو غيابها يعيد المحاولة بما
       // كتبه المالك (الحقل يقبل الكلمة أو رمز الاسترداد، وكلتاهما
       // تُجرّبان بوسم GCM حاكم). v1/v2 بمساريهما القديمين حرفاً.
+      // د11 (س229): وجيل الخزنة v4 يُفك بمفتاح هذا الجهاز صمتاً —
+      // وعلى جهاز آخر يكتب المالك رمز الاسترداد بالحقل ذاته.
       final typed = _restorePassword.text.isEmpty ? null : _restorePassword.text;
       final stored = typed == null ? await _secrets.loadLock() : null;
+      final storedVault = typed == null ? await _tryLoadVault() : null;
       try {
         candidate = await prepareRestore(
           path,
           password: typed ?? stored?.password,
           recoveryCode: typed ?? stored?.recoveryCode,
+          vaultRootKey: storedVault?.rootKey,
           appSchemaVersion: widget.db.schemaVersion,
         );
       } on BackupCipherException {
-        if (typed == null && stored == null) rethrow;
+        if (typed == null && stored == null && storedVault == null) rethrow;
         if (typed == null) rethrow; // القفل المخزن خالف — بلا بديل مكتوب
         // إعادة المحاولة بما كتبه المالك وحده لا فوق أسرار الخزنة.
         candidate = await prepareRestore(
           path,
           password: typed,
           recoveryCode: typed,
+          vaultRootKey: storedVault?.rootKey,
           appSchemaVersion: widget.db.schemaVersion,
         );
       }
@@ -1023,6 +1119,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           candidate: candidate,
           currentDbPath: widget.dbPath,
           imagesDir: currentImages,
+          vaultKeys: storedVault,
           imagesCipher: ItemImagesStore.cipher,
         );
       } finally {
@@ -1188,13 +1285,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _busy = true);
       // P1-أ/P1-ب (س149): مواد الفك كما في الاستعادة الكاملة — القفل
       // المخزن صامتاً ثم المكتوب، والكتابة بمفتاح هذا الجهاز.
+      // د11 (س229): ونسخ الخزنة v4 بمفتاح هذا الجهاز (أو برمز
+      // الاسترداد المكتوب من جهاز آخر).
       final typed = _restorePassword.text.isEmpty ? null : _restorePassword.text;
       final stored = typed == null ? await _secrets.loadLock() : null;
+      final storedVault = typed == null ? await _tryLoadVault() : null;
       final count = await restoreImagesFrom(
         path,
         Directory(imagesDirFor(widget.dbPath)),
         password: typed ?? stored?.password,
         recoveryCode: typed ?? stored?.recoveryCode,
+        vaultRootKey: storedVault?.rootKey,
         imagesCipher: ItemImagesStore.cipher,
       );
       if (!mounted) return;
@@ -1698,8 +1799,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
                   // ── P1-أ (س149/D-210): قفل النسخ بكلمة مستخدم اختيارية
-                  // ورمز استرداد — بلا قفل الجيل v2 كما هو، وبقفل الجيل
-                  // v3 المقفل بكلمة المالك نفسها.
+                  // ورمز استرداد — بلا قفل الجيل v4 بمفاتيح الخزنة (د11)
+                  // وبقفل الجيل v3 المقفل بكلمة المالك نفسها.
                   const Divider(height: 24),
                   Row(
                     children: [
@@ -1718,8 +1819,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _backupLock != null
                               ? 'النسخ مقفلة بكلمة مرور (جيل v3) — تُفك '
                                   'بالكلمة أو رمز الاسترداد'
-                              : 'النسخ بلا كلمة مرور (جيل v2 بمفتاح '
-                                  'البرنامج) — القفل اختياري',
+                              : _vaultKeys != null
+                                  ? 'النسخ بمفتاح هذا الجهاز (جيل الخزنة '
+                                      'v4) — تُفك هنا صمتاً وبرمز '
+                                      'الاسترداد على جهاز آخر — القفل '
+                                      'بكلمة اختياري فوقها'
+                                  : 'النسخ بلا كلمة مرور (جيل v2 بمفتاح '
+                                      'البرنامج) — القفل اختياري',
                         ),
                       ),
                     ],
@@ -1753,6 +1859,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ],
                   ),
+                  // ── د11 (س229/D-225 الجزء الأول): بطاقة رمز الخزنة —
+                  // إعادة عرض الرمز المطبوع مرة واحدة عند أول تشغيل
+                  // (بعرف الصدق: يبقى قابلاً للعرض والنسخ دائماً).
+                  if (_vaultKeys != null) ...[
+                    const Divider(height: 24),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.shield_outlined,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                              'رمز استرداد الخزنة — يُطلب مرة واحدة عند أول '
+                              'تشغيل، ويعاد عرضه من هنا (يفك نسخ v4 على '
+                              'جهاز آخر)'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _busy ? null : _viewVaultRecoveryCode,
+                          icon: const Icon(Icons.key, size: 18),
+                          label: const Text('عرض الرمز'),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _busy ? null : _backup,
@@ -1803,7 +1936,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     decoration: const InputDecoration(
                       labelText:
                           'كلمة المرور أو رمز الاسترداد — للنسخ القديمة '
-                          'والمقفلة (الأخرى تُفتح تلقائياً)',
+                          'والمقفلة ونسخ جهاز آخر (نسخ هذا الجهاز '
+                          'تُفتح تلقائياً)',
                       border: OutlineInputBorder(),
                     ),
                   ),

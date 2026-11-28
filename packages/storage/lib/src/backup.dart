@@ -46,6 +46,13 @@ import 'file_encryption.dart';
 /// v2 بمفتاح البرنامج كما كان. P1-ب: [imagesCipher] مفتاح الجهاز
 /// لملفات الصور الحية — الجمع يفك الملفات المشفرة فتحمل النسخة نص
 /// الصور الصريح داخل غلافها (تُفك على أي جهاز).
+///
+/// د11 (س229/D-225 الجزء الأول): [vaultKeys] مواد مفاتيح الخزنة —
+/// بلا قفل (الجيل الأعلى أولوية: v3 ثم v4 ثم v2) تُكتب النسخة وملف
+/// صورها المجاور **بجيل v4**: DEK مغلّف بسجل مفتاح الخزنة (فتح صامت
+/// على الجهاز ذاته) وسجل رمز الاسترداد (الفتح على أي جهاز آخر —
+/// N-005 يلتئم بالرمز بلا كسر). غياب القفل والمواد معاً = v2 بمفتاح
+/// البرنامج (انخفاض موثق لا صمت — نمط عرف س149 ذاته بالخزنة الفاشلة).
 Future<String> backupTo(
   DiqqahDatabase db,
   String targetPath, {
@@ -54,6 +61,7 @@ Future<String> backupTo(
   bool includeImages = false,
   Directory? imagesDir,
   BackupLock? lock,
+  BackupVaultKeys? vaultKeys,
   ImageFileCipher? imagesCipher,
 }) async {
   final temp = File('$targetPath.tmp');
@@ -93,17 +101,35 @@ Future<String> backupTo(
         cipher?.iterations ?? BackupCipher().iterations;
     final lockPassword = lock?.password;
     final lockRecovery = lock?.recoveryCode;
+    // د11: مواد الخزنة حقولاً خاماً تعبر العزل (نمط القفل بعينه —
+    // BackupCipher نقية البايتات فتُبنى داخل العزل بعينها).
+    final vaultRoot = (lockPassword == null || lockRecovery == null) &&
+            vaultKeys != null
+        ? vaultKeys.rootKey
+        : null;
+    final vaultRecovery = vaultKeys?.recoveryCode;
     final (hash, out) = await Isolate.run(() async {
       final hash = sha256HexOf(bytes);
       if (!encrypted) return (hash, List<int>.from(bytes));
       final resolved = BackupCipher(iterations: cipherIterations);
-      final encryptedOut = (lockPassword != null && lockRecovery != null)
-          ? await resolved.encryptLocked(
-              bytes,
-              password: lockPassword,
-              recoveryCode: lockRecovery,
-            )
-          : await resolved.encrypt(bytes);
+      final List<int> encryptedOut;
+      if (lockPassword != null && lockRecovery != null) {
+        encryptedOut = await resolved.encryptLocked(
+          bytes,
+          password: lockPassword,
+          recoveryCode: lockRecovery,
+        );
+      } else if (vaultRoot != null && vaultRecovery != null) {
+        // د11: بلا قفل وماللخزنة حاضرة — جيل الخزنة v4.
+        encryptedOut = await resolved.encryptVaulted(
+          bytes,
+          vaultRootKey: vaultRoot,
+          recoveryCode: vaultRecovery,
+        );
+      } else {
+        // انخفاض v2 موثق أعلاه (مواد غائبة/ناقصة).
+        encryptedOut = await resolved.encrypt(bytes);
+      }
       return (hash, encryptedOut);
     });
     plainSha256 = hash;
@@ -113,6 +139,7 @@ Future<String> backupTo(
   }
   // س-129: ملف الصور المجاور بنفس غلاف التشفير — بعد نجاح ملف القاعدة
   // حصراً كي لا يبقى ملف صور يتيمة لنسخة فشلت. P1-أ: نفس القفل v3/v2.
+  // د11: وبمواد الخزنة بلا قفل — جيل v4 عينه (نفس الأولوية حرفاً).
   if (includeImages && imagesDir != null) {
     final bundle = await collectImagesBundle(imagesDir, cipher: imagesCipher);
     if (bundle != null) {
@@ -124,7 +151,13 @@ Future<String> backupTo(
                   password: lock.password,
                   recoveryCode: lock.recoveryCode,
                 )
-              : await resolved.encrypt(bundle))
+              : vaultKeys != null
+                  ? await resolved.encryptVaulted(
+                      bundle,
+                      vaultRootKey: vaultKeys.rootKey,
+                      recoveryCode: vaultKeys.recoveryCode,
+                    )
+                  : await resolved.encrypt(bundle))
           : bundle;
       await File(imagesSiblingPath(targetPath))
           .writeAsBytes(wrapped, flush: true);
@@ -182,10 +215,16 @@ class RestoreCandidate {
 /// [recoveryCode] يكمل [password]، والمستدعى يمرر أسرار خزنة الجهاز
 /// أولاً (نفس الجهاز يفتح صامتاً) أو ما كتبه المستخدم (الحقل يقبل
 /// الكلمة أو الرمز فكلاهما يُجرّب بوسم GCM حاكم). v1/v2 كما كانت حرفاً.
+///
+/// د11 (س229/D-225 الجزء الأول): الجيل الرابع v4 بمفاتيح الخزنة —
+/// [vaultRootKey] مفتاح خزنة هذا الجهاز: حاضراً يُفك صامتاً (نفس
+/// الجهاز)، وغائباً يُطلب رمز الاسترداد المكتوب (جهاز آخر — فسيناريو
+/// N-005 يلتئم بالرمز بلا كسر). v1/v2/v3 بمساراتها القائمة حرفاً.
 Future<RestoreCandidate> prepareRestore(
   String backupPath, {
   String? password,
   String? recoveryCode,
+  List<int>? vaultRootKey,
   required int appSchemaVersion,
   BackupCipher? cipher,
 }) async {
@@ -203,6 +242,13 @@ Future<RestoreCandidate> prepareRestore(
         plain = await resolvedCipher.decryptLocked(
           blob,
           password: password,
+          recoveryCode: recoveryCode,
+        );
+      } else if (ver == BackupCipher.vaultFormatVersion) {
+        // د11: جيل الخزنة — مفتاح الجهاز صامتاً أو رمز الاسترداد.
+        plain = await resolvedCipher.decryptVaulted(
+          blob,
+          vaultRootKey: vaultRootKey,
           recoveryCode: recoveryCode,
         );
       } else if (ver == BackupCipher.formatVersion) {
@@ -308,6 +354,7 @@ Future<String> applyRestore({
   required String currentDbPath,
   Directory? imagesDir,
   String? sourcePath,
+  BackupVaultKeys? vaultKeys,
   ImageFileCipher? imagesCipher,
 }) async {
   // D-054: معرّف الجهاز المستقر عليه يُلتقط قبل الغلق — قد يُولد الآن
@@ -334,24 +381,42 @@ Future<String> applyRestore({
   // كلمة — سلوك الكتالوج والبوابة والتدوير بلا تغيير: المسح بالاسم
   // وقيمة restore.gate كما هي) — فتُسد فتحة اللقطة النصية الشقيقة
   // للقاعدة المشفرة بلا كسر سيناريو الرجوع.
+  //
+  // د11 (س229/D-225 الجزء الأول): وماللخزنة حاضرة تُغلَّف اللقطة
+  // بجيل الخزنة v4 عينه (فتح صامت على الجهاز ذاته وبرمز الاسترداد
+  // على جهاز آخر) — زر التراجع يمرر مفتاح خزنته بprepareRestore
+  // فيفتحها صامتاً، والغائب = v2 كما كانت حرفاً.
   final snapshotKey = db.dbKeyHex;
   if (snapshotKey != null && !fileIsPlaintextSqlite(snapshotPath)) {
     await decryptImageInPlace(snapshotPath, snapshotKey);
   }
-  final snapshotSealed =
-      await BackupCipher().encrypt(await File(snapshotPath).readAsBytes());
+  final snapshotPlain = await File(snapshotPath).readAsBytes();
+  final snapshotSealed = vaultKeys != null
+      ? await BackupCipher().encryptVaulted(
+          snapshotPlain,
+          vaultRootKey: vaultKeys.rootKey,
+          recoveryCode: vaultKeys.recoveryCode,
+        )
+      : await BackupCipher().encrypt(snapshotPlain);
   final snapshotTmp = File('$snapshotPath.wrap-tmp');
   await snapshotTmp.writeAsBytes(snapshotSealed, flush: true);
   await snapshotTmp.rename(snapshotPath);
 
   // س-130: لقطة الصور المرافقة — طريق الرجوع يحفظ الصور ذاته (D-124).
-  // س227: الحزمة مغلَّفة بالجيل ذاته v2 — _decodeImagesBlob يفك الجيل
+  // س227: الحزمة مغلَّفة بالجيل ذاته — _decodeImagesBlob يفك الجيل
   // الجاري بلا كلمة فالتراجع يعمل كما كان، والصور لم تعد نصاً صريحاً
-  // بجوار نسخة القاعدة على القرص.
+  // بجوار نسخة القاعدة على القرص. د11: وv4 عينه بماللخزنة.
   if (imagesDir != null) {
     final bundle = await collectImagesBundle(imagesDir, cipher: imagesCipher);
     if (bundle != null) {
-      final sealedBundle = await BackupCipher().encrypt(bundle);
+      final resolved = BackupCipher();
+      final sealedBundle = vaultKeys != null
+          ? await resolved.encryptVaulted(
+              bundle,
+              vaultRootKey: vaultKeys.rootKey,
+              recoveryCode: vaultKeys.recoveryCode,
+            )
+          : await resolved.encrypt(bundle);
       await File(imagesSiblingPath(snapshotPath))
           .writeAsBytes(sealedBundle, flush: true);
     }
@@ -679,11 +744,14 @@ Future<int> replaceImagesDir(
 /// أي شكل غريب رفض آمن واحد (فحص قبل أي لمس — F-013 روحاً).
 /// P1-أ (س149): ملف الصور المقفل يُفك بكلمة المرور أو رمز الاسترداد
 /// ذاتيهما اللذين فكا ملف القاعدة (نفس مواد prepareRestore).
+/// د11 (س229): وملف الصور بجيل الخزنة v4 يُفك بمفتاح هذا الجهاز
+/// أو برمز الاسترداد — نفس مواد ملف القاعدة عينها.
 Future<List<(String, List<int>)>> _decodeImagesBlob(
   List<int> blob,
   BackupCipher cipher, {
   String? password,
   String? recoveryCode,
+  List<int>? vaultRootKey,
 }) async {
   List<int> plain;
   switch (BackupCipher.identify(blob)) {
@@ -693,6 +761,12 @@ Future<List<(String, List<int>)>> _decodeImagesBlob(
         plain = await cipher.decryptLocked(
           blob,
           password: password,
+          recoveryCode: recoveryCode,
+        );
+      } else if (ver == BackupCipher.vaultFormatVersion) {
+        plain = await cipher.decryptVaulted(
+          blob,
+          vaultRootKey: vaultRootKey,
           recoveryCode: recoveryCode,
         );
       } else {
@@ -725,12 +799,14 @@ Future<List<(String, List<int>)>> _decodeImagesBlob(
 /// س-130: نسخة صور مستقلة — أداة مكمّلة لا بديل (D-124): مجلد الصور
 /// وحده في ملف `.diqqah.images` بنفس التغليف، وتُستعاد منفردة فتستبدل
 /// مجلد الصور بلا مساس بالبيانات. P1-أ/P1-ب: نفس القفل ومفتاح الصور.
+/// د11 (س229): ونفس أولوية الأجيال — قفل v3 ثم مواد خزنة v4 ثم v2.
 Future<void> backupImagesTo(
   Directory imagesDir,
   String targetPath, {
   bool encrypted = true,
   BackupCipher? cipher,
   BackupLock? lock,
+  BackupVaultKeys? vaultKeys,
   ImageFileCipher? imagesCipher,
 }) async {
   final bundle = await collectImagesBundle(imagesDir, cipher: imagesCipher);
@@ -746,7 +822,13 @@ Future<void> backupImagesTo(
             password: lock.password,
             recoveryCode: lock.recoveryCode,
           )
-        : await resolved.encrypt(bundle);
+        : vaultKeys != null
+            ? await resolved.encryptVaulted(
+                bundle,
+                vaultRootKey: vaultKeys.rootKey,
+                recoveryCode: vaultKeys.recoveryCode,
+              )
+            : await resolved.encrypt(bundle);
   } else {
     wrapped = bundle;
   }
@@ -761,6 +843,7 @@ Future<int> restoreImagesFrom(
   BackupCipher? cipher,
   String? password,
   String? recoveryCode,
+  List<int>? vaultRootKey,
   ImageFileCipher? imagesCipher,
 }) async {
   final blob = await File(imagesFilePath).readAsBytes();
@@ -769,6 +852,7 @@ Future<int> restoreImagesFrom(
     cipher ?? BackupCipher(),
     password: password,
     recoveryCode: recoveryCode,
+    vaultRootKey: vaultRootKey,
   );
   return replaceImagesDir(imagesDir, files, cipher: imagesCipher);
 }

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- س227 (المرحلة صفر د6): الانطلاقة بالهوية في الوضع الليلي كذلك —
-     خلفية بني الهوية العميق والكلمة الوسطة (نمط النهار بعينه فلا
-     وميض تبديل بين الانطلاقة والتطبيق). -->
+<!-- س229 (توحيد الانطلاقة): الوضع الليلي بالنمط ذاته — الخلفية
+     الفحمية والعمل الفني الجديد (لا تبديل بين الليل والنهار فالعمل
+     يحمل خلفيته الخاصة — توحيد لا انقسام). -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="?android:colorBackground" />
     <item>
-        <color android:color="#8B5A3C" />
+        <color android:color="#1E1E1E" />
     </item>
     <item>
         <bitmap
             android:gravity="center"
-            android:src="@drawable/diqqah_splash_wordmark" />
+            android:src="@drawable/diqqah_splash_art" />
     </item>
 </layer-list>

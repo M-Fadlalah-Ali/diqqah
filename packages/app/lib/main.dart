@@ -2,6 +2,7 @@ import 'dart:async' show unawaited;
 import 'dart:io' show Directory;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:diqqah_storage/diqqah_storage.dart';
@@ -158,6 +159,11 @@ class _AppGateState extends State<AppGate> {
   /// بوابة الجهاز لا الرئيسية فلا ثقب عودة بعد موت العملية، وأفعال
   /// الثلاثة بالرئيسية تعيد كتابتها وتحمل البوابة بغلٍّ واحد هنا.
   bool _sessionLocked = false;
+
+  /// د11 (س229/D-225 الجزء الأول): حارس الطباعة الواحدة لرمز استرداد
+  /// الخزنة — مرة واحدة لكل إقلاع جذر على الأكثر، والراية القاطعة
+  /// بخزنة الجهاز (لا هذه الراية) فلا يتكرر بكل بناء.
+  bool _vaultRecoveryPromptTried = false;
 
   /// D-197 (دفعة التحصين الافتتاحي — س96): فشل الافتتاح المعروض بدل
   /// الدورة الأبدية — نصه الحقيقي كامل على شاشة الخطأ.
@@ -324,19 +330,25 @@ class _AppGateState extends State<AppGate> {
       // س216: لسان الصدق أثناء الافتتاح — أول فتح بعد تحديث يحمل
       // ترحيلة وفهارس لمرة واحدة، فالنص يفسر أي انتظار بدل صمتٍ
       // يوحي بالتوقف (رسالة أندرويد التي رآها المالك بالحياة b71).
-      return const Scaffold(
+      // س229 (توحيد الانطلاقة بالعمل الفني الجديد): خلفية الانطلاقة
+      // الفحمية (30,30,30) ذاتها وأثر الهوية الفاتح — فلا وميض أبيض
+      // بين انطلاقة النظام المشغلة بالعمل الجديد وأول إطار هنا.
+      return Scaffold(
+        backgroundColor: const Color(0xFF1E1E1E),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
+              const CircularProgressIndicator(
+                  color: kDarkIdentityBrown),
+              const SizedBox(height: 16),
               Padding(
-                padding: EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Text(
                   'يُفتح قاعدة بياناتك… أول فتح بعد التحديث يستغرق '
                   'وقتاً أطول مرة واحدة (تحسين المخطط والفهارس)',
                   textAlign: TextAlign.center,
+                  style: const TextStyle(color: kDarkIdentityBrown),
                 ),
               ),
             ],
@@ -372,11 +384,79 @@ class _AppGateState extends State<AppGate> {
         onUnlocked: () => _setSessionLocked(false),
       );
     }
+    if (!_vaultRecoveryPromptTried) {
+      // مرة واحدة لكل إقلاع — والراية القاطعة بخزنة الجهاز لا هنا.
+      _vaultRecoveryPromptTried = true;
+      _revealVaultRecoveryOnce();
+    }
     return HomeScreen(
       db: db,
       dbPath: dbPath,
       onRestored: _onRestored,
       onLocked: () => _setSessionLocked(true),
     );
+  }
+
+  /// د11 (س229/D-225 الجزء الأول): الطباعة الواحدة لرمز استرداد الخزنة
+  /// — عند أول دخول للرئيسية (بعد إعداد جديد أو أول إقلاع بعد التحديث):
+  /// إن لم يُطبع بعد تُقرأ المواد (تُولَّد إن غابت — أول تشغيل حقيقي)
+  /// ويُعرض الرمز مرة واحدة بحوار «سجّلته» (نسخ + إثبات) ثم يُوسم
+  /// بالخزنة فلا يعود تلقائياً — ويعاد عرضه من الإعدادات متى شاء
+  /// المالك (عرف الصدق الموثق بv3 ذاته). الإنتاج حصراً (قاعدة محقونة
+  /// = اختبار فلا قناة خزنة هنا)، وكل فشل صامت موثق: الخزنة الغائبة
+  /// تعني نسخاً بجيل v2 المنخفض الموثق بالفحص والإعدادات.
+  Future<void> _revealVaultRecoveryOnce() async {
+    if (widget.db != null) return; // اختبار محقون — لا خزنة هنا.
+    try {
+      final store = VaultBackupKeys();
+      if (await store.recoveryRevealed()) return;
+      final keys = await store.loadOrCreate();
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('رمز استرداد نسخك — سجّله خارج الجهاز'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'نسخك الجديدة (جيل الخزنة v4) تُفك على هذا الجهاز '
+                  'تلقائياً — وعلى جهاز آخر بهذا الرمز فقط. اكتبه ورقياً '
+                  'الآن واحفظه خارج الجهاز: فقد الخزنة بلا رمز يعني '
+                  'الرجوع لنسخك القديمة.\n'
+                  'يبقى الرمز قابلاً للعرض من الإعدادات متى شئت.'),
+              const SizedBox(height: 12),
+              SelectableText(keys.recoveryCode,
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5)),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(
+                    ClipboardData(text: keys.recoveryCode));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('نُسخ الرمز للحافظة')),
+                );
+              },
+              icon: const Icon(Icons.copy),
+              label: const Text('نسخ'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('سجّلته'),
+            ),
+          ],
+        ),
+      );
+      await store.markRecoveryRevealed();
+    } catch (_) {
+      // خزنة غائبة/فاشلة — انخفاض v2 موثق لا صمت استثناء هنا.
+    }
   }
 }

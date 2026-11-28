@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- س227 (المرحلة صفر د6 من خارطة طريق التقرير الاستشاري): الانطلاقة
-     بهوية المشروع — بني الهوية العميق (#8B5A3C) والكلمة الوسطة بحبر
-     الهوية الفاتح (diqqah_splash_wordmark) بدل الأبيض الافتراضي،
-     والوضع الليلي نظيره أدناه (drawable-v21). -->
+<!-- س229 (توحيد الانطلاقة بالعمل الفني الجديد بكلمة المالك «وحّد
+     الانطلاقة»): الخلفية الفحمية (30,30,30) ذاتها خلفية العمل
+     الفني الديواني الجديد (diqqah_splash_art — من icon-master بس228
+     الذي صار أيقونة) فالانطلاقة والأيقونة وجهان لعمل واحد بدل
+     البني والكلمة الوسطة القديمة (س227). الوضع الليلي نظيره
+     أدناه (drawable-v21) وواجهة أندرويد 12+ بvalues-v31. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@android:color/white" />
     <item>
-        <color android:color="#8B5A3C" />
+        <color android:color="#1E1E1E" />
     </item>
     <item>
         <bitmap
             android:gravity="center"
-            android:src="@drawable/diqqah_splash_wordmark" />
+            android:src="@drawable/diqqah_splash_art" />
     </item>
 </layer-list>
