@@ -26,6 +26,7 @@ import 'context_menu.dart';
 import 'hijri_display.dart';
 import 'list_display.dart';
 import 'empty_state.dart';
+import 'l10n/app_strings.dart';
 
 /// قراءة بايتات صورة صنف للمطبوع — المسار النسبي مع جذر المجلد، والغائب
 /// null فتعرض الصورة النائب البصري (س-127: بلا صورة يعرض النائب).
@@ -66,10 +67,10 @@ IconData invoiceKindIcon(InvoiceKind kind) => switch (kind) {
 /// مربع «مستلم» D-131 على كل الأنواع بكلمة المالك): لسان البيع المعتمد
 /// باقٍ حرفاً والأنواع الأخرى بلسان الاستلام لا التسليم.
 String receiptLineStatusFor(InvoiceKind kind, bool delivered) => delivered
-    ? 'مستلم'
+    ? S.receivedLabel
     : kind == InvoiceKind.sale
-        ? 'بانتظار التسليم'
-        : 'بانتظار الاستلام';
+        ? S.awaitingDelivery
+        : S.awaitingReceipt;
 
 /// بناء قسيمة الفاتورة — نقطة واحدة لكل مسارات إخراج الفاتورة (س-133/
 /// D-127، دفعة 11): زر التفاصيل النصي وزر القائمة السريع والمشاركة كلها
@@ -90,7 +91,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
 }) async {
   final invoice = await db.invoiceById(invoiceId);
   if (invoice == null) {
-    throw StateError('لا فاتورة بهذا المعرف');
+    throw StateError(S.noInvoiceWithId);
   }
   final lines = await db.invoiceLines(invoiceId);
   final items = await db.select(db.items).get();
@@ -143,7 +144,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     ];
     rowLetters = [
       for (final line in lines)
-        itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
+        itemById[line.itemId]?.name ?? S.itemWithNumber(line.itemId),
     ];
   }
 
@@ -153,21 +154,21 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   // س-153/D-151 (دفعة 15): وعمود «ملاحظة» بقسيمة البيع حصراً حين
   // وُجدت ملاحظة تسليم على أسطرها — فلا عمود فارغ يعمّم الضجيج.
   final columns = <String>[
-    'الصنف',
-    'الكمية',
-    'سعر الوحدة',
+    S.itemLabel,
+    S.quantityLabel,
+    S.unitPriceLabel,
     // س50/5 (س-161/D-159 دفعة 17): «المبلغ» — عرف البرمجيات
     // الشهيرة لعمود مبلغ السطر، و«الإجمالي» باق للتذييل كله.
-    'المبلغ',
+    S.amountLabel,
     // الدفعة 21 (F-168): «مستلم» بكل الأنواع بعد تعميم العلم —
     // وس119: بإمكان قالب النوع إخفاؤه من الإعدادات.
-    if (showDelivered) 'مستلم',
-    if (hasDeliveryNotes) 'ملاحظة',
+    if (showDelivered) S.receivedLabel,
+    if (hasDeliveryNotes) S.noteLabel,
   ];
   final rows = [
     for (final line in lines)
       [
-        itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
+        itemById[line.itemId]?.name ?? S.itemWithNumber(line.itemId),
         // س-10 (الدفعة 30): الكمية بوحدة الاختيار — والسعر لوحتها فلا
         // يُعرض بالأساسية رقمٌ لا يلتقي سعرُه (وبالأساسية مطابق القائم).
         '${line.qty}',
@@ -175,8 +176,8 @@ Future<Uint8List> buildInvoicePrintoutBytes(
         formatMinorAmount(line.lineTotalDocMinor),
         if (showDelivered)
           line.delivered
-              ? (isSale ? 'سُلِّم' : 'مستلم')
-              : (isSale ? 'بانتظار التسليم' : 'بانتظار الاستلام'),
+              ? (isSale ? S.deliveredShort : S.receivedLabel)
+              : (isSale ? S.awaitingDelivery : S.awaitingReceipt),
         if (hasDeliveryNotes) line.deliveryNote ?? '—',
       ],
   ];
@@ -233,7 +234,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
   // «بالأساسية تُستبدل برمز العملة — ل.س تُكتب مباشرة أو $») — الرمز
   // من جدول العملات لا لفظ ثابت، والغريب الكود يبقى كوده حرفاً.
   final docSymbol = currencySymbol(currencyFields?['code'] as String?);
-  final docSuffix = docSymbol.isEmpty ? 'بعملة المستند' : docSymbol;
+  final docSuffix = docSymbol.isEmpty ? S.inDocumentCurrency : docSymbol;
   final baseSymbol = currencySymbol(baseCode);
   // س-156/D-154 (دفعة 17): المدفوع من محرك المطابقة ذاته — فواتير
   // السندات المرحّلة بوحدات المستند (س50/4 بلفظ المالك:
@@ -264,31 +265,31 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     ].join(' · ');
     return buildDocumentPdf(
       db: db,
-      title: 'إذن تسليم — نسخة أمين المستودع (بلا أسعار)',
+      title: S.deliveryNoteKeeperCopyTitle,
       headerPairs: [
-        ('المستند', invoiceDisplayLabel(invoice)),
-        ('التاريخ', displayDate(invoice.invoiceDate)),
-        ('الطرف', partyName ?? '—'),
+        (S.documentLabel, invoiceDisplayLabel(invoice)),
+        (S.dateLabel, displayDate(invoice.invoiceDate)),
+        (S.partyLabel, partyName ?? '—'),
         if (invoice.narration != null && invoice.narration!.isNotEmpty)
-          ('البيان', invoice.narration!),
+          (S.descriptionLabel, invoice.narration!),
       ],
-      columns: const ['رقم الصنف', 'اسم الصنف', 'الكمية'],
+      columns: const [S.itemNumberLabel, S.itemNameLabel, S.quantityLabel],
       rows: [
         for (final line in lines)
           [
             (itemById[line.itemId]?.sku ?? '').isEmpty
                 ? '—'
                 : itemById[line.itemId]!.sku,
-            itemById[line.itemId]?.name ?? 'صنف #${line.itemId}',
+            itemById[line.itemId]?.name ?? S.itemWithNumber(line.itemId),
             '${line.qty} ${unitNameOf(line)}'.trim(),
           ],
       ],
       rowLeadingImages: rowImages,
       rowPlaceholderLetters: rowLetters,
       footerPairs: [
-        ('مجموع الكميات', totalsText.isEmpty ? '0' : totalsText),
-        ('المسلِّم', '................'),
-        ('المستلِم', '................'),
+        (S.totalQuantities, totalsText.isEmpty ? '0' : totalsText),
+        (S.delivererLabel, '................'),
+        (S.receiverLabel, '................'),
       ],
       format: resolvePageFormat(
         docKind: 'invoice',
@@ -303,16 +304,16 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     db: db,
     title: invoiceDisplayLabel(invoice),
     headerPairs: [
-      ('التاريخ', displayDate(invoice.invoiceDate)),
+      (S.dateLabel, displayDate(invoice.invoiceDate)),
       // س-156/D-154: لسان المالك — «نحن صنفنا الفواتير نقدية وذمة
       // فلتكتب كذلك» (س50/4): السداد بالتصنيف المعتمد عند الإدخال
       // (النقدي بصندوقه والآجل بطرفه — لا صندوق ولا طرف مرفوضان
       // بالمحرك)، والمسودة تُنادى بمسودتها كي لا تُباع ورقة غير
       // مرحّلة بلا إنذار.
-      ('السداد', invoice.cashBoxId != null ? 'نقدية' : 'ذمة'),
-      if (invoice.state == 'draft') ('الحالة', 'مسودة'),
+      (S.paymentLabel, invoice.cashBoxId != null ? S.cashLabel : S.onAccountLabel),
+      if (invoice.state == 'draft') (S.statusLabel, S.draftLabel),
       if (invoice.narration != null && invoice.narration!.isNotEmpty)
-        ('البيان', invoice.narration!),
+        (S.descriptionLabel, invoice.narration!),
     ],
     columns: columns,
     rows: rows,
@@ -321,7 +322,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
     summaryText: summary,
     footerPairs: [
       (
-        'الإجمالي',
+        S.totalLabel,
         '${formatMinorAmount(invoice.totalDocMinor)} $docSuffix',
       ),
       // س-159/D-157 (دفعة 17): المكافئ بغير عملة الأساس حصراً — بعملة
@@ -329,16 +330,16 @@ Future<Uint8List> buildInvoicePrintoutBytes(
       // وتسميته برمز الأساس لا بلفظ «المكافئ الأساسي».
       if (invoice.currencyId != 1)
         (
-          'المكافئ ب$baseSymbol',
+          S.equivalentIn(baseSymbol),
           formatMinorAmount(invoice.totalBaseMinor),
         ),
       // س-156/D-154: المدفوع والباقي بقراءة المحرك — وبرمز العملة.
       (
-        'المدفوع',
+        S.paidLabel,
         '${formatMinorAmount(covered)} $docSuffix',
       ),
       (
-        'الباقي',
+        S.remainingLabel,
         '${formatMinorAmount(invoice.totalDocMinor - covered)} $docSuffix',
       ),
     ],
@@ -390,8 +391,8 @@ Future<Uint8List> buildInvoicePrintoutBytes(
 /// ومردوده معاً أو الشراء ومردوده معاً — والفراغ مدخل الأرشيف المحايد
 /// بكل الأنواع (مرجع الاختبارات والروابط الأخرى).
 enum InvoiceArchiveSide {
-  sales('المبيعات', 'البيع ومردوده'),
-  purchases('المشتريات', 'الشراء ومردوده');
+  sales(S.salesLabel, S.salesAndReturns),
+  purchases(S.purchasesLabel, S.purchasesAndReturns);
 
   /// اسم الجهة بلسان البلاطة — عنوان الشاشة به.
   final String title;
@@ -454,9 +455,9 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
   /// س101: خيارات فلتر الحالة — الثلاثية المألوفة.
   static final List<(String?, String)> _stateChoices = [
-    (null, 'كل الحالات'),
-    ('draft', 'المسودات'),
-    ('posted', 'المرحّلة'),
+    (null, S.allStatuses),
+    ('draft', S.draftsLabel),
+    ('posted', S.postedLabel),
   ];
 
   /// س164: جلسة صاحب الأرشيف — أصحاب بوابة «ترحيل مسودات الآخرين»
@@ -481,24 +482,24 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// يبقى جامعاً بألسنة معلّمة بالجهة فلا خيار بلا تمييز.
   List<(String?, String)> get _kindChoices => switch (widget.initialSide) {
         InvoiceArchiveSide.sales => [
-          (kSideFilterSales, 'المبيعات كلها (البيع ومردوده)'),
+          (kSideFilterSales, S.salesAllFilter),
           (InvoiceKind.sale.storageValue, InvoiceKind.sale.label),
           (InvoiceKind.saleReturn.storageValue, InvoiceKind.saleReturn.label),
         ],
         InvoiceArchiveSide.purchases => [
-          (kSideFilterPurchases, 'المشتريات كلها (الشراء ومردوده)'),
+          (kSideFilterPurchases, S.purchasesAllFilter),
           (InvoiceKind.purchase.storageValue, InvoiceKind.purchase.label),
           (InvoiceKind.purchaseReturn.storageValue,
               InvoiceKind.purchaseReturn.label),
         ],
         null => [
-          (null, 'كل الأنواع'),
-          (kSideFilterSales, 'بيعي (البيع ومردوده)'),
-          (kSideFilterPurchases, 'شرائي (الشراء ومردوده)'),
-          (InvoiceKind.sale.storageValue, 'فاتورة بيع — مبيعات'),
-          (InvoiceKind.saleReturn.storageValue, 'مردود بيع — مبيعات'),
-          (InvoiceKind.purchase.storageValue, 'فاتورة شراء — مشتريات'),
-          (InvoiceKind.purchaseReturn.storageValue, 'مردود شراء — مشتريات'),
+          (null, S.allTypes),
+          (kSideFilterSales, S.salesTypeFilter),
+          (kSideFilterPurchases, S.purchasesTypeFilter),
+          (InvoiceKind.sale.storageValue, S.salesInvoiceType),
+          (InvoiceKind.saleReturn.storageValue, S.salesReturnType),
+          (InvoiceKind.purchase.storageValue, S.purchaseInvoiceType),
+          (InvoiceKind.purchaseReturn.storageValue, S.purchaseReturnType),
         ],
       };
 
@@ -506,10 +507,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// لأن الثنائية تخفي الجزئي (فاتورة سُلّم نصفها تظهر «غير مستلم»
   /// كذباً).
   static final List<(String?, String)> _receiptChoices = [
-    (null, 'الكل'),
-    ('undelivered', 'غير مستلم'),
-    ('partial', 'جزئي'),
-    ('received', 'مكتمل الاستلام'),
+    (null, S.allLabel),
+    ('undelivered', S.notReceived),
+    ('partial', S.partialLabel),
+    ('received', S.fullyReceived),
   ];
 
   @override
@@ -572,21 +573,18 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     final proceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('ترحيل المسودة؟'),
+        title: const Text(S.postDraftTitle),
         content: Text(
-          '${row.displayLabel} بمبلغ '
-          '${formatMinorAmount(row.totalDocMinor)} ${row.currencyCode}.\n'
-          'الترحيل يُرحّل الفاتورة: تمس المخزون والدفتر والذمة '
-          'وتُمنح رقمها النهائي — ولا رجوع بعده إلا بمردود.',
+          S.postDraftBody(row.displayLabel, formatMinorAmount(row.totalDocMinor), row.currencyCode),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('تركها مسودة'),
+            child: const Text(S.keepAsDraft),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('ترحيل الآن'),
+            child: const Text(S.postNow),
           ),
         ],
       ),
@@ -604,8 +602,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       final posted = await widget.db.invoiceById(row.id);
       messenger.showSnackBar(SnackBar(
         content: Text(posted == null || posted.number.isEmpty
-            ? 'رُحّلت الفاتورة'
-            : 'رُحّلت برقم ${posted.number}'),
+            ? S.invoicePosted
+            : S.postedWithNumber(posted.number)),
       ));
       _reload();
       // س119: الترحيل من الأرشيف يفتح أمر الطباعة بنسختَيه أيضاً.
@@ -616,17 +614,17 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       // الرمز DQ-1001 للسجل والمرجع لا نص المستخدم (س204 — م03).
       messenger.showSnackBar(SnackBar(
         content: Text(
-          'رفض الترحيل: ${
+          S.postRejected(
             [for (final err in e.errors) describeInvoiceValidationError(err)]
                 .join(' · ')
-          }',
+          ),
         ),
         duration: const Duration(seconds: 5),
       ));
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoices.post');
       messenger.showSnackBar(SnackBar(
-        content: Text('تعذر الترحيل — $e${dqTag(e)}'),
+        content: Text(S.postFailed(e, dqTag(e))),
       ));
     }
   }
@@ -667,8 +665,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
               // س202: ورقة الجهة بلسان جهتها والمعايد بلسانه القائم.
               Text(
                 widget.initialSide == null
-                    ? 'فاتورة جديدة — اختر النوع بالضغط'
-                    : 'فاتورة جديدة — ${widget.initialSide!.laneLabel}',
+                    ? S.newInvoiceChooseType
+                    : S.newInvoiceOfType(widget.initialSide!.laneLabel),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
@@ -749,7 +747,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoice.quick_print');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -767,13 +765,13 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// الدفعة 21 (F-168): أعمدة أرشيف الفواتير وصفوفه تجميعاً واحداً —
   /// المطبوع والمصدّر صورة العرض ذاتها فلا انحراف (عرف F-166 الموثق).
   static const List<String> _archiveColumns = [
-    'النوع',
-    'الرقم',
-    'التاريخ',
-    'الطرف / الصندوق',
-    'الحالة',
-    'الاستلام',
-    'المبلغ',
+    S.typeLabel,
+    S.numberLabel,
+    S.dateLabel,
+    S.partyOrBoxLabel,
+    S.statusLabel,
+    S.receiptLabel,
+    S.amountLabel,
   ];
 
   static List<List<String>> _archiveRows(List<InvoiceListRow> rows) => [
@@ -800,20 +798,20 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     try {
       final bytes = await buildDocumentPdf(
         db: widget.db,
-        title: 'سجل الفواتير',
+        title: S.invoicesLog,
         headerPairs: const [],
         columns: _archiveColumns,
         rows: _archiveRows(rows),
         footerPairs: [
-          ('عدد الفواتير', '${rows.length}'),
+          (S.invoicesCount, '${rows.length}'),
         ],
         format: resolvePageFormat(docKind: 'report'),
       );
-      await sharePdfBytes(bytes, 'سجل الفواتير.pdf');
+      await sharePdfBytes(bytes, S.invoicesLogPdf);
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoice.archive_print');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -826,16 +824,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final csv = buildCsvSnapshot(
-        title: 'سجل الفواتير',
+        title: S.invoicesLog,
         columns: _archiveColumns,
         rows: _archiveRows(rows),
-        footer: [('عدد الفواتير', '${rows.length}')],
+        footer: [(S.invoicesCount, '${rows.length}')],
       );
-      await shareCsvBytes(csv, 'سجل الفواتير.csv');
+      await shareCsvBytes(csv, S.invoicesLogCsv);
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoice.archive_csv');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد التصدير — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.exportFailed(e, dqTag(e)))),
       );
     }
   }
@@ -846,20 +844,20 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       appBar: AppBar(
         // س202: عنوان الجهة بلسان بلاطتها — المبيعات/المشتريات من البلاطتين
         // والأرشيف المحايد بلسانه القائم.
-        title: Text(widget.initialSide?.title ?? 'الفواتير'),
+        title: Text(widget.initialSide?.title ?? S.invoicesTitle),
         actions: [
           // الدفعة 21 (F-168): طباعة القائمة المفلترة وتصديرها CSV —
           // في الشريط العلوي سطراً مستقلاً لا حشواً بصف فلاتر (درس س67)،
           // وتعطيلهما بلا صفوف فلا زر ميت (عرف زر تسليم الكل).
           IconButton(
-            tooltip: 'طباعة القائمة',
+            tooltip: S.printList,
             icon: const Icon(Icons.picture_as_pdf_outlined),
             onPressed: (_listRows == null || _listRows!.isEmpty)
                 ? null
                 : _printList,
           ),
           IconButton(
-            tooltip: 'تصدير CSV',
+            tooltip: S.exportCsv,
             icon: const Icon(Icons.table_view_outlined),
             onPressed: (_listRows == null || _listRows!.isEmpty)
                 ? null
@@ -870,7 +868,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNew,
         icon: const Icon(Icons.receipt_long_outlined),
-        label: const Text('فاتورة جديدة'),
+        label: const Text(S.newInvoice),
       ),
       body: Column(
         children: [
@@ -888,7 +886,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                   controller: _search,
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.search),
-                    labelText: 'بحث بالطرف أو الرقم',
+                    labelText: S.searchPartyOrNumber,
                     isDense: true,
                   ),
                 ),
@@ -900,7 +898,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                         controller: _from,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'من (YYYY-MM-DD)',
+                            labelText: S.fromDateLabel,
                             suffixIcon:
                                 calendarPickerSuffix(context, _from)),
                       ),
@@ -911,7 +909,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                         controller: _to,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'إلى (YYYY-MM-DD)',
+                            labelText: S.toDateLabel,
                             suffixIcon:
                                 calendarPickerSuffix(context, _to)),
                       ),
@@ -927,7 +925,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _kind,
                         decoration:
-                            const InputDecoration(labelText: 'النوع'),
+                            const InputDecoration(labelText: S.typeLabel),
                         items: [
                           for (final (value, label) in _kindChoices)
                             DropdownMenuItem<String>(
@@ -943,7 +941,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton(onPressed: _reload, child: const Text('عرض')),
+                    FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
                   ],
                 ),
                 // الدفعة 21 (F-168): فلتر الاستلام سطراً مستقلاً — درس
@@ -955,7 +953,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _receipt,
                         decoration: const InputDecoration(
-                            labelText: 'الاستلام'),
+                            labelText: S.receiptLabel),
                         items: [
                           for (final (value, label) in _receiptChoices)
                             DropdownMenuItem<String>(
@@ -978,7 +976,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _state,
                         decoration: const InputDecoration(
-                            labelText: 'الحالة'),
+                            labelText: S.statusLabel),
                         items: [
                           for (final (value, label) in _stateChoices)
                             DropdownMenuItem<String>(
@@ -1038,8 +1036,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                           ? Icons.receipt_long_outlined
                           : Icons.search_off,
                       message: rows.isEmpty
-                          ? 'لا فواتير بعد — أضف أول فاتورة بزر «فاتورة جديدة»'
-                          : 'لا نتائج مطابقة للبحث ضمن العرض الحالي',
+                          ? S.noInvoicesYet
+                          : S.noSearchResults,
                     ),
                   );
                 }
@@ -1057,12 +1055,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       RecordContextMenu(
                         actions: [
                           RecordContextAction(
-                            label: 'تفاصيل الفاتورة',
+                            label: S.invoiceDetailsTitle,
                             icon: Icons.receipt_long_outlined,
                             onSelected: () => _openDetail(row.id),
                           ),
                           RecordContextAction(
-                            label: 'طباعة سريعة',
+                            label: S.quickPrint,
                             icon: Icons.print_outlined,
                             onSelected: () => _quickPrint(context, row.id),
                           ),
@@ -1088,12 +1086,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             // بيده — فصل الأيدي).
                             if (row.state == 'draft' && _canPostOthers)
                               IconButton(
-                                tooltip: 'ترحيل',
+                                tooltip: S.postAction,
                                 icon: const Icon(Icons.task_alt_outlined),
                                 onPressed: () => _approve(row),
                               ),
                             IconButton(
-                              tooltip: 'طباعة',
+                              tooltip: S.printAction,
                               icon: const Icon(Icons.print_outlined),
                               onPressed: () => _quickPrint(context, row.id),
                             ),
@@ -1184,8 +1182,7 @@ class _ReturnPickerSheetState extends State<_ReturnPickerSheet> {
                         child: Padding(
                           padding: const EdgeInsets.all(24),
                           child: Text(
-                            'لا أصل مطابق — والمرشّح فاتورة مرحّلة بنوعها '
-                            'حصراً (بيع لمردود البيع وشراء لمردود الشراء)',
+                            S.returnNoMatchingOrigin,
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -1197,8 +1194,8 @@ class _ReturnPickerSheetState extends State<_ReturnPickerSheet> {
                               leading: const Icon(
                                   Icons.receipt_long_outlined),
                               title: Text(
-                                  'فاتورة ${c.id} — ${c.invoiceDate}'),
-                              subtitle: Text(c.partyName ?? 'بلا طرف'),
+                                  S.invoiceOfNumber(c.id, c.invoiceDate)),
+                              subtitle: Text(c.partyName ?? S.noParty),
                               trailing: Text(
                                   formatMinorAmount(c.totalDocMinor)),
                               onTap: () =>
@@ -1478,7 +1475,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       if (p > 0) {
         line.price.text = groupDigits(p);
         line.priceSource =
-            'سعر الأمر ${seed.order.number} المرجعي';
+            S.orderReferencePrice(seed.order.number);
       }
       _lines.add(line);
       _listenLine(line);
@@ -1515,8 +1512,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
       builder: (sheetContext) => _ReturnPickerSheet(
         candidates: candidates,
         searchHint: expectedKind == InvoiceKind.sale
-            ? 'بحث برقم فاتورة البيع أو اسم العميل'
-            : 'بحث برقم فاتورة الشراء أو اسم المورد',
+            ? S.searchSalesInvoiceOrCustomer
+            : S.searchPurchaseInvoiceOrSupplier,
       ),
     );
     if (picked == null || !mounted) return;
@@ -1528,7 +1525,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     if (seed == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text(
-            'تعذر تجهيز بذرة المردود — الأصل مرحّل بنوعه المطلوب حصراً'),
+            S.returnSeedFailed),
       ));
       return;
     }
@@ -1560,7 +1557,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         line.qty.text = groupDigits(sl.remainingQtyBase);
         if (sl.unitPriceMinor > 0) {
           line.price.text = groupDigits(sl.unitPriceMinor);
-          line.priceSource = 'سعر الأصل المرجعي';
+          line.priceSource = S.originReferencePrice;
         }
         _lines.add(line);
         _listenLine(line);
@@ -1799,8 +1796,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     line.price.text = minor > 0 ? groupDigits(minor) : '';
     line.priceSource =
         (last != null && last.priceMinor > 0 && minor == last.priceMinor)
-            ? 'آخر سعر مع ${_partyName(_partyId) ?? 'الطرف'}'
-                ' — من فاتورة ${last.docLabel}'
+            ? S.lastPriceWithParty(_partyName(_partyId) ?? S.partyLabel, last.docLabel)
             : null;
   }
 
@@ -1826,8 +1822,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         : derivedLevelPriceMinor(basePriceMinor: baseMinor, factor: factor);
     line.price.text = minor > 0 ? groupDigits(minor) : '';
     line.priceSource = stored != null
-        ? 'سعر ${_levelNameById[levelId] ?? 'المستوى'} المخزن'
-        : 'مشتق من الأساسية ×$factor';
+        ? S.storedPriceOf(_levelNameById[levelId] ?? S.levelLabel)
+        : S.derivedFromBase(factor);
   }
 
   /// إجمالي السطر الخام — الكمية بوحدة الاختيار × سعرها − خصم السطر
@@ -1882,7 +1878,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-              const SnackBar(content: Text('رمز غير مرتبط بأي صنف')));
+              const SnackBar(content: Text(S.barcodeNotLinked)));
       }
       setState(() {}); // لا مطابقة كاملة — الاقتراحات تبقى معروضة
       return;
@@ -2126,22 +2122,18 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final proceed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تجاوز حد الائتمان'),
+        title: const Text(S.creditLimitExceededTitle),
         content: Text(
-          'رصيد «${w.partyName}» بعد هذه الفاتورة '
-          '${formatMinorAmount(w.netAfterMinor)} — يتجاوز الحد المسموح '
-          '${formatMinorAmount(w.limitMinor)} بفائض '
-          '${formatMinorAmount(w.excessMinor)}.\n'
-          'التنبيه إرشاد لا منع — القرار لك.',
+          S.creditLimitExceededBody(w.partyName, formatMinorAmount(w.netAfterMinor), formatMinorAmount(w.limitMinor), formatMinorAmount(w.excessMinor)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('رجوع للتعديل'),
+            child: const Text(S.backToEdit),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('حفظ على أي حال'),
+            child: const Text(S.saveAnyway),
           ),
         ],
       ),
@@ -2220,8 +2212,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
   /// س123: عنوان النموذج — المبذّر من أمر يُعرف بعنوانه «فاتورة من
   /// أمر رقمها» فيرى المالك سياقه لا نموذجاً يتما، والحر فاتورة جديدة.
   String get _editTitle => widget.conversionSeed == null
-      ? 'فاتورة جديدة'
-      : 'فاتورة من أمر ${widget.conversionSeed!.order.number}';
+      ? S.newInvoice
+      : S.invoiceFromOrder(widget.conversionSeed!.order.number);
 
   @override
   Widget build(BuildContext context) {
@@ -2284,7 +2276,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                           style: TextStyle(
                               fontWeight: FontWeight.bold, color: lane.fg)),
                       subtitle: const Text(
-                          'النوع يُحدد من زر الدخول — لا مبدّل هنا'),
+                          S.typeFromEntryButton),
                     ),
                   );
                 }),
@@ -2295,7 +2287,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         controller: _date,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'التاريخ (YYYY-MM-DD)',
+                            labelText: S.dateWithFormatHint,
                             suffixIcon:
                                 calendarPickerSuffix(context, _date)),
                       ),
@@ -2306,7 +2298,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         controller: _due,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'الاستحقاق (اختياري)',
+                            labelText: S.dueDateOptional,
                             suffixIcon:
                                 calendarPickerSuffix(context, _due)),
                       ),
@@ -2316,10 +2308,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 DropdownButtonFormField<bool>(
                   initialValue: _isCash,
                   decoration: const InputDecoration(
-                      labelText: 'النقدية (نقدي يطلب صندوقاً — والآجل طرفاً)'),
+                      labelText: S.cashCreditExplainer),
                   items: const [
-                    DropdownMenuItem<bool>(value: true, child: Text('نقدي')),
-                    DropdownMenuItem<bool>(value: false, child: Text('آجل')),
+                    DropdownMenuItem<bool>(value: true, child: Text(S.cashOption)),
+                    DropdownMenuItem<bool>(value: false, child: Text(S.creditOption)),
                   ],
                   onChanged: (value) => setState(() => _isCash = value ?? true),
                 ),
@@ -2327,7 +2319,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   DropdownButtonFormField<int>(
                     initialValue: _boxId,
                     decoration: const InputDecoration(
-                        labelText: 'صندوق النقدية'),
+                        labelText: S.cashBoxLabel),
                     items: [
                       for (final b in _boxes)
                         DropdownMenuItem<int>(
@@ -2343,9 +2335,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: Text(
-                        'الرصيد الآن: '
-                        '${formatMinorAmount(_boxOf(_boxId)!.balanceBaseMinor)}'
-                        ' $kBaseCurrencySymbol',
+                        S.balanceNow(formatMinorAmount(_boxOf(_boxId)!.balanceBaseMinor), kBaseCurrencySymbol),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -2362,8 +2352,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                           avatar: const Icon(Icons.tips_and_updates_outlined,
                               size: 18),
                           label: Text(
-                              'اقتراح: ${_partyName(_mostActivePartyId!) ?? ''}'
-                              ' (الأكثر تداولاً)'),
+                              S.suggestionMostUsed(_partyName(_mostActivePartyId!) ?? '')),
                           onPressed: () {
                             setState(
                                 () => _partyId = _mostActivePartyId);
@@ -2376,8 +2365,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     initialValue: _partyId,
                     decoration: InputDecoration(
                         labelText: _kind.isSalesSide
-                            ? 'العميل (الآجل يطلب طرفاً)'
-                            : 'المورد (الآجل يطلب طرفاً)'),
+                            ? S.customerNeedsParty
+                            : S.supplierNeedsParty),
                     items: [
                       for (final p in _sideParties)
                         DropdownMenuItem<int>(
@@ -2403,7 +2392,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         initialValue: _warehouseId,
                         decoration: const InputDecoration(
                             labelText:
-                                'المستودع (للبضاعة — الخدمة بلا مستودع)'),
+                                S.warehouseForGoods),
                         items: [
                           for (final w in _warehouses)
                             DropdownMenuItem<int>(
@@ -2420,7 +2409,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       child: DropdownButtonFormField<int>(
                         initialValue: _currencyId,
                         decoration: const InputDecoration(
-                            labelText: 'عملة المستند'),
+                            labelText: S.documentCurrency),
                         items: [
                           for (final c in _currencies)
                             DropdownMenuItem<int>(
@@ -2451,7 +2440,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                           ],
                           decoration: const InputDecoration(
                               labelText:
-                                  'لقطة الصرف مكبرة ×1,000,000 (مثال: 15000000 = 15)'),
+                                  S.exchangeRateScaleHint),
                         ),
                       ),
                     if (showFx && _kind.isReturn)
@@ -2472,13 +2461,13 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                           // الثابتة ولسان الزر باقيان بلا مساس بالسلوك.
                           decoration: InputDecoration(
                             labelText:
-                                'معرف الفاتورة الأصلية (إلزامي للمردود)',
+                                S.originInvoiceIdRequired,
                             // م04 منتقي المردود (س205): زر المنتقي طرفي
                             // الحقل — فتح أصل المردود من سجله لا كتابة
                             // معرفه يدوياً، واليدوي خيار ثانٍ باقٍ حرفاً
                             // (عرف م02: اليدوي خيار ثانٍ).
                             suffixIcon: IconButton(
-                              tooltip: 'منتقي المردود',
+                              tooltip: S.returnPicker,
                               icon: const Icon(Icons.fact_check_outlined),
                               onPressed: _openReturnPicker,
                             ),
@@ -2493,10 +2482,10 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 TextField(
                   controller: _narration,
                   decoration: const InputDecoration(
-                      labelText: 'الوصف (اختياري)'),
+                      labelText: S.descriptionOptional),
                 ),
                 const SizedBox(height: 12),
-                Text('البنود — الإدخال بالوحدة الأساسية حصراً',
+                Text(S.linesBaseUnitOnly,
                     style: Theme.of(context).textTheme.titleMedium),
                 for (var i = 0; i < _lines.length; i++) _lineCard(i),
                 Align(
@@ -2504,7 +2493,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   child: TextButton.icon(
                     onPressed: _addLineFocused,
                     icon: const Icon(Icons.add),
-                    label: const Text('إضافة بند'),
+                    label: const Text(S.addLine),
                   ),
                 ),
                 // س-110 (D-109): حقل الخصم إلى جانب بطاقة المجاميع في
@@ -2521,13 +2510,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   controller: _quickSearch,
                   decoration: InputDecoration(
                     labelText:
-                        'بحث سريع بالاسم أو الكود أو الباركود',
-                    helperText: 'الرمز الكامل يجلب الصنف مباشرة — قارئ '
-                        'البلوتوث يكتب فيه ويعطي Enter',
+                        S.quickSearchNameCodeBarcode,
+                    helperText: S.fullCodeBluetoothHint,
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: supportsCameraScan
                         ? IconButton(
-                            tooltip: 'مسح باركود',
+                            tooltip: S.clearBarcode,
                             icon: const Icon(Icons.qr_code_scanner),
                             onPressed: _scanFromQuickSearch,
                           )
@@ -2545,25 +2533,25 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Row(
                       children: [
-                        Text('المحدد: ${_quickSelected.length}',
+                        Text(S.selectedCount(_quickSelected.length),
                             style:
                                 Theme.of(context).textTheme.labelLarge),
                         const Spacer(),
                         TextButton(
                           onPressed: () => _selectAllQuickSuggestions(
                               _quickSuggestions(_quickSearch.text)),
-                          child: const Text('تحديد كل النتائج'),
+                          child: const Text(S.selectAllResults),
                         ),
                         TextButton(
                           onPressed: _exitQuickSelect,
-                          child: const Text('إلغاء'),
+                          child: const Text(S.cancelAction),
                         ),
                         FilledButton.icon(
                           onPressed: _quickSelected.isEmpty
                               ? null
                               : _addSelectedToLines,
                           icon: const Icon(Icons.playlist_add),
-                          label: const Text('إضافة المحدد'),
+                          label: const Text(S.addSelected),
                         ),
                       ],
                     ),
@@ -2592,7 +2580,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                                 Theme.of(context).colorScheme.primary,
                           )
                         : (_itemAlreadyInLines(entry.value.id)
-                            ? Text('موجود',
+                            ? Text(S.inStockShort,
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
@@ -2645,7 +2633,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [const PercentDecimalInputFormatter()],
                   decoration: const InputDecoration(
-                      labelText: 'خصم الفاتورة نسبةً 0..100 (اختياري)'),
+                      labelText: S.invoiceDiscountPercentHint),
                 ),
                 _totalsCard(),
                 const SizedBox(height: 8),
@@ -2659,10 +2647,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(10),
                     child: Text(
-                      'المسودة المحفوظة لا تمس المخزون والدفتر والذمة '
-                      'حتى تُرحَّل — وترحيلها بيده من التفاصيل أو بيد من '
-                      'مُنح بوابة «ترحيل مسودات الآخرين».'
-                      '${_reserveEnabled && _kind == InvoiceKind.sale ? ' وبالإعداد المعتمد تحجز كمياتها من المخزون فلا تُباع لغيرها حتى الترحيل أو الحذف.' : ''}',
+                      S.draftExplainer(_reserveEnabled && _kind == InvoiceKind.sale ? S.draftHoldsStockNote : ''),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
@@ -2676,14 +2661,14 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: () => _save(post: true),
-                        child: const Text('حفظ وترحيل'),
+                        child: const Text(S.saveAndPost),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => _save(post: false),
-                        child: const Text('حفظ كمسودة'),
+                        child: const Text(S.saveAsDraft),
                       ),
                     ),
                   ],
@@ -2701,12 +2686,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
     final minor =
         _kind.isSalesSide ? it.salePriceMinor : it.purchasePriceMinor;
     final priceText =
-        minor > 0 ? formatMinorAmount(minor) : 'بلا سعر بعد';
-    final priceLabel = _kind.isSalesSide ? 'سعر بيع' : 'سعر شراء';
+        minor > 0 ? formatMinorAmount(minor) : S.noPriceYet;
+    final priceLabel = _kind.isSalesSide ? S.salePriceLabel : S.purchasePriceLabel;
     final avail = _stockAvail[it.id] ?? 0;
     // التجميعي مخزوني برصيد جاهز (F-034) — فالمتاح عنده «الجاهز»
     // بلفظها، والبضاعة كما هي بحرفها القائم (D-106/س-108).
-    final availLabel = it.kind == 'bundle' ? 'المتاح (الجاهز)' : 'المتاح';
+    final availLabel = it.kind == 'bundle' ? S.availableReady : S.availableLabel;
     // س102: بالإعداد المعتمد وبالبيع حصراً يظهر المحجوز حقيقةً (F-016):
     // «المتاح: 4 (محجوز 6)» — فيعلم البائع لماذا رُفض فوق المتاح،
     // ويعلم المندوب أن فاتورته المعلّقة تحجز فعلاً.
@@ -2714,7 +2699,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
         ? (_reservedQty[it.id] ?? 0)
         : 0;
     final availText = rsv > 0
-        ? '${groupDigits(avail)} (محجوز ${groupDigits(rsv)})'
+        ? S.availableWithReserved(groupDigits(avail), groupDigits(rsv))
         : groupDigits(avail);
     return it.kind == 'service'
         ? '$priceLabel: $priceText'
@@ -2735,7 +2720,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
             DropdownButtonFormField<int>(
               initialValue: line.itemId,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'الصنف'),
+              decoration: const InputDecoration(labelText: S.itemLabel),
               onTap: () {
                 // س-119/D-114: النقر على الصنف يحدّث المتاح أولاً كي
                 // لا تُعرض خريطة قديمة إن رُحّلت فاتورة والنموذج مفتوح.
@@ -2759,7 +2744,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                       children: [
                         Text(
                           '${it.sku} ${it.name}'
-                          '${it.kind == 'service' ? ' (خدمة)' : it.kind == 'bundle' ? ' (تجميعي)' : ''}',
+                          '${it.kind == 'service' ? S.serviceSuffix : it.kind == 'bundle' ? S.assemblySuffix : ''}',
                         ),
                         Text(_itemSubtitle(it),
                             style: Theme.of(context).textTheme.bodySmall),
@@ -2774,7 +2759,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 for (final it in _items)
                   Text(
                     '${it.sku} ${it.name}'
-                    '${it.kind == 'service' ? ' (خدمة)' : it.kind == 'bundle' ? ' (تجميعي)' : ''}'
+                    '${it.kind == 'service' ? S.serviceSuffix : it.kind == 'bundle' ? S.assemblySuffix : ''}'
                     ' — ${_itemSubtitle(it)}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -2817,8 +2802,8 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                               alignment: AlignmentDirectional.centerStart,
                               child: Text(
                                   line.unitLevelId == null
-                                      ? 'الوحدة: $unitName (الأساسية)'
-                                      : 'الوحدة: ${_levelNameById[line.unitLevelId] ?? ''} ×${_factorOfLevel(line.unitLevelId!)}',
+                                      ? S.unitBase(unitName)
+                                      : S.unitWithFactor(_levelNameById[line.unitLevelId] ?? '', _factorOfLevel(line.unitLevelId!)),
                                   style: Theme.of(context).textTheme.bodySmall),
                             ),
                           if (line.unitLevelId != null &&
@@ -2829,7 +2814,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                                 // س-10 (السير الموثق 06): السعر يُدخل لوحدة
                                 // الاختيار مع عرض مكافئ الأساسية — والفرق
                                 // الحي بonChanged (درس س79).
-                                'المكافئ بالأساسية: ${groupDigits(_parsed(line.qty) * _factorOfLevel(line.unitLevelId!))} $unitName',
+                                S.equivalentInBase(groupDigits(_parsed(line.qty) * _factorOfLevel(line.unitLevelId!)), unitName),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
@@ -2838,7 +2823,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                             child: Text(
                               // س-120 (D-115): إجمالي السطر لحظياً — الكمية × السعر
                               // − خصم السطر، ويتجدد مع كل ضغطة (مستمعو الحقول أعلاه).
-                              'إجمالي السطر: ${formatMinorAmount(_lineGrossMinor(line))}',
+                              S.lineTotal(formatMinorAmount(_lineGrossMinor(line))),
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ),
@@ -2857,12 +2842,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                   // واختيار المستوى يعبّئ سعره ويظهر المكافئ اللحظي.
                   initialValue: line.unitLevelId,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'الوحدة'),
+                  decoration: const InputDecoration(labelText: S.unitLabel),
                   items: [
                     DropdownMenuItem<int?>(
                       value: null,
                       child: Text(
-                          '${_unitNames[_baseUnitIdOf(line.itemId)] ?? 'الأساسية'} (الأساسية)'),
+                          S.baseUnitSuffix(_unitNames[_baseUnitIdOf(line.itemId)] ?? S.baseLabel)),
                     ),
                     for (final lv in _levelsOfItem(line.itemId))
                       DropdownMenuItem<int?>(
@@ -2893,12 +2878,12 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         ThousandsSeparatorInputFormatter(),
                       ],
                       decoration: InputDecoration(
-                        labelText: 'الكمية',
+                        labelText: S.quantityLabel,
                         // س-10: الكمية بوحدة الاختيار حينها — واسمها على
                         // الحقل ليُدخل بها لا بالأساسية.
                         helperText: line.unitLevelId == null
                             ? null
-                            : 'بوحدة ${_levelNameById[line.unitLevelId] ?? ''}',
+                            : S.inUnit(_levelNameById[line.unitLevelId] ?? ''),
                       ),
                       onSubmitted: (_) => FocusScope.of(context)
                           .requestFocus(line.priceFocus),
@@ -2917,7 +2902,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         ThousandsSeparatorInputFormatter(),
                       ],
                       decoration: InputDecoration(
-                        labelText: 'سعر الوحدة بوحدة صغرى',
+                        labelText: S.unitPriceMinorUnit,
                         // F-146/D-183: وسم مصدر الاقتراح يُرى لا يُخفى،
                         // ويصمت بأول تعديل بشري فالرقم بعده رقمه هو.
                         helperText: line.priceSource,
@@ -2945,13 +2930,13 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                         ThousandsSeparatorInputFormatter(),
                       ],
                       decoration: const InputDecoration(
-                          labelText: 'خصم السطر (اختياري)'),
+                          labelText: S.lineDiscountOptional),
                       onSubmitted: (_) => _addLineFocused(),
                     ),
                   ),
                 ),
                 IconButton(
-                  tooltip: 'حذف البند',
+                  tooltip: S.deleteLine,
                   icon: const Icon(Icons.delete_outline),
                   onPressed: _lines.length <= 1
                       ? null
@@ -3001,7 +2986,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('المجموع', style: labelStyle),
+                        Text(S.sumLabel, style: labelStyle),
                         Text(
                           '${formatMinorAmount(totals.subtotalDocMinor)} $docSymbol',
                           style: Theme.of(context).textTheme.titleMedium,
@@ -3013,7 +2998,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('الخصم', style: labelStyle),
+                        Text(S.discountLabel, style: labelStyle),
                         Text(
                           '${formatMinorAmount(totals.discountDocMinor)} $docSymbol',
                           style: Theme.of(context).textTheme.titleMedium,
@@ -3024,7 +3009,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 ],
               ),
               const SizedBox(height: 8),
-              Text('الإجمالي', style: labelStyle),
+              Text(S.totalLabel, style: labelStyle),
               Text(
                 '${formatMinorAmount(totals.totalDocMinor)} $docSymbol',
                 style: Theme.of(context).textTheme.titleLarge,
@@ -3033,8 +3018,7 @@ class _InvoiceEditScreenState extends State<InvoiceEditScreen> {
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    'تعادل ${formatMinorAmount(totals.totalBaseMinor)} '
-                    '$kBaseCurrencySymbol بالأساسية',
+                    S.equalsInBase(formatMinorAmount(totals.totalBaseMinor), kBaseCurrencySymbol),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -3186,7 +3170,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         _unitNames = {for (final u in units) u.id: u.name};
         _levelNameById = {for (final l in groupLevels) l.id: l.name};
         _covered = covered;
-        _docSuffix = docSymbol.isEmpty ? 'بعملة المستند' : docSymbol;
+        _docSuffix = docSymbol.isEmpty ? S.inDocumentCurrency : docSymbol;
         _baseSymbol = currencySymbol(baseCode);
         _session = session;
         _submission = submission;
@@ -3227,7 +3211,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       await dqLog(widget.db, e, context: 'invoice.deliver');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر تحديث علم التسليم — $e')),
+        SnackBar(content: Text(S.deliveryFlagFailed(e))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -3247,7 +3231,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       await dqLog(widget.db, e, context: 'invoice.deliver_all');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر تحديث علم التسليم — $e')),
+        SnackBar(content: Text(S.deliveryFlagFailed(e))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -3264,7 +3248,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       await dqLog(widget.db, e, context: 'invoice.supplier');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر حفظ المورد المسؤول — $e')),
+        SnackBar(content: Text(S.responsibleSupplierFailed(e))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -3281,7 +3265,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoice.print');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -3292,7 +3276,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       final invoice = await widget.db.invoiceById(widget.invoiceId);
       if (invoice == null) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('لا فاتورة بهذا المعرف')),
+          const SnackBar(content: Text(S.noInvoiceWithId)),
         );
         return;
       }
@@ -3302,7 +3286,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'invoice.share');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -3317,8 +3301,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     try {
       await widget.db.postInvoice(widget.invoiceId);
       messenger.showSnackBar(SnackBar(
-        content: Text('رُحّلت برقم '
-            '${(await widget.db.invoiceById(widget.invoiceId))?.number ?? ''}'),
+        content: Text(S.postedWithNumber((await widget.db.invoiceById(widget.invoiceId))?.number ?? '')),
       ));
       await _load();
       // س119: الترحيل من التفاصيل يفتح أمر الطباعة بنسختَيه أيضاً.
@@ -3331,10 +3314,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       setState(() => _busy = false);
       messenger.showSnackBar(SnackBar(
         content: Text(
-          'رفض الترحيل: ${
+          S.postRejectedWithReason(
             [for (final err in e.errors) describeInvoiceValidationError(err)]
                 .join(' · ')
-          }${dqTag(e)}',
+          , dqTag(e)),
         ),
         duration: const Duration(seconds: 5),
       ));
@@ -3343,7 +3326,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر الترحيل — $e${dqTag(e)}')));
+        SnackBar(content: Text(S.postFailed(e, dqTag(e)))));
     }
   }
 
@@ -3351,25 +3334,25 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Widget build(BuildContext context) {
     if (!_loaded) {
       return Scaffold(
-        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        appBar: AppBar(title: const Text(S.invoiceDetailsTitle)),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (_error != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        appBar: AppBar(title: const Text(S.invoiceDetailsTitle)),
         body: Center(child: Text(_error!)),
       );
     }
     final invoice = _invoice;
     if (invoice == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
-        body: const Center(child: Text('لا فاتورة بهذا المعرف')),
+        appBar: AppBar(title: const Text(S.invoiceDetailsTitle)),
+        body: const Center(child: Text(S.noInvoiceWithId)),
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+      appBar: AppBar(title: const Text(S.invoiceDetailsTitle)),
       // م06 التكيفي لويندوز (س205): العريض يتوسّط بعرضه الأقصى.
       body: ListView(
         padding: EdgeInsets.symmetric(
@@ -3384,7 +3367,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 child: FilledButton.icon(
                   onPressed: _busy ? null : _print,
                   icon: const Icon(Icons.print_outlined),
-                  label: const Text('طباعة / PDF'),
+                  label: const Text(S.printOrPdf),
                 ),
               ),
               const SizedBox(width: 8),
@@ -3392,7 +3375,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 child: OutlinedButton.icon(
                   onPressed: _busy ? null : _share,
                   icon: const Icon(Icons.ios_share),
-                  label: const Text('مشاركة PDF'),
+                  label: const Text(S.sharePdf),
                 ),
               ),
             ],
@@ -3420,7 +3403,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   ));
                 },
                 icon: const Icon(Icons.assignment_return_outlined),
-                label: const Text('مردود من هذه الفاتورة'),
+                label: const Text(S.returnFromThisInvoice),
               ),
             ),
           // س164: شريط المسودة فوق التفاصيل — لسان حالة المسودة
@@ -3437,10 +3420,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   children: [
                     Text(
                       _submission == null
-                          ? 'مسودة — لم تُرحّل بعد فلا تمس المخزون والدفتر.'
-                          : 'مسودة حفظها ${_submission!.userName} '
-                              '(بدور «${_submission!.roleName}») — '
-                              'ترحيلها بيده أو بيد من مُنح البوابة.',
+                          ? S.draftBanner
+                          : S.draftSavedBy(_submission!.userName, _submission!.roleName),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     if (_canPostDraft) ...[
@@ -3448,7 +3429,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                       FilledButton.icon(
                         onPressed: _busy ? null : _approve,
                         icon: const Icon(Icons.task_alt_outlined),
-                        label: const Text('ترحيل'),
+                        label: const Text(S.postAction),
                       ),
                     ],
                   ],
@@ -3458,19 +3439,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           ListTile(
             title: Text(invoiceDisplayLabel(invoice)),
             subtitle: Text(
-                'التاريخ ${invoice.invoiceDate}'
-                // س-156/D-154 (دفعة 17): لسان المالك — نقدية/ذمة (س50/4)،
-                // والمسودة تُنادى بمسودتها.
-                ' · السداد ${invoice.cashBoxId != null ? 'نقدية' : 'ذمة'}'
-                "${invoice.state == 'draft' ? ' · مسودة' : ''}"),
+                S.dateAndPayment(invoice.invoiceDate, invoice.cashBoxId != null ? S.cashLabel : S.onAccountLabel, invoice.state == 'draft' ? S.draftSuffix : '')),
           ),
           ListTile(
-            title: Text('الإجمالي ${formatMinorAmount(invoice.totalDocMinor)}'
-                ' $_docSuffix'),
+            title: Text(S.totalWithAmount(formatMinorAmount(invoice.totalDocMinor), _docSuffix)),
             subtitle: Text(
-                '${invoice.currencyId != 1 ? 'المكافئ ب$_baseSymbol ${formatMinorAmount(invoice.totalBaseMinor)} · ' : ''}'
-                'المدفوع ${formatMinorAmount(_covered)}'
-                ' · الباقي ${formatMinorAmount(invoice.totalDocMinor - _covered)}'),
+                S.paidAndRemaining(invoice.currencyId != 1 ? S.equivalentTrailing(_baseSymbol, formatMinorAmount(invoice.totalBaseMinor)) : '', formatMinorAmount(_covered), formatMinorAmount(invoice.totalDocMinor - _covered))),
           ),
           // س-148/D-138 (دفعة 14): عدّاد التسليم «مستلم X من Y»
           // بأساسه الافتراضي (الكميات بالواحدة) وقائمة التبديل
@@ -3488,13 +3462,13 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 child: FilledButton.tonalIcon(
                   onPressed: _busy ? null : _deliverAll,
                   icon: const Icon(Icons.done_all_outlined),
-                  label: const Text('تسليم الكل'),
+                  label: const Text(S.deliverAll),
                 ),
               ),
             ),
           const Divider(),
           for (final line in _lines) _lineTile(line),
-          if (_lines.isEmpty) const ListTile(title: Text('لا بنود')),
+          if (_lines.isEmpty) const ListTile(title: Text(S.noLines)),
         ],
       ),
     );
@@ -3539,11 +3513,11 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             initialValue: _deliveryBasis,
             isDense: true,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'أساس العد'),
+            decoration: const InputDecoration(labelText: S.countingBasis),
             items: [
               for (final b in deliveryBasisChoices)
                 DropdownMenuItem(
-                    value: b, child: Text('حسب ${deliveryBasisLabel(b)}')),
+                    value: b, child: Text(S.byBasis(deliveryBasisLabel(b)))),
             ],
             onChanged: (b) {
               if (b != null) setState(() => _deliveryBasis = b);
@@ -3560,7 +3534,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   /// بدفعة 13).
   Widget _lineTile(InvoiceLineDocument line) {
     final item = _itemById[line.itemId];
-    final itemName = item?.name ?? 'صنف #${line.itemId}';
+    final itemName = item?.name ?? S.itemWithNumber(line.itemId);
     final title =
         '$itemName — ${line.qty} × ${formatMinorAmount(line.unitPriceMinor)}';
     final isSale = _isSale;
@@ -3577,7 +3551,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             ListTile(
               title: Text(title),
               subtitle: Text(
-                  'المبلغ ${formatMinorAmount(line.lineTotalDocMinor)}'),
+                  S.amountWith(formatMinorAmount(line.lineTotalDocMinor))),
               // س-137/D-131: مربع «مستلم» الواحد — غير محدد افتراضاً
               // لكل سطر، والتحديد يحفظ فوراً. الدفعة 21 (F-168): بكل
               // الأنواع بعد تعميم العلم بكلمة المالك.
@@ -3610,12 +3584,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 initialValue: line.supplierPartyId,
                 isExpanded: true,
                 decoration: const InputDecoration(
-                  labelText: 'المورد المسؤول',
+                  labelText: S.responsibleSupplier,
                   border: InputBorder.none,
                 ),
                 items: [
                   const DropdownMenuItem<int>(
-                      value: null, child: Text('بلا مورد')),
+                      value: null, child: Text(S.noSupplier)),
                   for (final p in _suppliers)
                     DropdownMenuItem<int>(value: p.id, child: Text(p.name)),
                 ],
@@ -3634,7 +3608,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                       child: Text(
-                        'مقترح (آخر شراء): ${p.name}',
+                        S.suggestedLastPurchase(p.name),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),

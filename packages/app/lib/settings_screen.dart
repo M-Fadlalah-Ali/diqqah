@@ -31,6 +31,7 @@ import 'import_screen.dart';
 import 'device_status.dart';
 import 'session.dart';
 import 'dq_log.dart';
+import 'l10n/app_strings.dart';
 
 /// Task 51: هوية الإصدار تُحقن زمن الترجمة من CI (--dart-define) —
 /// مصدر الحقيقة pubspec.yaml، ويظهر السطر للمالك أسفل شاشة الإعدادات
@@ -51,10 +52,10 @@ const String kBuildNumber = String.fromEnvironment('BUILD_NUMBER');
 String diqqahVersionLine(String version, String build) {
   if (version.isEmpty) return '';
   final parts = version.split('.');
-  if (parts.length == 2) return 'دِقَّة v.$version';
+  if (parts.length == 2) return S.appVersionLine(version);
   final display =
       '${parts[0]}.${parts[1]}.${parts[2].padLeft(2, '0')}';
-  return build.isEmpty ? 'دِقَّة $display' : 'دِقَّة $display.$build';
+  return build.isEmpty ? S.appTitleWith(display) : S.appTitleWithMinor(display, build);
 }
 
 /// اختيار مسار نسخة حرة — ثغرة CI #40/#41 (2026-10-29): الختم بدقة
@@ -81,13 +82,13 @@ String freeBackupPath(
 /// حجم مجلد الصور بالصياغة الإنسانية — نقية للاختبار (س-129: سطر
 /// الحجم الحالي للمجلد تحت مربع التضمين). الفراغ «بلا صور بعد».
 String formatImagesBytes(int bytes) {
-  if (bytes <= 0) return 'بلا صور بعد';
+  if (bytes <= 0) return S.noImagesYet;
   final kb = bytes / 1024;
   if (kb < 1024) {
-    return '${kb.toStringAsFixed(kb < 10 ? 1 : 0)} كيلوبايت';
+    return S.kilobytesCount(kb.toStringAsFixed(kb < 10 ? 1 : 0));
   }
   final mb = kb / 1024;
-  return '${mb.toStringAsFixed(1)} ميغابايت';
+  return S.megabytesCount(mb.toStringAsFixed(1));
 }
 
 /// شاشة الإعدادات — النسخ الاحتياطي الكامل والاستعادة (F-012/F-013، س-01).
@@ -287,8 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final cap = text.isEmpty ? 0 : parseGroupedInt(text, fallback: -1);
     if (cap < 0) {
       setState(() => _custodyCapResult =
-          'قيمة غير صالحة — أدخل عدداً صحيحاً بوحدة صغرى من العملة '
-          'الأساسية أو اتركه فارغاً لإلغاء السقف');
+          S.custodyCapInvalid);
       return;
     }
     setState(() => _busy = true);
@@ -298,9 +298,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _custodyCapController.text = cap > 0 ? groupDigits(cap) : '';
         _custodyCapResult = cap > 0
-            ? 'حُفظ السقف: ${groupDigits(cap)} بوحدة صغرى — تجاوزه يمنع '
-                'تحصيلاً جديداً حتى تسليم المعلَّق'
-            : 'حُفظ — بلا سقف عهدة (السلوك القائم بلا حدّ)';
+            ? S.custodyCapSaved(groupDigits(cap))
+            : S.custodyCapCleared;
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -346,8 +345,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final parsed = int.tryParse(_counterWidthController.text.trim());
     if (parsed == null || !isValidCounterWidth(parsed)) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('عدد الخانات يجب أن يكون بين $kCounterWidthMin '
-            'و $kCounterWidthMax'),
+        content: Text(S.counterDigitsRange(kCounterWidthMin, kCounterWidthMax)),
       ));
       return;
     }
@@ -357,7 +355,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() => _counterWidth = parsed);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('تم حفظ عدد خانات العدّاد — يسري على الأرقام الجديدة'),
+        content: Text(S.counterDigitsSaved),
       ));
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -415,7 +413,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await dqLog(widget.db, e, context: 'settings.integrity');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر تنفيذ الفحص — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.integrityCheckFailed(e, dqTag(e)))),
       );
     } finally {
       if (mounted) setState(() => _integrityBusy = false);
@@ -448,20 +446,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
         StateSetter setDialogState) async {
       final subject = (await widget.db.currentUser())?.id;
       if (subject == null) {
-        setDialogState(() => error = 'لا صاحب جلسة لتغيير كلمته');
+        setDialogState(() => error = S.noSessionUser);
         return;
       }
       if (current.text.isEmpty) {
         setDialogState(
-            () => error = 'الكلمة الحالية إلزامية — لا جلسة بلا تحقق');
+            () => error = S.currentPasswordRequired);
         return;
       }
       if (next.text.isEmpty) {
-        setDialogState(() => error = 'الكلمة الجديدة إلزامية — لا فراغات');
+        setDialogState(() => error = S.newPasswordRequired);
         return;
       }
       if (next.text != confirm.text) {
-        setDialogState(() => error = 'التأكيد لا يطابق الكلمة الجديدة');
+        setDialogState(() => error = S.passwordConfirmMismatch);
         return;
       }
       try {
@@ -491,7 +489,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('تغيير كلمة المرور'),
+          title: const Text(S.changePasswordTitle),
           content: SizedBox(
             width: 420,
             child: ListView(
@@ -501,7 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: current,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'كلمة المرور الحالية',
+                    labelText: S.currentPasswordField,
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -510,7 +508,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: next,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'كلمة المرور الجديدة',
+                    labelText: S.newPasswordField,
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -519,7 +517,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   controller: confirm,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'تأكيد كلمة المرور الجديدة',
+                    labelText: S.confirmPasswordField,
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -537,11 +535,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('إلغاء'),
+              child: const Text(S.cancelAction),
             ),
             FilledButton(
               onPressed: () => submit(dialogContext, setDialogState),
-              child: const Text('حفظ الكلمة الجديدة'),
+              child: const Text(S.saveNewPassword),
             ),
           ],
         ),
@@ -554,7 +552,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final changed = await _showPasswordChangeDialog();
     if (changed == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم تغيير كلمة المرور')),
+        const SnackBar(content: Text(S.passwordChanged)),
       );
     }
   }
@@ -585,7 +583,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.pick');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر فتح منتقي الملفات — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.filePickerFailed(e, dqTag(e)))),
       );
     }
   }
@@ -598,12 +596,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await Share.shareXFiles(
         [XFile(path)],
         subject: p.basename(path),
-        text: 'نسخة احتياطية دِقَّة',
+        text: S.backupDefaultName,
       );
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.export');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر إخراج النسخة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.backupExportFailed(e, dqTag(e)))),
       );
     }
   }
@@ -624,24 +622,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final set = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('قفل النسخ بكلمة مرور'),
+        title: const Text(S.lockBackupWithPassword),
         content: Form(
           key: formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                  'النسخ الجديدة تُكتب بجيل v3 المقفل: تُفك بكلمة المرور '
-                  'أو رمز الاسترداد على أي جهاز — فضع كلمة تعرفها وحداً '
-                  'وسجّل الرمز خارج الجهاز. نسخك القديمة تبقى كما هي.'),
+                  S.lockBackupExplainer),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _lockPass1,
                 obscureText: true,
                 validator: (v) =>
-                    (v == null || v.length < 8) ? '8 محارف فأكثر' : null,
+                    (v == null || v.length < 8) ? S.eightCharsHint : null,
                 decoration: const InputDecoration(
-                  labelText: 'كلمة المرور (8 محارف فأكثر)',
+                  labelText: S.passwordWithHint,
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -649,9 +645,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextFormField(
                 controller: _lockPass2,
                 obscureText: true,
-                validator: (v) => (v != _lockPass1.text) ? 'التأكيد يخالف' : null,
+                validator: (v) => (v != _lockPass1.text) ? S.confirmMismatchShort : null,
                 decoration: const InputDecoration(
-                  labelText: 'تأكيد كلمة المرور',
+                  labelText: S.confirmPassword,
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -661,7 +657,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('تراجع'),
+            child: const Text(S.revertAction),
           ),
           FilledButton(
             onPressed: () {
@@ -669,7 +665,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.of(context).pop(true);
               }
             },
-            child: const Text('توليد رمز الاسترداد'),
+            child: const Text(S.generateRecoveryCode),
           ),
         ],
       ),
@@ -686,7 +682,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text('فشل حفظ القفل بالخزنة — لم يُعيّن — $e${dqTag(e)}')),
+            content: Text(S.vaultLockFailed(e, dqTag(e)))),
       );
       return;
     }
@@ -695,15 +691,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('رمز الاسترداد — سجّله خارج الجهاز'),
+        title: const Text(S.recoveryCodeTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-                'يفك النسخ المقفلة عندما تُنسى الكلمة أو على جهاز ثانٍ. '
-                'اكتبه ورقياً الآن — وبقيته بالخزنة قابل للعرض من هذه '
-                'البطاقة في أي وقت.'),
+                S.recoveryCodeBody),
             const SizedBox(height: 12),
             SelectableText(recovery,
                 style: const TextStyle(
@@ -716,15 +710,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () {
               Clipboard.setData(ClipboardData(text: recovery));
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('نُسخ الرمز للحافظة')),
+                const SnackBar(content: Text(S.recoveryCodeCopied)),
               );
             },
             icon: const Icon(Icons.copy),
-            label: const Text('نسخ'),
+            label: const Text(S.copyAction),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('سجّلته'),
+            child: const Text(S.recordedIt),
           ),
         ],
       ),
@@ -738,12 +732,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('رمز الاسترداد'),
+        title: const Text(S.recoveryCodeLabel),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('يفك النسخ المقفلة عند نسيان الكلمة أو على جهاز ثانٍ.'),
+            const Text(S.recoveryCodeShort),
             const SizedBox(height: 12),
             SelectableText(lock.recoveryCode,
                 style: const TextStyle(
@@ -756,15 +750,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () {
               Clipboard.setData(ClipboardData(text: lock.recoveryCode));
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('نُسخ الرمز للحافظة')),
+                const SnackBar(content: Text(S.recoveryCodeCopied)),
               );
             },
             icon: const Icon(Icons.copy),
-            label: const Text('نسخ'),
+            label: const Text(S.copyAction),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('حسناً'),
+            child: const Text(S.okAction),
           ),
         ],
       ),
@@ -790,17 +784,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('رمز استرداد الخزنة'),
+        title: const Text(S.vaultRecoveryCode),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-                'يفك نسخ الجيل الرابع والخامس على جهاز آخر غير هذا — '
-                'والمقفلة (v3/v6) بالكلمة أو هذا الرمز: ثبّت التطبيق '
-                'ثم اكتب الرمز بحقل كلمة المرور عند الاستعادة.\n'
-                'اكتبه ورقياً خارج الجهاز — نسخ هذا الجهاز تُفك صامتة بلا '
-                'أي رمز.'),
+                S.vaultRecoveryCodeBody),
             const SizedBox(height: 12),
             SelectableText(keys.recoveryCode,
                 style: const TextStyle(
@@ -814,15 +804,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Clipboard.setData(
                   ClipboardData(text: keys.recoveryCode));
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('نُسخ الرمز للحافظة')),
+                const SnackBar(content: Text(S.recoveryCodeCopied)),
               );
             },
             icon: const Icon(Icons.copy),
-            label: const Text('نسخ'),
+            label: const Text(S.copyAction),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('حسناً'),
+            child: const Text(S.okAction),
           ),
         ],
       ),
@@ -836,20 +826,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('إزالة قفل النسخ؟'),
+        title: const Text(S.removeLockTitle),
         content: const Text(
-            'النسخ الجديدة تُكتب بمفتاح هذا الجهاز (جيل الخزنة v4): '
-            'تُفك هنا صمتاً وبرمز الاسترداد على جهاز آخر. '
-            'النسخ المقفلة القائمة تبقى بكلمة مرورها ورمز استردادها '
-            'ولا تتأثر بشيء.'),
+            S.removeLockExplainer),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('تراجع'),
+            child: const Text(S.revertAction),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('إزالة القفل'),
+            child: const Text(S.removeLockAction),
           ),
         ],
       ),
@@ -869,18 +856,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final proceed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('نسخة بدون تشفير'),
+          title: const Text(S.unencryptedBackup),
           content: const Text(
-              'كل من يملك الملف سيقرأ القاعدة كاملة بدون كلمة مرور. '
-              'إلغاء التشفير قرار واعٍ — متابعة بدون تشفير؟'),
+              S.unencryptedWarning),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('تراجع'),
+              child: const Text(S.revertAction),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('متابعة بدون تشفير'),
+              child: const Text(S.continueUnencrypted),
             ),
           ],
         ),
@@ -930,39 +916,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('أُنشئت النسخة الاحتياطية'),
+          title: const Text(S.backupCreated),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(!_encryptBackup
-                  ? 'ملف واحد للقاعدة كاملة — غير مشفرة'
+                  ? S.backupFilePlain
                   : _backupLock != null
-                      ? 'ملف واحد للقاعدة كاملة — مقفلة بكلمة مرورك '
-                          '(جيل ${liveLogRoot != null ? 'v6' : 'v3'}): '
-                          'تُفك بكلمة المرور أو رمز الاسترداد '
-                          'على أي جهاز'
+                      ? S.backupFileLocked(liveLogRoot != null ? 'v6' : 'v3')
                       : _vaultKeys != null
-                          ? 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح هذا '
-                              'الجهاز (جيل ${liveLogRoot != null ? 'v5' : 'v4'}): '
-                              'تُفك هنا صمتاً وبرمز '
-                              'الاسترداد على جهاز آخر'
-                          : 'ملف واحد للقاعدة كاملة — مشفرة بمفتاح '
-                              'البرنامج (جيل v2): تُفتح داخل التطبيق نفسه '
-                              'فحسب على أي جهاز'),
+                          ? S.backupFileVaulted(liveLogRoot != null ? 'v5' : 'v4')
+                          : S.backupFileProgramKey),
               const SizedBox(height: 8),
               // س-129: تصريح محتوى النسخة بالصور لا صمت أبداً.
               Text(hasImagesFile
-                  ? 'النسخة تتضمن صور الأصناف ($_imagesCount ملفاً — '
-                      'صور الأصناف: ${formatImagesBytes(_imagesBytes)}) في ملف ثانٍ '
-                      'مغلّف بنفس المفتاح'
-                  : 'النسخة بلا صور — مجلد الصور فارغ أو غائب'),
+                  ? S.backupIncludesImages(_imagesCount, formatImagesBytes(_imagesBytes))
+                  : S.backupNoImages),
               const SizedBox(height: 12),
-              const Text('مسار النسخة:'),
+              const Text(S.backupPathLabel),
               SelectableText(target),
               if (hasImagesFile) ...[
                 const SizedBox(height: 8),
-                const Text('ملف الصور:'),
+                const Text(S.imagesFileLabel),
                 SelectableText(imagesPath),
               ],
             ],
@@ -975,11 +951,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _exportBackup(
                     hasImagesFile ? imagesPath : target);
               },
-              child: const Text('إخراج النسخة'),
+              child: const Text(S.exportBackupAction),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('حسناً'),
+              child: const Text(S.okAction),
             ),
           ],
         ),
@@ -987,7 +963,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.backup');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر إنشاء النسخة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.backupCreateFailed(e, dqTag(e)))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -998,7 +974,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final path = _restorePath.text.trim();
     if (path.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('حدد مسار ملف النسخة أولاً')),
+        const SnackBar(content: Text(S.chooseBackupPathFirst)),
       );
       return;
     }
@@ -1007,18 +983,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final first = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('استعادة نسخة احتياطية؟'),
+        title: const Text(S.restoreBackupTitle),
         content: const Text(
-            'ستُستبدل القاعدة الحالية كاملة بالنسخة المختارة — كاملاً أو لا شيء. '
-            'تُلتقط نسخة رجوع آلية قبل الاستعادة، وهي طريق الرجوع الوحيد.'),
+            S.restoreBackupBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('إلغاء'),
+            child: const Text(S.cancelAction),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('متابعة'),
+            child: const Text(S.continueAction),
           ),
         ],
       ),
@@ -1028,16 +1003,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final second = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('التأكيد الأخير'),
-        content: const Text('متأكد من الاستبدال الكامل للقاعدة؟'),
+        title: const Text(S.finalConfirmTitle),
+        content: const Text(S.replaceAllConfirm),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('إلغاء آمن'),
+            child: const Text(S.safeCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('استعادة نهائية'),
+            child: const Text(S.finalRestore),
           ),
         ],
       ),
@@ -1092,31 +1067,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final declare = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('محتوى النسخة'),
+          title: const Text(S.backupContentTitle),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(candidate!.hasImages
-                  ? 'النسخة تتضمن صور الأصناف '
-                      '(${candidate.imagesFiles.length} ملفاً)'
-                  : 'النسخة بلا صور'),
+                  ? S.restoreIncludesImages(candidate.imagesFiles.length)
+                  : S.restoreNoImages),
               if (!candidate.hasImages && currentHasFiles) ...[
                 const SizedBox(height: 8),
                 const Text(
-                    'مجلد الصور الحالي سيُستبدل بفراغ — والصور القديمة '
-                    'محفوظة في نسخة ما قبل الاستعادة (طريق الرجوع).'),
+                    S.restoreImagesWillEmpty),
               ],
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('تراجع'),
+              child: const Text(S.revertAction),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('متابعة'),
+              child: const Text(S.continueAction),
             ),
           ],
         ),
@@ -1145,18 +1118,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('تمت الاستعادة'),
+          title: const Text(S.restoreDone),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('استُبدلت القاعدة كاملة. '
-                  'نسخة ما قبل الاستعادة (طريق الرجوع) في:'),
+              const Text(S.restoreRollbackAt),
               const SizedBox(height: 12),
               SelectableText(snapshotPath),
               if (File(imagesSiblingPath(snapshotPath)).existsSync()) ...[
                 const SizedBox(height: 8),
-                const Text('ولقطة صورها المرافقة:'),
+                const Text(S.restoreRollbackImagesAt),
                 SelectableText(imagesSiblingPath(snapshotPath)),
               ],
             ],
@@ -1164,7 +1136,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           actions: [
             FilledButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('متابعة'),
+              child: const Text(S.continueAction),
             ),
           ],
         ),
@@ -1186,7 +1158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.restore');
       messenger.showSnackBar(SnackBar(
-          content: Text('تعذرت الاستعادة — $e${dqTag(e)}')));
+          content: Text(S.restoreFailed(e, dqTag(e)))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1223,13 +1195,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('أُنشئت نسخة الصور'),
+          title: const Text(S.imagesBackupCreated),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('ملف صور مستقل ($_imagesCount ملفاً — '
-                  'صور الأصناف: ${formatImagesBytes(_imagesBytes)})'),
+              Text(S.imagesFileStandalone(_imagesCount, formatImagesBytes(_imagesBytes))),
               const SizedBox(height: 12),
               SelectableText(target),
             ],
@@ -1240,11 +1211,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.of(context).pop();
                 _exportBackup(target);
               },
-              child: const Text('إخراج النسخة'),
+              child: const Text(S.exportBackupAction),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('حسناً'),
+              child: const Text(S.okAction),
             ),
           ],
         ),
@@ -1256,7 +1227,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.images_backup');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر إنشاء نسخة الصور — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.imagesBackupFailed(e, dqTag(e)))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1279,18 +1250,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('استعادة صور من ملف مستقل؟'),
+          title: const Text(S.restoreImagesTitle),
           content: const Text(
-              'سيُستبدل مجلد الصور الحالي كاملاً بمحتوى الملف — '
-              'بلا أي مساس بالبيانات. التراجع الآن لم يُمسّ شيئاً.'),
+              S.restoreImagesBody),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('إلغاء'),
+              child: const Text(S.cancelAction),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('استعادة الصور'),
+              child: const Text(S.restoreImagesAction),
             ),
           ],
         ),
@@ -1315,7 +1285,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       _loadImagesInfo();
       messenger.showSnackBar(SnackBar(
-        content: Text('استُعيدت صور الأصناف ($count ملفاً) — بلا مساس بالبيانات'),
+        content: Text(S.imagesRestored(count)),
       ));
     } on CorruptBackupException catch (e) {
       await dqLog(widget.db, e, context: 'settings.images_restore');
@@ -1324,7 +1294,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       await dqLog(widget.db, e, context: 'settings.images_restore');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذرت استعادة الصور — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.imagesRestoreFailed(e, dqTag(e)))),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1349,9 +1319,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// لسان المستويات بالعربية الصحيحة — واحدة مفردة والخمس عشرة
   /// تمييزُ مفرد، والبقية جمع (درس الدقة اللغوية بسجل العبارات).
   String _idleLabel(int minutes) {
-    if (minutes == 1) return 'دقيقة واحدة';
-    if (minutes == 15) return '15 دقيقة';
-    return '$minutes دقائق';
+    if (minutes == 1) return S.oneMinute;
+    if (minutes == 15) return S.fifteenMinutes;
+    return S.minutesCount(minutes);
   }
 
   /// س213 (D-217): بطاقة الخمول وقفل الجهاز — للمدير حصراً («بيد
@@ -1368,16 +1338,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'الخمول وقفل الجهاز',
+              S.idleLockTitle,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 4),
             const Text(
-              'إذا بقي التطبيق بلا لمس ومفاتيح مدة الخمول المختارة تقفل '
-              'الجلسة وتعود بوابة الجهاز — والفتح السريع لبلاطة المستأنف '
-              'بالكلمة أو البصمة. مغادرة التطبيق (إخفاء النافذة أو '
-              'خلفيتها) تقفل الجلسة فوراً — قاعدة لا خيار. الإعداد '
-              'لجهاز المنشأة بيد المدير حصراً فلا يعطّله الكاشير.',
+              S.idleLockBody,
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<int>(
@@ -1385,7 +1351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               // للمُنشأ هي المعروضة، والحقل محمّل من حالة القارئ عند الفتح.
               initialValue: _idleMinutes,
               decoration: const InputDecoration(
-                labelText: 'قفل الجلسة بعد خمول',
+                labelText: S.lockAfterIdle,
                 border: OutlineInputBorder(),
               ),
               items: [
@@ -1420,7 +1386,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'استيراد البيانات',
+              S.dataImportTitle,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 4),
@@ -1428,12 +1394,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             // ظاهر والشرح الكثيف خلف توسعة «كيف يعمل؟» — فتبقى
             // الحقيقة كاملة والمساحة هادئة فوق الفعل.
             _ExplanationDisclosure(
-              summary: 'الأطراف والأصناف بقوالب CSV المعتمدة ومعاينة '
-                  'قبل الاعتماد، والتفصيل خلف التوسعة.',
-              details: 'بيانات الانتقال على القوالب المعتمدة: '
-                  'الأطراف والأصناف — CSV بترميز UTF-8 بقالب معرّف، '
-                  'ومعاينة وعدادات قبل الاعتماد، ونسخة حدثية تلقائية قبله، '
-                  'ومعاملة واحدة كل-أو-لا شيء.',
+              summary: S.dataImportBody,
+              details: S.dataImportMigrationBody,
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
@@ -1446,7 +1408,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               },
               icon: const Icon(Icons.import_export),
-              label: const Text('فتح شاشة الاستيراد'),
+              label: const Text(S.openImportScreen),
             ),
           ],
         ),
@@ -1464,7 +1426,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final lastSuccess = catalog?.lastSuccess ?? const {};
     final manager = _session?.permissions.isAll ?? false;
     String fmt(DateTime? t) => t == null
-        ? 'لم تُنشأ بعد'
+        ? S.notCreatedYet
         : '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
     return Card(
       child: Padding(
@@ -1473,19 +1435,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'النسخ الاحتياطي المجدول (ساعي/يومي/أسبوعي/شهري)',
+              S.scheduledBackupTitle,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 4),
             // س198 (م17): سطر التلخيص والكشف التدريجي — دوريات النسخ
             // وشروطها كلها باقية حرفاً خلف التوسعة.
             _ExplanationDisclosure(
-              summary: 'النسخ تلقائية بكل دورية تختارها، والتفصيل '
-                  'بالدوريات وشروطها خلف التوسعة.',
-              details: 'ساعية كل ساعة عمل، ويومية عند أول تشغيل يلي اليوم، '
-                  'وأسبوعية أول تشغيل يلي السبت، وشهرية أول تشغيل يلي أول '
-                  'الشهر — نسخة واحدة عند اللحاق بلا تعويض الفائت. الدورية '
-                  'بيانات فقط؛ المرفقات باليدوية والسنوية والحدثية.',
+              summary: S.scheduledBackupBody,
+              details: S.scheduledBackupPeriods,
             ),
             const SizedBox(height: 8),
             // التذكيرات الذكية — الواجهة الأغنى (دفعة 2، تكليف §3):
@@ -1504,10 +1462,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     '${kind.label}: ${fmt(lastSuccess[kind])}'),
             const SizedBox(height: 8),
             Text(center == null
-                ? 'المجرد غير مبدأ هذه الجلسة (وضع اختبار) — النسخ '
-                    'اليدوي أعلاه يعمل كاملاً.'
-                : 'حصة مجلد النسخ: '
-                    '${(center.quotaBytes / (1024 * 1024 * 1024)).toStringAsFixed(0)}GB'),
+                ? S.trialModeDeferred
+                : S.backupQuotaGb((center.quotaBytes / (1024 * 1024 * 1024)).toStringAsFixed(0))),
             if (manager && center != null) ...[
               const SizedBox(height: 8),
               Wrap(
@@ -1529,7 +1485,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             FilledButton.icon(
               onPressed: _openBackupsCatalog,
               icon: const Icon(Icons.list_alt),
-              label: const Text('كتالوج النسخ (تحقق/استعادة/تصدير/حذف)'),
+              label: const Text(S.backupsCatalogTitle),
             ),
             const SizedBox(height: 8),
             // د-4/د-8 (§25.8، س136): قسم إدارة التخزين — شاشة مستقلة
@@ -1547,7 +1503,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               },
               icon: const Icon(Icons.settings_backup_restore),
-              label: const Text('إدارة التخزين (العرض والتنظيف الذكي)'),
+              label: const Text(S.storageManagerTitle),
             ),
           ],
         ),
@@ -1563,9 +1519,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.storefront_outlined),
-        title: const Text('بيانات المنشأة'),
+        title: const Text(S.companyDataTitle),
         subtitle: const Text(
-            'الاسم والهاتف والعنوان والرقم الضريبي — تظهر أول المطبوعات'),
+            S.companyDataBody),
         trailing: const Icon(Icons.chevron_right),
         onTap: _openCompanyDataDialog,
       ),
@@ -1597,7 +1553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('بيانات المنشأة'),
+          title: const Text(S.companyDataTitle),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1605,21 +1561,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 TextField(
                   controller: name,
                   decoration: const InputDecoration(
-                      labelText: 'اسم المنشأة (إلزامي)'),
+                      labelText: S.companyNameRequired),
                 ),
                 TextField(
                   controller: phone,
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(labelText: 'الهاتف'),
+                  decoration: const InputDecoration(labelText: S.phoneLabel),
                 ),
                 TextField(
                   controller: address,
-                  decoration: const InputDecoration(labelText: 'العنوان'),
+                  decoration: const InputDecoration(labelText: S.addressLabel),
                 ),
                 TextField(
                   controller: tax,
                   decoration: const InputDecoration(
-                      labelText: 'الرقم الضريبي (اختياري)'),
+                      labelText: S.taxNumberOptional),
                 ),
               ],
             ),
@@ -1629,7 +1585,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: busy
                   ? null
                   : () => Navigator.of(dialogContext).pop(),
-              child: const Text('إلغاء'),
+              child: const Text(S.cancelAction),
             ),
             FilledButton(
               onPressed: busy
@@ -1638,7 +1594,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       if (name.text.trim().isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                              content: Text('اسم المنشأة إلزامي')),
+                              content: Text(S.companyNameMandatory)),
                         );
                         return;
                       }
@@ -1664,16 +1620,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                               content: Text(
-                                  'حُفظت بيانات المنشأة — تظهر أول المطبوعات')),
+                                  S.companyDataSaved)),
                         );
                       } catch (e) {
                         setDialogState(() => busy = false);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('تعذر الحفظ — $e')),
+                          SnackBar(content: Text(S.saveFailed(e))),
                         );
                       }
                     },
-              child: const Text('حفظ'),
+              child: const Text(S.saveAction),
             ),
           ],
         ),
@@ -1684,7 +1640,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('الإعدادات')),
+      appBar: AppBar(title: const Text(S.settingsTitle)),
       body: ListView(
         padding: EdgeInsets.fromLTRB(
             diqqahAdaptiveHorizontalMargin(context, baseMargin: 16),
@@ -1697,7 +1653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // بقرار D-218 مع تذكير تنفيذه). الأقسام بترتيب القرار:
           // الهوية والصلاحيات، البيانات والأمان، سياسات البيع،
           // العرض والمظهر، العمليات.
-          _SettingsSectionHeader('الهوية والصلاحيات'),
+          _SettingsSectionHeader(S.identitySectionTitle),
           // س203: بيانات المنشأة — هوية صاحب العمل التي تظهر أول
           // المطبوعات (الطباعة التجارية)، للمدير حصراً فالمنشأة
           // هويّة إدارية لا يدخلها منوِّب.
@@ -1713,7 +1669,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'المستخدم الحالي',
+                    S.currentUser,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
@@ -1729,7 +1685,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   FilledButton.tonalIcon(
                     onPressed: _busy ? null : _lockForSwitch,
                     icon: const Icon(Icons.lock_person_outlined),
-                    label: const Text('قفل وتبديل المستخدم'),
+                    label: const Text(S.lockSwitchUser),
                   ),
                   const SizedBox(height: 8),
                   // س211 (D-216): تغيير الكلمة الذاتي طوعي لصاحب
@@ -1737,7 +1693,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _changeOwnPassword,
                     icon: const Icon(Icons.password_outlined),
-                    label: const Text('تغيير كلمة مروري'),
+                    label: const Text(S.changeMyPassword),
                   ),
                 ],
               ),
@@ -1746,7 +1702,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           // ── 2. البيانات والأمان: الخمول (س213/D-217) والنسخ
           // والاستعادة وفحص الثوابت.
-          _SettingsSectionHeader('البيانات والأمان'),
+          _SettingsSectionHeader(S.dataSecurityTitle),
           // ── س213 (D-217): بطاقة الخمول — إعداد جهاز بيد المدير حصراً
           // فلا يعطّله الكاشير (تفضيل شخصي لا): المستويات المغلقة
           // 1/5/10/15/30 دقيقة والافتراض 10، وقفل مغادرة التطبيق
@@ -1766,20 +1722,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'النسخ الاحتياطي الكامل',
+                    S.fullBackupTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   // س198 (م17): سطر التلخيص والكشف التدريجي — الشرح
                   // الكامل بلاحقة البرنامج وشروط التشفير خلف التوسعة.
                   _ExplanationDisclosure(
-                    summary: 'ملف واحد للقاعدة كاملة بلاحقة البرنامج '
-                        'الخاصة، يُستعاد كاملاً أو لا شيء — والتفصيل '
-                        'خلف التوسعة.',
-                    details: 'ملف واحد للقاعدة كاملة بلاحقة البرنامج الخاصة '
-                        '(.diqqah) — يُستعاد كاملاً أو لا شيء. '
-                        'يُحفظ في مجلد القاعدة نفسه. التشفير الافتراضي '
-                        'بمفتاح البرنامج، وإلغاؤه قرار واعٍ بتحذير.',
+                    summary: S.fullBackupBody,
+                    details: S.fullBackupBodyLong,
                   ),
                   const SizedBox(height: 4),
                   // D-050: صندوق الاختيار مشدود افتراضياً — النسخة بلا
@@ -1790,10 +1741,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: _busy
                         ? null
                         : (v) => setState(() => _encryptBackup = v ?? true),
-                    title: const Text('تشفير النسخة بمفتاح البرنامج'),
+                    title: const Text(S.programKeyEncryption),
                     subtitle: const Text(
-                        'الافتراضي — لا يفتح النسخة إلا '
-                        'التطبيق نفسه على أي جهاز'),
+                        S.programKeyDefault),
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
@@ -1804,11 +1754,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: _busy
                         ? null
                         : (v) => setState(() => _includeImages = v ?? true),
-                    title: const Text('تضمين صور الأصناف'),
+                    title: const Text(S.includeItemImages),
                     subtitle: Text(
-                        'صور الأصناف: ${formatImagesBytes(_imagesBytes)}'
-                        '${_imagesCount > 0 ? ' ($_imagesCount ملفاً)' : ''}'
-                        ' — في ملف ثانٍ مجاور بنفس المفتاح'),
+                        S.itemImagesSummary(formatImagesBytes(_imagesBytes), _imagesCount > 0 ? S.filesCountSuffix(_imagesCount) : '')),
                     contentPadding: EdgeInsets.zero,
                     controlAffinity: ListTileControlAffinity.leading,
                   ),
@@ -1831,15 +1779,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Expanded(
                         child: Text(
                           _backupLock != null
-                              ? 'النسخ مقفلة بكلمة مرور (جيل v3) — تُفك '
-                                  'بالكلمة أو رمز الاسترداد'
+                              ? S.v3LockedSummary
                               : _vaultKeys != null
-                                  ? 'النسخ بمفتاح هذا الجهاز (جيل الخزنة '
-                                      'v4) — تُفك هنا صمتاً وبرمز '
-                                      'الاسترداد على جهاز آخر — القفل '
-                                      'بكلمة اختياري فوقها'
-                                  : 'النسخ بلا كلمة مرور (جيل v2 بمفتاح '
-                                      'البرنامج) — القفل اختياري',
+                                  ? S.v4VaultSummary
+                                  : S.v2PlainSummary,
                         ),
                       ),
                     ],
@@ -1852,7 +1795,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: TextButton.icon(
                             onPressed: _busy ? null : _setBackupLock,
                             icon: const Icon(Icons.lock_outline, size: 18),
-                            label: const Text('قفل النسخ بكلمة مرور'),
+                            label: const Text(S.lockBackupWithPassword),
                           ),
                         )
                       else ...[
@@ -1860,14 +1803,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: TextButton.icon(
                             onPressed: _busy ? null : _viewRecoveryCode,
                             icon: const Icon(Icons.key, size: 18),
-                            label: const Text('عرض رمز الاسترداد'),
+                            label: const Text(S.showRecoveryCode),
                           ),
                         ),
                         Expanded(
                           child: TextButton.icon(
                             onPressed: _busy ? null : _clearBackupLock,
                             icon: const Icon(Icons.lock_open, size: 18),
-                            label: const Text('إزالة القفل'),
+                            label: const Text(S.removeLockAction),
                           ),
                         ),
                       ],
@@ -1888,14 +1831,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const SizedBox(width: 8),
                         const Expanded(
                           child: Text(
-                              'رمز استرداد الخزنة — يُطلب مرة واحدة عند أول '
-                              'تشغيل، ويعاد عرضه من هنا (يفك نسخ v4 على '
-                              'جهاز آخر)'),
+                              S.vaultRecoverySummary),
                         ),
                         TextButton.icon(
                           onPressed: _busy ? null : _viewVaultRecoveryCode,
                           icon: const Icon(Icons.key, size: 18),
-                          label: const Text('عرض الرمز'),
+                          label: const Text(S.showCodeAction),
                         ),
                       ],
                     ),
@@ -1903,7 +1844,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: _busy ? null : _backup,
-                    child: const Text('إنشاء نسخة احتياطية'),
+                    child: const Text(S.createBackupAction),
                   ),
                 ],
               ),
@@ -1919,25 +1860,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'الاستعادة الكاملة',
+                    S.fullRestoreAction,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'تحقق من سلامة الملف (وتشفيره إن وجد) قبل استبدال القاعدة، '
-                    'بتأكيد مزدوج وإلغاء آمن. نسخة رجوع آلية تُلتقط قبل كل استعادة.',
+                    S.fullRestoreBody,
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: _restorePath,
                     decoration: InputDecoration(
-                      labelText: 'مسار ملف النسخة الاحتياطية',
+                      labelText: S.backupFilePathLabel,
                       border: const OutlineInputBorder(),
                       // D-056: على أندرويد مسار data مخفي لا يُكتب يدوياً —
                       // التصفح من داخل التطبيق هو الطريق القياسي الوحيد.
-                      helperText: 'على الهاتف استخدم زر التصفح بدل الكتابة اليدوية',
+                      helperText: S.mobileBrowseHint,
                       suffixIcon: IconButton(
-                        tooltip: 'اختيار ملف النسخة',
+                        tooltip: S.chooseBackupFile,
                         icon: const Icon(Icons.folder_open),
                         onPressed: _busy ? null : _pickBackupFile,
                       ),
@@ -1949,16 +1889,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     obscureText: true,
                     decoration: const InputDecoration(
                       labelText:
-                          'كلمة المرور أو رمز الاسترداد — للنسخ القديمة '
-                          'والمقفلة ونسخ جهاز آخر (نسخ هذا الجهاز '
-                          'تُفتح تلقائياً)',
+                          S.passwordOrCodeHint,
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonal(
                     onPressed: _busy ? null : _restore,
-                    child: const Text('استعادة…'),
+                    child: const Text(S.restoreEllipsis),
                   ),
                 ],
               ),
@@ -1974,13 +1912,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'نسخة الصور المستقلة',
+                    S.standaloneImagesBackup,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'مجلد الصور وحده في ملف `.diqqah.images` بنفس التغليف — '
-                    'تُستعاد منفردة فتستبدل الصور بلا مساس بالبيانات.',
+                    S.standaloneImagesBody,
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -1989,7 +1926,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: OutlinedButton.icon(
                           onPressed: _busy ? null : _backupImagesStandalone,
                           icon: const Icon(Icons.photo_library_outlined),
-                          label: const Text('نسخ الصور'),
+                          label: const Text(S.copyImagesAction),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1997,7 +1934,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         child: OutlinedButton.icon(
                           onPressed: _busy ? null : _restoreImagesStandalone,
                           icon: const Icon(Icons.restore),
-                          label: const Text('استعادة صور'),
+                          label: const Text(S.restoreImagesShort),
                         ),
                       ),
                     ],
@@ -2016,19 +1953,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'فحص الثوابت',
+                    S.integrityChecksTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'الفحوص الأربعة ومطابقات الدفتر الثلاثة: '
-                    'توازن القيود، وسلامة المخزون، ولا حركة يتيمة، وارتباط '
-                    'الفواتير بقيودها، ومطابقة الصناديق والمخزون والذمم بالدفتر.',
+                    S.integrityChecksBody,
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonal(
                     onPressed: _integrityBusy ? null : _runIntegrityCheck,
-                    child: Text(_integrityBusy ? 'جارٍ الفحص…' : 'فحص الآن'),
+                    child: Text(_integrityBusy ? S.checkingNow : S.checkNowAction),
                   ),
                   if (_integrityReport != null) ...[
                     const SizedBox(height: 12),
@@ -2054,7 +1989,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           // ── 3. سياسات البيع: مسودات البيع وتحصيلات المندوب —
           // خيارا المنشأة في القاعدة (D-218).
-          _SettingsSectionHeader('سياسات البيع'),
+          _SettingsSectionHeader(S.salesPoliciesTitle),
           // ── س164: بطاقة مسودات البيع — خيارا المنشأة معاً: الحجز
           // (س102 بمفتاحه الباق حرفاً) صار بتابع المسودة بعد إلغاء
           // التعليق، و«مسودة أكبر من المتاح» نقطة المالك الخامسة:
@@ -2067,24 +2002,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'مسودات البيع',
+                    S.salesDraftsTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'مسودة البيع التزام غير معلن: لا تمس المخزون والدفتر والذمة '
-                    'حتى تُرحَّل، وترحيلها بيده أو بيد من مُنح بوابة ترحيل '
-                    'مسودات الآخرين. الخياران هنا قرار منشأة يسري على '
-                    'كل مستخدمي القاعدة.',
+                    S.salesDraftsBody,
                   ),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('مسودات البيع تحجز الكمية'),
+                    title: const Text(S.draftsHoldStock),
                     subtitle: const Text(
-                        'مفعّل: كميات كل مسودة بيع تحجز فلا يبيعها سواها '
-                        'والمتاح يُخصم بها حتى الترحيل أو الحذف. '
-                        'مطفأ: مسودة فقط لا مساس بالكمية (السلوك القائم).'),
+                        S.draftsHoldStockBody),
                     value: _heldReserve,
                     onChanged: _busy
                         ? null
@@ -2095,12 +2025,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('السماح بحفظ مسودة أكبر من المتاح'),
+                    title: const Text(S.allowDraftOverStock),
                     subtitle: const Text(
-                        'مفعّل: تُحفظ مسودة البيع ولو فاقت كمياتها الرصيد '
-                        '(وعند تفعيل الحجز تحجز كامل كميتها) والحاكم لحظة '
-                        'الترحيل — من رحّل أولاً غلب. '
-                        'مطفأ: فحص الاكتفاء عند الحفظ باقٍ (السلوك القائم).'),
+                        S.allowDraftOverStockBody),
                     value: _draftOverStock,
                     onChanged: _busy
                         ? null
@@ -2125,16 +2052,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'تحصيلات المندوب',
+                    S.agentCollectionsTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'تحصيل المندوب يُحفظ معلّقاً في «تحصيلات في الطريق» حتى '
-                    'اعتماده وتسليمه للصندوق. السقف هنا: أقصى ما '
-                    'يحمله المندوب الواحد من معلّق بوحدة صغرى من العملة '
-                    'الأساسية — تجاوزه يمنع تحصيلاً جديداً حتى التسليم. '
-                    'الفراغ أو الصفر: بلا سقف (السلوك القائم).',
+                    S.agentCollectionsBody,
                   ),
                   const SizedBox(height: 8),
                   TextField(
@@ -2142,14 +2065,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     keyboardType: TextInputType.number,
                     inputFormatters: const [ThousandsSeparatorInputFormatter()],
                     decoration: const InputDecoration(
-                      labelText: 'سقف العهدة بوحدة صغرى (فارغ: بلا سقف)',
+                      labelText: S.custodyCapLabel,
                       border: OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.tonal(
                     onPressed: _busy ? null : _saveCustodyCap,
-                    child: const Text('حفظ سقف العهدة'),
+                    child: const Text(S.saveCustodyCap),
                   ),
                   if (_custodyCapResult != null)
                     Padding(
@@ -2163,7 +2086,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           // ── 4. العرض والمظهر: التاريخ الهجري وصور المطبوعات والخط
           // والمظهر — عرضٌ لا سياسات (D-218).
-          _SettingsSectionHeader('العرض والمظهر'),
+          _SettingsSectionHeader(S.displaySectionTitle),
           // ── بطاقة خيارات العرض (F-167/D-183 — الدفعة 23): مفتاح
           // الهجري بجانب الميلادي — عرض لا إدخال، والميلادي أساس
           // التخزين والإدخال دائماً (D-077/F-175: لا إدخال هجري أبداً).
@@ -2174,22 +2097,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'خيارات العرض',
+                    S.displayOptionsTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'التاريخ الهجري بجانب الميلادي في القوائم والتقارير '
-                    'والمطبوعات — بالتقويم الحسابي المعياري وقد يخالف '
-                    'رؤية المحلّة بيوم أو يومين فهو عرض لا مرجع حكم. '
-                    'الميلادي أساس التخزين والإدخال دائماً — لا إدخال هجري.',
+                    S.hijriBesideGregorianBody,
                   ),
                   const SizedBox(height: 8),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('التاريخ الهجري بجانب الميلادي'),
+                    title: const Text(S.hijriBesideGregorian),
                     subtitle: Text(
-                        'معاينة: ${displayDate(todayIsoDate())}'),
+                        S.previewOf(displayDate(todayIsoDate()))),
                     value: hijriDisplayEnabled.value,
                     onChanged: _busy
                         ? null
@@ -2214,13 +2134,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'صور الأصناف في المطبوعات',
+                    S.itemImagesInPrints,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'معطلة افتراضياً في كل المستندات — فعّلها أين تشاء. '
-                    'عمود صورة مربع بالاحتواء، وبلا صورة دائرة بأول حرف.',
+                    S.itemImagesInPrintsBody,
                   ),
                   const SizedBox(height: 8),
                   for (final (key, label) in kPrintImageChoices)
@@ -2250,15 +2169,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'خط التطبيق والطباعة',
+                    S.appFontTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'خيار واحد يغيّر خط الشاشات والفواتير المطبوعة معاً '
-                    'بعد لحظة. الخطوط الأربعة مدمجة مع التطبيق حصراً — '
-                    'فمطبوعاتك تظهر واحدة على كل الأجهزة، ولا يحتاج '
-                    'البرنامج أي اتصال.',
+                    S.appFontBody,
                   ),
                   const SizedBox(height: 4),
                   // منتقي الشرائح الأربع (D-212) — شفرات اختيار بقائمة
@@ -2298,13 +2214,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'المظهر',
+                    S.themeTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'نهاري بخلفية بيضاء وليلي بخلفية داكنة، والنظام يتبع '
-                    'إعداد جهازك — التغيير فوري بلا إعادة تشغيل.',
+                    S.themeBody,
                   ),
                   const SizedBox(height: 4),
                   // منتقي الأوضاع الثلاثة (س182) — بنمط منتقي الخطوط:
@@ -2336,7 +2251,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ── 5. العمليات: الترقيم والعملات والقوالب والمزامنة
           // والاستيراد والتشخيص (D-218) — والتشخيص أخيرة القائمة
           // بعرف درس D-098/س107 باقياً.
-          _SettingsSectionHeader('العمليات'),
+          _SettingsSectionHeader(S.operationsTitle),
           // ── بطاقة الترقيم (D-169 — س56): سنة برقمين فالعدّاد بلا فاصل،
           // وعرض العدّاد بعد السنة خانة إعداد المالك (3..8) بمعاينة حية —
           // والأرقام الصادرة لا تُمسّ فالتغيير للوثائق الجديدة حصراً.
@@ -2348,14 +2263,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'ترقيم المستندات',
+                    S.numberingTitle,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'الصيغة: سنة برقمين فالعدّاد مبطناً بلا فاصل — «26000001». '
-                    'عدد خانات العدّاد بعد السنة من 3 إلى 8، والأرقام الصادرة '
-                    'لا تتغير — فالتغيير للوثائق الجديدة حصراً.',
+                    S.numberingBody,
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -2366,17 +2279,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       LengthLimitingTextInputFormatter(1),
                     ],
                     decoration: const InputDecoration(
-                      labelText: 'عدد خانات العدّاد بعد السنة (3–8)',
+                      labelText: S.counterDigitsLabel,
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 4),
-                  Text('معاينة: «فاتورة بيع ${_counterWidthPreview()}»'),
+                  Text(S.numberingPreview(_counterWidthPreview())),
                   const SizedBox(height: 12),
                   FilledButton.tonal(
                     onPressed: _busy ? null : _saveCounterWidth,
-                    child: const Text('حفظ عدد خانات العدّاد'),
+                    child: const Text(S.saveCounterDigits),
                   ),
                 ],
               ),
@@ -2389,10 +2302,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Card(
             child: ListTile(
               leading: const Icon(Icons.currency_exchange),
-              title: const Text('العملات وأسعار الصرف'),
+              title: const Text(S.currenciesTitle),
               subtitle: const Text(
-                  'إضافة عملات وتعطيل غير المستخدمة — وأسعار يومية '
-                  'محفوظة لا تُعدل أبداً'),
+                  S.currenciesBody),
               onTap: () async {
                 await Navigator.of(context).push(
                   MaterialPageRoute<void>(
@@ -2427,10 +2339,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               key: const ValueKey('settings_diagnostics'),
               leading: const Icon(Icons.bug_report_outlined),
-              title: const Text('التشخيص ومرجع الأخطاء'),
+              title: const Text(S.diagnosticsTitle),
               subtitle: const Text(
-                  'هوية النافذة وآخر أخطاء القاعدة المرقّمة DQ-xxxx '
-                  'وشرحها — لمشاركتها مع من يفحص المشكلة.'),
+                  S.diagnosticsBody),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).push(
@@ -2512,7 +2423,7 @@ class _ExplanationDisclosureState extends State<_ExplanationDisclosure> {
           child: TextButton.icon(
             onPressed: () => setState(() => _open = !_open),
             icon: Icon(_open ? Icons.expand_less : Icons.expand_more),
-            label: Text(_open ? 'إخفاء الشرح' : 'كيف يعمل؟'),
+            label: Text(_open ? S.hideExplanation : S.howItWorks),
           ),
         ),
         if (_open)

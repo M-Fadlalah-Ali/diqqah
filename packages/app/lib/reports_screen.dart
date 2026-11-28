@@ -18,6 +18,7 @@ import 'drilldown.dart'
     show AccountStatementScreen, showItemSheet, showPartySheet;
 import 'adaptive.dart';
 import 'report_table.dart';
+import 'l10n/app_strings.dart';
 
 /// م09 تنظيم التقارير (س205 — الدفعة الثالثة من فحص الواجهات وفق M3
 /// بأمر المالك «تابع في م06 التكيفي ثم بقية الرابعة»): القائمة كانت
@@ -105,19 +106,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('التقارير اليومية')),
+      appBar: AppBar(title: const Text(S.dailyReportsTitle)),
       // م06 التكيفي لويندوز (س205): المحتوى يتوسّط بعرضه الأقصى على
       // العريض والضيّق بهامشه الأساسي كما كان حرفاً.
       body: ListView(
         padding: EdgeInsets.symmetric(
             horizontal: diqqahAdaptiveHorizontalMargin(context)),
         children: [
-          _reportsSectionHeader(context, 'القوائم المالية'),
+          _reportsSectionHeader(context, S.financialStatementsTitle),
           ListTile(
             leading: const Icon(Icons.balance_outlined),
-            title: const Text('ميزان المراجعة'),
+            title: const Text(S.trialBalanceTitle),
             subtitle: const Text(
-                'أرصدة الحسابات من المرحّل لحظة الطلب — ومجموعاه متوازنان'),
+                S.trialBalanceDesc),
             onTap: () => _open(context, _TrialBalanceView(db: widget.db)),
           ),
           // الدفعة 33 (عاشرة م2): القوائم المالية الأساسية F-096 من
@@ -130,53 +131,53 @@ class _ReportsScreenState extends State<ReportsScreen> {
           if (_canSeeFinancials) ...[
             ListTile(
               leading: const Icon(Icons.receipt_long_outlined),
-              title: const Text('قائمة الدخل'),
+              title: const Text(S.incomeStatementTitle),
               subtitle: const Text(
-                  'الإيرادات والمصروفات وصافي النتيجة بمدى تاريخ — من أنواع الحسابات'),
+                  S.incomeStatementDesc),
               onTap: () =>
                   _open(context, IncomeStatementView(db: widget.db)),
             ),
             ListTile(
               leading: const Icon(Icons.balance_outlined),
-              title: const Text('الميزانية العمومية'),
+              title: const Text(S.balanceSheetTitle),
               subtitle: const Text(
-                  'الأصول والخصوم وحقوق الملكية إلى تاريخ — وبشارة المعادلة'),
+                  S.balanceSheetDesc),
               onTap: () =>
                   _open(context, BalanceSheetView(db: widget.db)),
             ),
           ],
-          _reportsSectionHeader(context, 'الدفاتر والمطابقة'),
+          _reportsSectionHeader(context, S.booksMatchingTitle),
           // س-152/D-150 (دفعة 15): دفتر اليومية — قيود المرحّل
           // بترتيب الزمن بأسطرها بفلاتر المدى والدفتر.
           ListTile(
             leading: const Icon(Icons.menu_book_outlined),
-            title: const Text('دفتر اليومية'),
+            title: const Text(S.journalBookTitle),
             subtitle: const Text(
-                'كل قيد بأسطره بترتيب الزمن — ومجموعاه متوازنان'),
+                S.journalBookDesc),
             onTap: () => _open(context, _JournalBookView(db: widget.db)),
           ),
           // الدفعة 31 (ثامنة م2): ربط المخزون بالدفتر بصرياً — ثابت
           // المطابقة D-067/F-178 معروض بالأرقام لا كلاماً (07 §3.1).
           ListTile(
             leading: const Icon(Icons.rule_outlined),
-            title: const Text('مطابقة دفتر المخزون'),
+            title: const Text(S.stockLedgerMatchTitle),
             subtitle: const Text(
-                'رصيد المخزون بالقيود مقابل قيمته بالحركات — لكل صنف والإجمالي'),
+                S.stockLedgerMatchDesc),
             onTap: () =>
                 _open(context, LedgerReconView(db: widget.db)),
           ),
-          _reportsSectionHeader(context, 'الصناديق والذمم'),
+          _reportsSectionHeader(context, S.boxesAndReceivablesTitle),
           ListTile(
             leading: const Icon(Icons.account_balance_wallet_outlined),
-            title: const Text('تقرير الصناديق'),
+            title: const Text(S.boxesReportTitle),
             subtitle: const Text(
-                'رصيد كل صندوق بمعادلة الصندوق ذاتها — والمعطل بشارته لا يُخفى'),
+                S.boxesReportDesc),
             onTap: () => _open(context, _CashBoxesView(db: widget.db)),
           ),
           ListTile(
             leading: const Icon(Icons.swap_horiz),
-            title: const Text('الذمم المدينة والدائنة'),
-            subtitle: const Text('صافي كل طرف — هم يدينون لنا / نحن مدينون لهم'),
+            title: const Text(S.receivablesPayablesTitle),
+            subtitle: const Text(S.receivablesPayablesDesc),
             onTap: () => _open(context, _ReceivablesPayablesView(db: widget.db)),
           ),
           // س-151/D-149 (دفعة 15): أعمار الذمم — أقرب ربح من دراسة
@@ -185,9 +186,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
           // موضع البند انتقل بقسمه بتنظيم م09 (س205) واللسان والهدف كما كانا.
           ListTile(
             leading: const Icon(Icons.hourglass_bottom),
-            title: const Text('أعمار الذمم'),
+            title: const Text(S.agingTitle),
             subtitle: const Text(
-                'كل طرف بمبلغه المفتوح موزعاً على فترات التأخر عن الاستحقاق'),
+                S.agingDesc),
             onTap: () => _open(context, _AgingView(db: widget.db)),
           ),
           // الدفعة 34 (F-124، D-194): مراكز العملات — كل عملة حية
@@ -195,41 +196,40 @@ class _ReportsScreenState extends State<ReportsScreen> {
           // وآخر سعر مسجل — القيم المخزنة حصراً لا حساب صرف جديد.
           ListTile(
             leading: const Icon(Icons.currency_exchange),
-            title: const Text('مراكز العملات'),
+            title: const Text(S.currencyCentersTitle),
             subtitle: const Text(
-                'كل عملة بصناديقها وفواتيرها المفتوحة ومكافئها بالأساسية '
-                'ومآخر سعر مسجل'),
+                S.currencyCentersDesc),
             onTap: () => _open(context, _CurrencyPositionsView(db: widget.db)),
           ),
-          _reportsSectionHeader(context, 'المخزون والحركة'),
+          _reportsSectionHeader(context, S.stockAndMovementTitle),
           ListTile(
             leading: const Icon(Icons.inventory_2_outlined),
-            title: const Text('تقرير المخزون'),
+            title: const Text(S.stockReportTitle),
             subtitle: const Text(
-                'الكمية والقيمة الدفترية لكل صنف — والمتوسط عرضاً حصراً'),
+                S.stockReportDesc),
             onTap: () => _open(context, InventoryView(db: widget.db)),
           ),
           ListTile(
             leading: const Icon(Icons.trending_up),
-            title: const Text('مبيعات وحركة الأصناف'),
-            subtitle: const Text('بيع ومردود بيع بمدى تاريخ — والصافي مشتق لا مخزن'),
+            title: const Text(S.itemSalesMovementTitle),
+            subtitle: const Text(S.itemSalesMovementDesc),
             onTap: () =>
                 _open(context, MovementView(db: widget.db, sales: true)),
           ),
           ListTile(
             leading: const Icon(Icons.shopping_cart_outlined),
-            title: const Text('تقرير المشتريات'),
+            title: const Text(S.purchasesReportTitle),
             subtitle: const Text(
-                'المستقل — شراء ومردود شراء بمدى تاريخ'),
+                S.purchasesReportDesc),
             onTap: () =>
                 _open(context, MovementView(db: widget.db, sales: false)),
           ),
-          _reportsSectionHeader(context, 'الإدارة'),
+          _reportsSectionHeader(context, S.managementTitle),
           ListTile(
             leading: const Icon(Icons.lock_clock_outlined),
-            title: const Text('الفترات والإقفال'),
+            title: const Text(S.periodsClosingTitle),
             subtitle: const Text(
-                'إقفال فترة وما فيها يثبّت إلى الأبد — والفك طارئ بسبب نصي إلزامي'),
+                S.periodsClosingDesc),
             onTap: () => _open(context, PeriodsScreen(db: widget.db)),
           ),
         ],
@@ -294,7 +294,7 @@ Future<void> _printReportDoc(
     await sharePdfBytes(bytes, '$title.pdf');
   } catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+      SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
     );
   }
 }
@@ -322,7 +322,7 @@ Future<void> _exportReportCsv(
     await shareCsvBytes(csv, '$title.csv');
   } catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('تعذر توليد التصدير — $e${dqTag(e)}')),
+      SnackBar(content: Text(S.exportFailed(e, dqTag(e)))),
     );
   }
 }
@@ -347,13 +347,13 @@ class _ReportActionsBar extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onCsv,
               icon: const Icon(Icons.table_view_outlined),
-              label: const Text('تصدير CSV'),
+              label: const Text(S.exportCsv),
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
               onPressed: onPrint,
               icon: const Icon(Icons.picture_as_pdf_outlined),
-              label: const Text('طباعة / PDF'),
+              label: const Text(S.printOrPdf),
             ),
           ],
         ),
@@ -374,7 +374,7 @@ class _TrialBalanceView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ميزان المراجعة')),
+      appBar: AppBar(title: const Text(S.trialBalanceTitle)),
       body: FutureBuilder<TrialBalanceReport>(
         future: db.trialBalanceReport(),
         builder: (context, snapshot) {
@@ -382,7 +382,7 @@ class _TrialBalanceView extends StatelessWidget {
           final report = snapshot.data!;
           // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة
           // 20): تجميع واحد فلا انحراف بين ما يُرى وما يُطبع وما يُصدَّر.
-          const docColumns = ['الحساب', 'مدين', 'دائن', 'الرصيد'];
+          const docColumns = [S.accountLabel, S.debitLabel, S.creditLabel, S.balanceLabel];
           final docRows = [
             for (final row in report.rows)
               [
@@ -393,13 +393,13 @@ class _TrialBalanceView extends StatelessWidget {
               ],
           ];
           final docFooter = <(String, String)>[
-            ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
-            ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
+            (S.totalDebit, formatMinorAmount(report.totalDebitMinor)),
+            (S.totalCredit, formatMinorAmount(report.totalCreditMinor)),
             (
-              'الحالة',
+              S.statusLabel,
               report.isBalanced
-                  ? 'الميزان متوازن ✓'
-                  : 'الميزان غير متوازن — راجع فوراً!',
+                  ? S.trialBalanced
+                  : S.trialNotBalanced,
             ),
           ];
           return Column(
@@ -411,15 +411,14 @@ class _TrialBalanceView extends StatelessWidget {
                   child: Column(
                     children: [
                       Text(
-                        'مجموع المدين ${formatMinorAmount(report.totalDebitMinor)}'
-                        ' — مجموع الدائن ${formatMinorAmount(report.totalCreditMinor)}',
+                        S.totalsDebitCredit(formatMinorAmount(report.totalDebitMinor), formatMinorAmount(report.totalCreditMinor)),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
                       Text(
                         report.isBalanced
-                            ? 'الميزان متوازن ✓ — مجموعا الجانبين متساويان'
-                            : 'الميزان غير متوازن — راجع فوراً!',
+                            ? S.trialBalancedFull
+                            : S.trialNotBalanced,
                         style: TextStyle(
                           color: report.isBalanced
                               ? diqqahLanesOf(context).positive.fg
@@ -438,14 +437,14 @@ class _TrialBalanceView extends StatelessWidget {
                       onPrint: () => _printReportDoc(
                         db: db,
                         context,
-                        title: 'ميزان المراجعة',
+                        title: S.trialBalanceTitle,
                         columns: docColumns,
                         rows: docRows,
                         footer: docFooter,
                       ),
                       onCsv: () => _exportReportCsv(
                         context,
-                        title: 'ميزان المراجعة',
+                        title: S.trialBalanceTitle,
                         columns: docColumns,
                         rows: docRows,
                         footer: docFooter,
@@ -498,18 +497,18 @@ class _CashBoxesView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('تقرير الصناديق')),
+      appBar: AppBar(title: const Text(S.boxesReportTitle)),
       body: FutureBuilder<List<CashBoxReportRow>>(
         future: db.cashBoxesReport(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
           final rows = snapshot.data!;
           if (rows.isEmpty) {
-            return _reportEmpty('لا صناديق بعد');
+            return _reportEmpty(S.noBoxesYet);
           }
           // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
           const docColumns = [
-            'الصندوق', 'الحساب', 'العملة', 'الحالة', 'الرصيد'
+            S.boxLabel, S.accountLabel, S.currencyLabel, S.statusLabel, S.balanceLabel
           ];
           final docRows = [
             for (final box in rows)
@@ -517,7 +516,7 @@ class _CashBoxesView extends StatelessWidget {
                 box.name,
                 box.accountCode,
                 box.currencyCode,
-                box.isActive ? 'نشط' : 'معطل',
+                box.isActive ? S.activeLabel : S.inactiveLabel,
                 formatMinorAmount(box.balanceBaseMinor),
               ],
           ];
@@ -527,13 +526,13 @@ class _CashBoxesView extends StatelessWidget {
                 onPrint: () => _printReportDoc(
                   db: db,
                   context,
-                  title: 'تقرير الصناديق',
+                  title: S.boxesReportTitle,
                   columns: docColumns,
                   rows: docRows,
                 ),
                 onCsv: () => _exportReportCsv(
                   context,
-                  title: 'تقرير الصناديق',
+                  title: S.boxesReportTitle,
                   columns: docColumns,
                   rows: docRows,
                 ),
@@ -592,7 +591,7 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('الذمم المدينة والدائنة')),
+      appBar: AppBar(title: const Text(S.receivablesPayablesTitle)),
       body: FutureBuilder<List<ReceivablesPayablesRow>>(
         future: _data,
         builder: (context, snapshot) {
@@ -602,7 +601,7 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
           if (!snapshot.hasData) return _reportWait();
           final all = snapshot.data!;
           if (all.isEmpty) {
-            return _reportEmpty('لا ذمم — كل الحسابات مصفاة');
+            return _reportEmpty(S.noReceivables);
           }
           // الترتيب الافتراضي بلفظ المالك: المدينة ثم الدائنة — وكل
           // مجموعة بأسمائها.
@@ -623,18 +622,18 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
             ];
           }
           final kindLabel = _kind == null
-              ? 'الذمم المدينة والدائنة'
-              : (_kind! ? 'الذمم المدينة (هم يدينون لنا)' : 'الذمم الدائنة (نحن مدينون لهم)');
+              ? S.receivablesPayablesTitle
+              : (_kind! ? S.receivablesSide : S.payablesSide);
           // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة
           // 20): صفوف الفلتر المعروضة ذاتها لا إعادة قراءة ولا حساب.
-          const docColumns = ['الطرف', 'الاتجاه', 'المبلغ'];
+          const docColumns = [S.partyLabel, S.directionLabel, S.amountLabel];
           final docRows = [
             for (final row in rows)
               [
                 row.partyName,
                 row.direction == PartyBalanceDirection.theyOweUs
-                    ? 'هم يدينون لنا'
-                    : 'نحن مدينون لهم',
+                    ? S.theyOweUs
+                    : S.weOweThem,
                 formatMinorAmount(row.amountMinor),
               ],
           ];
@@ -648,16 +647,16 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
                       child: DropdownButtonFormField<bool>(
                         initialValue: _kind,
                         decoration:
-                            const InputDecoration(labelText: 'حسب النوع'),
+                            const InputDecoration(labelText: S.byTypeLabel),
                         items: const [
                           DropdownMenuItem<bool>(
-                              value: null, child: Text('الكل')),
+                              value: null, child: Text(S.allLabel)),
                           DropdownMenuItem<bool>(
                               value: true,
-                              child: Text('المدينة — هم يدينون لنا')),
+                              child: Text(S.receivableTypeSide)),
                           DropdownMenuItem<bool>(
                               value: false,
-                              child: Text('الدائنة — نحن مدينون لهم')),
+                              child: Text(S.payableTypeSide)),
                         ],
                         onChanged: (value) =>
                             setState(() => _kind = value),
@@ -686,7 +685,7 @@ class _ReceivablesPayablesViewState extends State<_ReceivablesPayablesView> {
               ),
               Expanded(
                 child: rows.isEmpty
-                    ? _reportEmpty('لا ذمم في هذا النوع')
+                    ? _reportEmpty(S.noReceivablesOfType)
                     // م07 (س205): صفوف الذمم أعمدةً — الطرف والاتجاه
                     // والمبلغ بعمودها، ونقر الصف بعرفه القائم (س-147).
                     : ListView(
@@ -740,8 +739,8 @@ class _AgingViewState extends State<_AgingView> {
   Future<AgingReport>? _future;
 
   static const Map<String, String> _kindLabels = {
-    'sale': 'المدينة — فواتير البيع',
-    'purchase': 'الدائنة — فواتير الشراء',
+    'sale': S.receivableFromSales,
+    'purchase': S.payableFromPurchases,
   };
 
   @override
@@ -774,8 +773,8 @@ class _AgingViewState extends State<_AgingView> {
   }
 
   String get _kindLabel => _kind == null
-      ? 'أعمار الذمم'
-      : 'أعمار الذمم — ${_kindLabels[_kind]!}';
+      ? S.agingTitle
+      : S.agingOf(_kindLabels[_kind]!);
 
   /// لسان صف الطرف — الفوهج غير الصفرية حصراً فلا صمت ولا ضجيج.
   /// (س205: حُذف بتحويل صفوف الأعمار للجدول الموحد م07 — خلايا الجدول
@@ -784,17 +783,17 @@ class _AgingViewState extends State<_AgingView> {
   /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20):
   /// تجميع واحد لصفوف العرض فما يُصدَّر هو المعروض حرفاً لا إعادة حساب.
   List<String> _agingColumns(AgingReport report) => [
-        'الطرف',
-        'الاتجاه',
+        S.partyLabel,
+        S.directionLabel,
         ...report.bucketLabels,
-        'الإجمالي',
+        S.totalLabel,
       ];
 
   List<List<String>> _agingRows(AgingReport report) => [
         for (final party in report.parties)
           [
             party.partyName,
-            party.theyOweUs ? 'هم يدينون لنا' : 'نحن مدينون لهم',
+            party.theyOweUs ? S.theyOweUs : S.weOweThem,
             for (final amount in party.bucketMinor)
               amount == 0 ? '—' : formatMinorAmount(amount),
             formatMinorAmount(party.totalMinor),
@@ -808,7 +807,7 @@ class _AgingViewState extends State<_AgingView> {
               report.bucketLabels[i],
               formatMinorAmount(report.bucketTotalsMinor[i]),
             ),
-        ('الإجمالي', formatMinorAmount(report.totalMinor)),
+        (S.totalLabel, formatMinorAmount(report.totalMinor)),
       ];
 
   Future<void> _print(AgingReport report) async {
@@ -818,7 +817,7 @@ class _AgingViewState extends State<_AgingView> {
         db: widget.db,
         title: _kindLabel,
         headerPairs: [
-          ('فترات الأعمار', agingPresetLabel(report.thresholds)),
+          (S.agingPeriods, agingPresetLabel(report.thresholds)),
         ],
         columns: _agingColumns(report),
         rows: _agingRows(report),
@@ -826,11 +825,11 @@ class _AgingViewState extends State<_AgingView> {
         format: resolvePageFormat(docKind: 'report'),
       );
       if (!context.mounted) return;
-      await sharePdfBytes(bytes, 'أعمار الذمم.pdf');
+      await sharePdfBytes(bytes, S.agingPdf);
     } catch (e) {
       await dqLog(widget.db, e, context: 'report.aging_print');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -844,7 +843,7 @@ class _AgingViewState extends State<_AgingView> {
       columns: _agingColumns(report),
       rows: _agingRows(report),
       footer: [
-        ('فترات الأعمار', agingPresetLabel(report.thresholds)),
+        (S.agingPeriods, agingPresetLabel(report.thresholds)),
         ..._agingFooter(report),
       ],
     );
@@ -862,19 +861,18 @@ class _AgingViewState extends State<_AgingView> {
             ListTile(
               title: Text(party.partyName),
               subtitle: Text(party.theyOweUs
-                  ? 'هم يدينون لنا — الفواتير المفتوحة'
-                  : 'نحن مدينون لهم — الفواتير المفتوحة'),
+                  ? S.theyOweUsOpen
+                  : S.weOweThemOpen),
             ),
             for (final inv in party.invoices)
               ListTile(
-                title: Text('فاتورة ${inv.number}'),
+                title: Text(S.invoiceNumber(inv.number)),
                 subtitle: Text(
-                    'الاستحقاق: ${inv.dueDate ?? inv.invoiceDate}'
-                    ' · ${inv.daysOver < 0
-                        ? 'غير مستحق'
+                    S.dueDateWith(inv.dueDate ?? inv.invoiceDate, inv.daysOver < 0
+                        ? S.notDue
                         : inv.daysOver == 0
-                            ? 'استحقاق اليوم'
-                            : 'متأخر ${inv.daysOver} يوماً'}'),
+                            ? S.dueToday
+                            : S.overdueDays(inv.daysOver))),
                 trailing: Text(formatMinorAmount(inv.remainingBaseMinor)),
               ),
           ],
@@ -886,7 +884,7 @@ class _AgingViewState extends State<_AgingView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('أعمار الذمم')),
+      appBar: AppBar(title: const Text(S.agingTitle)),
       body: FutureBuilder<AgingReport>(
         future: _future,
         builder: (context, snapshot) {
@@ -896,7 +894,7 @@ class _AgingViewState extends State<_AgingView> {
           if (!snapshot.hasData) return _reportWait();
           final report = snapshot.data!;
           if (report.parties.isEmpty) {
-            return _reportEmpty('لا ذمم مفتوحة — كل الفواتير مصفاة');
+            return _reportEmpty(S.noOpenReceivables);
           }
           return Column(
             children: [
@@ -908,14 +906,14 @@ class _AgingViewState extends State<_AgingView> {
                       child: DropdownButtonFormField<String>(
                         initialValue: _kind,
                         decoration:
-                            const InputDecoration(labelText: 'حسب النوع'),
+                            const InputDecoration(labelText: S.byTypeLabel),
                         items: const [
                           DropdownMenuItem<String>(
-                              value: null, child: Text('الكل')),
+                              value: null, child: Text(S.allLabel)),
                           DropdownMenuItem<String>(
-                              value: 'sale', child: Text('المدينة')),
+                              value: 'sale', child: Text(S.receivableLabel)),
                           DropdownMenuItem<String>(
-                              value: 'purchase', child: Text('الدائنة')),
+                              value: 'purchase', child: Text(S.payableLabel)),
                         ],
                         onChanged: (value) {
                           setState(() {
@@ -930,7 +928,7 @@ class _AgingViewState extends State<_AgingView> {
                       child: DropdownButtonFormField<int>(
                         initialValue: agingPresetIndex.value,
                         decoration: const InputDecoration(
-                            labelText: 'فترات الأعمار'),
+                            labelText: S.agingPeriods),
                         items: [
                           for (var i = 0;
                               i < kAgingBucketPresets.length;
@@ -964,7 +962,7 @@ class _AgingViewState extends State<_AgingView> {
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Text(
-                    'الإجمالي ${formatMinorAmount(report.totalMinor)}',
+                    S.totalOf(formatMinorAmount(report.totalMinor)),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -995,7 +993,7 @@ class _AgingViewState extends State<_AgingView> {
                       // بمجموعها البسيط باقية كما هي فلا موضع مختبر يزحزح.
                       footerRows: [
                         [
-                          'إجمالي الفوهج',
+                          S.invoicesGroupTotal,
                           '',
                           for (var i = 0;
                               i < report.bucketLabels.length;
@@ -1041,11 +1039,11 @@ class _JournalBookViewState extends State<_JournalBookView> {
   Future<JournalBookReport>? _future;
 
   static const Map<String, String> _journalKindLabels = {
-    'sales': 'المبيعات',
-    'purchase': 'المشتريات',
-    'cash': 'الصندوق',
-    'stock': 'المخزون',
-    'general': 'قيد عام',
+    'sales': S.salesLabel,
+    'purchase': S.purchasesLabel,
+    'cash': S.boxLabel,
+    'stock': S.stockLabel,
+    'general': S.generalEntry,
   };
 
   @override
@@ -1073,13 +1071,13 @@ class _JournalBookViewState extends State<_JournalBookView> {
 
   /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
   static const _journalColumns = [
-    'التاريخ',
-    'القيد',
-    'الدفتر',
-    'الحساب',
-    'الطرف',
-    'مدين',
-    'دائن',
+    S.dateLabel,
+    S.entryLabel,
+    S.bookLabel,
+    S.accountLabel,
+    S.partyLabel,
+    S.debitLabel,
+    S.creditLabel,
   ];
 
   List<List<String>> _journalRows(JournalBookReport report) => [
@@ -1097,13 +1095,13 @@ class _JournalBookViewState extends State<_JournalBookView> {
       ];
 
   List<(String, String)> _journalFooter(JournalBookReport report) => [
-        ('مجموع المدين', formatMinorAmount(report.totalDebitMinor)),
-        ('مجموع الدائن', formatMinorAmount(report.totalCreditMinor)),
+        (S.totalDebit, formatMinorAmount(report.totalDebitMinor)),
+        (S.totalCredit, formatMinorAmount(report.totalCreditMinor)),
         (
-          'الحالة',
+          S.statusLabel,
           report.isBalanced
-              ? 'المجموعان متوازنان ✓'
-              : 'غير متوازن — راجع فوراً!',
+              ? S.bothTotalsBalanced
+              : S.notBalanced,
         ),
       ];
 
@@ -1112,7 +1110,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
     try {
       final bytes = await buildDocumentPdf(
         db: widget.db,
-        title: 'دفتر اليومية',
+        title: S.journalBookTitle,
         headerPairs: const [],
         columns: _journalColumns,
         rows: _journalRows(report),
@@ -1120,11 +1118,11 @@ class _JournalBookViewState extends State<_JournalBookView> {
         format: resolvePageFormat(docKind: 'report'),
       );
       if (!context.mounted) return;
-      await sharePdfBytes(bytes, 'دفتر اليومية.pdf');
+      await sharePdfBytes(bytes, S.journalPdf);
     } catch (e) {
       await dqLog(widget.db, e, context: 'report.journal_print');
       messenger.showSnackBar(
-        SnackBar(content: Text('تعذر توليد الطباعة — $e${dqTag(e)}')),
+        SnackBar(content: Text(S.printFailed(e, dqTag(e)))),
       );
     }
   }
@@ -1133,7 +1131,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
   Future<void> _csv(JournalBookReport report) {
     return _exportReportCsv(
       context,
-      title: 'دفتر اليومية',
+      title: S.journalBookTitle,
       columns: _journalColumns,
       rows: _journalRows(report),
       footer: _journalFooter(report),
@@ -1143,7 +1141,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('دفتر اليومية')),
+      appBar: AppBar(title: const Text(S.journalBookTitle)),
       body: FutureBuilder<JournalBookReport>(
         future: _future,
         builder: (context, snapshot) {
@@ -1166,7 +1164,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                           child: TextField(
                             controller: _from,
                             decoration: InputDecoration(
-                                labelText: 'من تاريخ (سنة-شهر-يوم)',
+                                labelText: S.fromDateArabicHint,
                                 suffixIcon:
                                     calendarPickerSuffix(context, _from)),
                           ),
@@ -1176,7 +1174,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                           child: TextField(
                             controller: _to,
                             decoration: InputDecoration(
-                                labelText: 'إلى تاريخ (سنة-شهر-يوم)',
+                                labelText: S.toDateArabicHint,
                                 suffixIcon:
                                     calendarPickerSuffix(context, _to)),
                           ),
@@ -1186,10 +1184,10 @@ class _JournalBookViewState extends State<_JournalBookView> {
                           child: DropdownButtonFormField<String>(
                             initialValue: _journalKind,
                             decoration:
-                                const InputDecoration(labelText: 'الدفتر'),
+                                const InputDecoration(labelText: S.bookLabel),
                             items: [
                               const DropdownMenuItem<String>(
-                                  value: null, child: Text('الكل')),
+                                  value: null, child: Text(S.allLabel)),
                               for (final e in _journalKindLabels.entries)
                                 DropdownMenuItem<String>(
                                     value: e.key, child: Text(e.value)),
@@ -1205,7 +1203,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                         const SizedBox(width: 8),
                         OutlinedButton(
                           onPressed: _reload,
-                          child: const Text('عرض'),
+                          child: const Text(S.viewButton),
                         ),
                       ],
                     ),
@@ -1222,8 +1220,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                   child: Column(
                     children: [
                       Text(
-                        'مجموع المدين ${formatMinorAmount(report.totalDebitMinor)}'
-                        ' — مجموع الدائن ${formatMinorAmount(report.totalCreditMinor)}',
+                        S.totalsDebitCredit(formatMinorAmount(report.totalDebitMinor), formatMinorAmount(report.totalCreditMinor)),
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
@@ -1233,13 +1230,13 @@ class _JournalBookViewState extends State<_JournalBookView> {
                           OutlinedButton.icon(
                             onPressed: () => _csv(report),
                             icon: const Icon(Icons.table_view_outlined),
-                            label: const Text('تصدير CSV'),
+                            label: const Text(S.exportCsv),
                           ),
                           const SizedBox(width: 8),
                           OutlinedButton.icon(
                             onPressed: () => _print(report),
                             icon: const Icon(Icons.picture_as_pdf_outlined),
-                            label: const Text('طباعة / PDF'),
+                            label: const Text(S.printOrPdf),
                           ),
                         ],
                       ),
@@ -1249,7 +1246,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
               ),
               Expanded(
                 child: report.entries.isEmpty
-                    ? _reportEmpty('لا قيود مرحّلة في هذا المدى')
+                    ? _reportEmpty(S.noEntriesInRange)
                     : ListView(
                         // م06 (س205): الهامش التكيفي — العريض يتوسّط.
                         padding: EdgeInsets.symmetric(
@@ -1264,8 +1261,7 @@ class _JournalBookViewState extends State<_JournalBookView> {
                                 children: [
                                   ListTile(
                                     title: Text(
-                                        '${entry.moveDate} · قيد ${entry.moveNumber}'
-                                        ' · ${entry.journalName}'),
+                                        S.withEntryAndDesc(entry.moveDate, entry.moveNumber, entry.journalName)),
                                     subtitle: entry.narration == null ||
                                             entry.narration!.isEmpty
                                         ? null
@@ -1279,10 +1275,9 @@ class _JournalBookViewState extends State<_JournalBookView> {
                                           '${line.accountCode} ${line.accountName}'),
                                       subtitle: line.partyName == null
                                           ? null
-                                          : Text('الطرف: ${line.partyName}'),
+                                          : Text(S.partyOf(line.partyName)),
                                       trailing: Text(
-                                          'مدين ${formatMinorAmount(line.debitMinor)}'
-                                          ' · دائن ${formatMinorAmount(line.creditMinor)}'),
+                                          S.debitCreditOf(formatMinorAmount(line.debitMinor), formatMinorAmount(line.creditMinor))),
                                     ),
                                 ],
                               ),
@@ -1324,16 +1319,16 @@ class LedgerReconView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مطابقة دفتر المخزون')),
+      appBar: AppBar(title: const Text(S.stockLedgerMatchTitle)),
       body: FutureBuilder<InventoryReconciliationReport>(
         future: db.inventoryLedgerReconciliation(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
           final report = snapshot.data!;
           if (report.rows.isEmpty) {
-            return _reportEmpty('لا حركات مخزون بعد');
+            return _reportEmpty(S.noStockMovesYet);
           }
-          const docColumns = ['الصنف', 'بالقيود', 'بالحركات', 'الميل'];
+          const docColumns = [S.itemLabel, S.byLedgerEntries, S.byMovements, S.varianceLabel];
           final docRows = [
             for (final row in report.rows)
               [
@@ -1341,15 +1336,15 @@ class LedgerReconView extends StatelessWidget {
                 formatMinorAmount(row.ledgerValueMinor),
                 formatMinorAmount(row.stockValueMinor),
                 row.driftMinor == 0
-                    ? 'مطابق'
+                    ? S.matchedLabel
                     : formatMinorAmount(row.driftMinor),
               ],
           ];
           final footer = <(String, String)>[
-            ('إجمالي بالقيود', formatMinorAmount(report.ledgerTotalMinor)),
-            ('إجمالي بالحركات', formatMinorAmount(report.stockTotalMinor)),
-            ('الميل', report.isMatched
-                ? 'صفر'
+            (S.totalByEntries, formatMinorAmount(report.ledgerTotalMinor)),
+            (S.totalByMovements, formatMinorAmount(report.stockTotalMinor)),
+            (S.varianceLabel, report.isMatched
+                ? S.zeroLabel
                 : formatMinorAmount(report.driftMinor)),
           ];
           return Column(
@@ -1357,12 +1352,12 @@ class LedgerReconView extends StatelessWidget {
               _ReportActionsBar(
                 onPrint: () => _printReportDoc(context,
                   db: db,
-                    title: 'مطابقة دفتر المخزون',
+                    title: S.stockLedgerMatchTitle,
                     columns: docColumns,
                     rows: docRows,
                     footer: footer),
                 onCsv: () => _exportReportCsv(context,
-                    title: 'مطابقة دفتر المخزون',
+                    title: S.stockLedgerMatchTitle,
                     columns: docColumns,
                     rows: docRows,
                     footer: footer),
@@ -1388,11 +1383,10 @@ class LedgerReconView extends StatelessWidget {
                         : Theme.of(context).colorScheme.error,
                   ),
                   title: Text(report.isMatched
-                      ? 'المطابقة صحيحة ✓ — رصيد القيود يساوي قيمة المخزون'
-                      : 'ميل دفتري! راجع فوراً'),
+                      ? S.matchCorrect
+                      : S.bookVarianceAlert),
                   subtitle: Text(
-                      'القيود: ${formatMinorAmount(report.ledgerTotalMinor)} · '
-                      'المخزون: ${formatMinorAmount(report.stockTotalMinor)}'),
+                      S.entriesVsStock(formatMinorAmount(report.ledgerTotalMinor), formatMinorAmount(report.stockTotalMinor))),
                 ),
               ),
               // م07 (س205): صفوف المطابقة أعمدةً — وحالة الصف بلونها
@@ -1411,8 +1405,8 @@ class LedgerReconView extends StatelessWidget {
                             formatMinorAmount(row.ledgerValueMinor),
                             formatMinorAmount(row.stockValueMinor),
                             row.driftMinor == 0
-                                ? 'مطابق ✓'
-                                : 'ميل ${formatMinorAmount(row.driftMinor)}',
+                                ? S.matchedCheck
+                                : S.varianceOf(formatMinorAmount(row.driftMinor)),
                           ],
                       ],
                       numericColumns: const {1, 2, 3},
@@ -1475,7 +1469,7 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
     setState(() {
       _rangeError = errors.isEmpty
           ? null
-          : errors.map(describeReportValidationError).join('؛ ');
+          : errors.map(describeReportValidationError).join(S.semicolonSpace);
       if (errors.isEmpty) {
         _future = widget.db.incomeStatementReport(
             fromText: _from.text.trim(), toText: _to.text.trim());
@@ -1486,7 +1480,7 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('قائمة الدخل')),
+      appBar: AppBar(title: const Text(S.incomeStatementTitle)),
       body: Column(
         children: [
           Padding(
@@ -1498,7 +1492,7 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
                     child: TextField(
                       controller: _from,
                       decoration: InputDecoration(
-                          labelText: 'من (YYYY-MM-DD)',
+                          labelText: S.fromDateLabel,
                           suffixIcon: calendarPickerSuffix(context, _from)),
                     ),
                   ),
@@ -1507,12 +1501,12 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
                     child: TextField(
                       controller: _to,
                       decoration: InputDecoration(
-                          labelText: 'إلى (YYYY-MM-DD)',
+                          labelText: S.toDateLabel,
                           suffixIcon: calendarPickerSuffix(context, _to)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(onPressed: _reload, child: const Text('عرض')),
+                  FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
                 ]),
                 // س204 (م02 — اختصارات المدى): ملء سريع بلا إعادة
                 // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
@@ -1533,7 +1527,7 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return _reportWait();
                 final statement = snapshot.data!;
-                const docColumns = ['الحساب', 'البيان', 'المبلغ'];
+                const docColumns = [S.accountLabel, S.descriptionLabel, S.amountLabel];
                 final docRows = [
                   for (final r in statement.revenueRows)
                     [r.code, r.name, formatMinorAmount(r.amountMinor)],
@@ -1545,15 +1539,15 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
                     ],
                 ];
                 final footer = <(String, String)>[
-                  ('إجمالي الإيرادات',
+                  (S.totalRevenues,
                       formatMinorAmount(statement.totalRevenueMinor)),
-                  ('إجمالي المصروفات',
+                  (S.totalExpenses,
                       formatMinorAmount(statement.totalExpenseMinor)),
                   (
-                    'صافي النتيجة',
+                    S.netResult,
                     statement.netResultMinor >= 0
-                        ? 'ربح ${formatMinorAmount(statement.netResultMinor)}'
-                        : 'خسارة ${formatMinorAmount(-statement.netResultMinor)}'
+                        ? S.profitOf(formatMinorAmount(statement.netResultMinor))
+                        : S.lossOf(formatMinorAmount(-statement.netResultMinor))
                   ),
                 ];
                 return Column(
@@ -1561,12 +1555,12 @@ class _IncomeStatementViewState extends State<IncomeStatementView> {
                     _ReportActionsBar(
                       onPrint: () => _printReportDoc(context,
                         db: widget.db,
-                          title: 'قائمة الدخل',
+                          title: S.incomeStatementTitle,
                           columns: docColumns,
                           rows: docRows,
                           footer: footer),
                       onCsv: () => _exportReportCsv(context,
-                          title: 'قائمة الدخل',
+                          title: S.incomeStatementTitle,
                           columns: docColumns,
                           rows: docRows,
                           footer: footer),
@@ -1628,27 +1622,27 @@ class _CurrencyPositionsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مراكز العملات')),
+      appBar: AppBar(title: const Text(S.currencyCentersTitle)),
       body: FutureBuilder<List<CurrencyPositionInput>>(
         future: db.currencyPositions(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return _reportWait();
           final rows = currencyPositionsCompute(snapshot.data!);
           const docColumns = [
-            'العملة',
-            'الصناديق',
-            'رصيد الصناديق (أساسي)',
-            'فواتير مفتوحة',
-            'المتبقي بعملة الفاتورة',
-            'المتبقي بالأساسية',
-            'المكافئ الإجمالي بالأساسية',
-            'آخر سعر مسجل',
-            'تاريخه',
+            S.currencyLabel,
+            S.boxesTitle,
+            S.boxesBalanceBase,
+            S.openInvoices,
+            S.remainingInvoiceCurrency,
+            S.remainingBaseCurrency,
+            S.totalEquivalentBase,
+            S.lastRateRecorded,
+            S.itsDate,
           ];
           final docRows = [
             for (final r in rows)
               [
-                '${r.code}${r.isBase ? ' (الأساسية)' : ''}',
+                '${r.code}${r.isBase ? S.baseSuffix : ''}',
                 '${r.boxesCount}',
                 formatMinorAmount(r.boxesBaseMinor),
                 '${r.openInvoicesCount}',
@@ -1666,11 +1660,11 @@ class _CurrencyPositionsView extends StatelessWidget {
               _ReportActionsBar(
                 onPrint: () => _printReportDoc(context,
                   db: db,
-                    title: 'مراكز العملات',
+                    title: S.currencyCentersTitle,
                     columns: docColumns,
                     rows: docRows),
                 onCsv: () => _exportReportCsv(context,
-                    title: 'مراكز العملات',
+                    title: S.currencyCentersTitle,
                     columns: docColumns,
                     rows: docRows),
               ),
@@ -1688,7 +1682,7 @@ class _CurrencyPositionsView extends StatelessWidget {
                         for (final r in rows)
                           [
                             '${r.code} — ${r.name}'
-                                '${r.isBase ? ' (الأساسية)' : ''}',
+                                '${r.isBase ? S.baseSuffix : ''}',
                             '${r.boxesCount}',
                             formatMinorAmount(r.boxesBaseMinor),
                             '${r.openInvoicesCount}',
@@ -1762,7 +1756,7 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('الميزانية العمومية')),
+      appBar: AppBar(title: const Text(S.balanceSheetTitle)),
       body: Column(
         children: [
           Padding(
@@ -1772,12 +1766,12 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
                 child: TextField(
                   controller: _asOf,
                   decoration: InputDecoration(
-                      labelText: 'إلى تاريخ (YYYY-MM-DD)',
+                      labelText: S.toDateWithFormat,
                       suffixIcon: calendarPickerSuffix(context, _asOf)),
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton(onPressed: _reload, child: const Text('عرض')),
+              FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
             ]),
           ),
           if (_rangeError != null)
@@ -1793,36 +1787,36 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return _reportWait();
                 final sheet = snapshot.data!;
-                const docColumns = ['الحساب', 'البيان', 'الجانب', 'المبلغ'];
+                const docColumns = [S.accountLabel, S.descriptionLabel, S.sideLabel, S.amountLabel];
                 final docRows = [
                   for (final r in sheet.assetRows)
                     [
                       r.code,
                       r.name,
-                      r.isDebitSide ? 'مدين' : 'دائن',
+                      r.isDebitSide ? S.debitLabel : S.creditLabel,
                       formatMinorAmount(r.magnitudeMinor),
                     ],
                   for (final r in sheet.liabilityRows)
                     [
                       r.code,
                       r.name,
-                      r.isDebitSide ? 'مدين' : 'دائن',
+                      r.isDebitSide ? S.debitLabel : S.creditLabel,
                       formatMinorAmount(r.magnitudeMinor),
                     ],
                   for (final r in sheet.equityRows)
                     [
                       r.code,
                       r.name,
-                      r.isDebitSide ? 'مدين' : 'دائن',
+                      r.isDebitSide ? S.debitLabel : S.creditLabel,
                       formatMinorAmount(r.magnitudeMinor),
                     ],
                 ];
                 final footer = <(String, String)>[
-                  ('إجمالي الأصول', formatMinorAmount(sheet.totalAssetsMinor)),
-                  ('إجمالي الخصوم',
+                  (S.totalAssets, formatMinorAmount(sheet.totalAssetsMinor)),
+                  (S.totalLiabilities,
                       formatMinorAmount(sheet.totalLiabilitiesMinor)),
                   (
-                    'إجمالي حقوق الملكية',
+                    S.totalEquity,
                     formatMinorAmount(sheet.totalEquityMinor),
                   ),
                 ];
@@ -1831,12 +1825,12 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
                     _ReportActionsBar(
                       onPrint: () => _printReportDoc(context,
                         db: widget.db,
-                          title: 'الميزانية العمومية',
+                          title: S.balanceSheetTitle,
                           columns: docColumns,
                           rows: docRows,
                           footer: footer),
                       onCsv: () => _exportReportCsv(context,
-                          title: 'الميزانية العمومية',
+                          title: S.balanceSheetTitle,
                           columns: docColumns,
                           rows: docRows,
                           footer: footer),
@@ -1862,13 +1856,10 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
                               : Theme.of(context).colorScheme.error,
                         ),
                         title: Text(sheet.isBalanced
-                            ? 'المعادلة متوازنة ✓ — الأصول تساوي الخصوم '
-                                'وحقوق الملكية'
-                            : 'المعادلة غير متوازنة — راجع فوراً!'),
+                            ? S.equationBalanced
+                            : S.equationNotBalanced),
                         subtitle: Text(
-                            'الأصول ${formatMinorAmount(sheet.totalAssetsMinor)} '
-                            '· الخصوم ${formatMinorAmount(sheet.totalLiabilitiesMinor)} '
-                            '· الحقوق ${formatMinorAmount(sheet.totalEquityMinor)}'),
+                            S.assetsLiabilitiesEquity(formatMinorAmount(sheet.totalAssetsMinor), formatMinorAmount(sheet.totalLiabilitiesMinor), formatMinorAmount(sheet.totalEquityMinor))),
                       ),
                     ),
                     Expanded(
@@ -1881,29 +1872,29 @@ class _BalanceSheetViewState extends State<BalanceSheetView> {
                           for (final r in sheet.assetRows)
                             ListTile(
                               title: Text('${r.code} ${r.name}'),
-                              subtitle: const Text('أصول'),
+                              subtitle: const Text(S.assetsLabel),
                               trailing: Text(
                                   formatMinorAmount(r.magnitudeMinor)),
                             ),
                           for (final r in sheet.liabilityRows)
                             ListTile(
                               title: Text('${r.code} ${r.name}'),
-                              subtitle: const Text('خصوم'),
+                              subtitle: const Text(S.liabilitiesLabel),
                               trailing: Text(
                                   formatMinorAmount(r.magnitudeMinor)),
                             ),
                           for (final r in sheet.equityRows)
                             ListTile(
                               title: Text('${r.code} ${r.name}'),
-                              subtitle: const Text('حقوق ملكية'),
+                              subtitle: const Text(S.equityLabel),
                               trailing: Text(
                                   formatMinorAmount(r.magnitudeMinor)),
                             ),
                           if (sheet.currentResultMinor != 0)
                             ListTile(
-                              title: const Text('نتيجة الفترة الجارية'),
+                              title: const Text(S.currentPeriodResult),
                               subtitle:
-                                  const Text('من حسابات النتيجة حتى التاريخ'),
+                                  const Text(S.fromResultAccountsToDate),
                               trailing: Text(
                                   formatMinorAmount(
                                       sheet.currentResultMinor)),
@@ -1953,8 +1944,8 @@ class _InventoryViewState extends State<InventoryView> {
     return Scaffold(
       appBar: AppBar(
           title: Text(isolated == null
-              ? 'تقرير المخزون'
-              : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون')),
+              ? S.stockReportTitle
+              : S.balanceInStock(widget.isolatedItemName ?? ''))),
       body: FutureBuilder<List<dynamic>>(
         future: _data,
         builder: (context, snapshot) {
@@ -1971,17 +1962,17 @@ class _InventoryViewState extends State<InventoryView> {
                     if (row.itemId == isolated) row,
                 ];
           if (visibleRows.isEmpty) {
-            return _reportEmpty('لا مخزون بعد');
+            return _reportEmpty(S.noStockYet);
           }
           // أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
           const docColumns = [
-            'الصنف', 'المستودع', 'الكمية', 'القيمة', 'المتوسط'
+            S.itemLabel, S.warehouseLabel, S.quantityLabel, S.valueLabel, S.averageLabel
           ];
           final docRows = [
             for (final row in visibleRows)
               [
                 '${row.sku} ${row.name}',
-                row.warehouseName ?? 'غير محدد',
+                row.warehouseName ?? S.unspecifiedLabel,
                 '${row.qtyBase}',
                 formatMinorAmount(row.totalValueMinor),
                 row.avgCostBaseMinor == null
@@ -2005,7 +1996,7 @@ class _InventoryViewState extends State<InventoryView> {
                     ];
                     rowLetters = [
                       for (final row in visibleRows)
-                        itemById[row.itemId]?.name ?? 'صنف',
+                        itemById[row.itemId]?.name ?? S.itemSingular,
                     ];
                   }
                   if (!context.mounted) return;
@@ -2013,8 +2004,8 @@ class _InventoryViewState extends State<InventoryView> {
                     db: widget.db,
                     context,
                     title: isolated == null
-                        ? 'تقرير المخزون'
-                        : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون',
+                        ? S.stockReportTitle
+                        : S.balanceInStock(widget.isolatedItemName ?? ''),
                     columns: docColumns,
                     rows: docRows,
                     rowImages: rowImages,
@@ -2024,8 +2015,8 @@ class _InventoryViewState extends State<InventoryView> {
                 onCsv: () => _exportReportCsv(
                   context,
                   title: isolated == null
-                      ? 'تقرير المخزون'
-                      : 'رصيد ${widget.isolatedItemName ?? ''} في المخزون',
+                      ? S.stockReportTitle
+                      : S.balanceInStock(widget.isolatedItemName ?? ''),
                   columns: docColumns,
                   rows: docRows,
                 ),
@@ -2048,8 +2039,7 @@ class _InventoryViewState extends State<InventoryView> {
                             : null,
                         title: Text('${row.sku} ${row.name}'),
                         subtitle: Text(
-                            'المستودع: ${row.warehouseName ?? 'غير محدد'}'
-                            ' · المتوسط: ${row.avgCostBaseMinor == null ? '—' : formatMinorAmount(row.avgCostBaseMinor!)}'),
+                            S.warehouseAndAverage(row.warehouseName ?? S.unspecifiedLabel, row.avgCostBaseMinor == null ? '—' : formatMinorAmount(row.avgCostBaseMinor!))),
                         trailing: Text(
                             '${row.qtyBase} × ${formatMinorAmount(row.totalValueMinor)}'),
                         // س-144/D-136: اسم الصنف مدخلاً — النقر يفتح ورقته.
@@ -2121,7 +2111,7 @@ class _MovementViewState extends State<MovementView> {
   List<_MovementDisplay>? _rows;
 
   /// أجزاء المستند مشتركة بين الطباعة والتصدير (F-166 — الدفعة 20).
-  static const _movementColumns = ['الصنف', 'التفصيل', 'الصافي'];
+  static const _movementColumns = [S.itemLabel, S.detailLabel, S.netLabel];
 
   /// صفوف العرض ذاتها للطباعة والتصدير — تجميع واحد فلا انحراف.
   List<List<String>> _movementRows() => [
@@ -2184,9 +2174,8 @@ class _MovementViewState extends State<MovementView> {
           for (final r in rows)
             _MovementDisplay(
               '${r.sku} ${r.name}',
-              'بيع ${r.qtySoldBase} × ${formatMinorAmount(r.salesValueBaseMinor)}'
-                  ' · مردود ${r.qtyReturnedBase} × ${formatMinorAmount(r.returnsValueBaseMinor)}',
-              'الصافي ${r.netQtyBase} × ${formatMinorAmount(r.netValueBaseMinor)}',
+              S.salesReturnsDetail(r.qtySoldBase, formatMinorAmount(r.salesValueBaseMinor), r.qtyReturnedBase, formatMinorAmount(r.returnsValueBaseMinor)),
+              S.netOf(r.netQtyBase, formatMinorAmount(r.netValueBaseMinor)),
               itemId: r.itemId,
               name: itemById[r.itemId]?.name ?? r.name,
             ),
@@ -2200,9 +2189,8 @@ class _MovementViewState extends State<MovementView> {
           for (final r in rows)
             _MovementDisplay(
               '${r.sku} ${r.name}',
-              'شراء ${r.qtyPurchasedBase} × ${formatMinorAmount(r.purchasesValueBaseMinor)}'
-                  ' · مردود ${r.qtyReturnedBase} × ${formatMinorAmount(r.returnsValueBaseMinor)}',
-              'الصافي ${r.netQtyBase} × ${formatMinorAmount(r.netValueBaseMinor)}',
+              S.purchasesReturnsDetail(r.qtyPurchasedBase, formatMinorAmount(r.purchasesValueBaseMinor), r.qtyReturnedBase, formatMinorAmount(r.returnsValueBaseMinor)),
+              S.netOf(r.netQtyBase, formatMinorAmount(r.netValueBaseMinor)),
               itemId: r.itemId,
               name: itemById[r.itemId]?.name ?? r.name,
             ),
@@ -2223,7 +2211,7 @@ class _MovementViewState extends State<MovementView> {
       await dqLog(widget.db, e, context: 'report.run');
       if (!mounted) return;
       setState(() => _error =
-          '${e.errors.map(describeReportValidationError).join('؛ ')}'
+          '${e.errors.map(describeReportValidationError).join(S.semicolonSpace)}'
           '${dqTag(e)}');
     }
   }
@@ -2231,10 +2219,10 @@ class _MovementViewState extends State<MovementView> {
   @override
   Widget build(BuildContext context) {
     final title = widget.isolatedItemId == null
-        ? (widget.sales ? 'مبيعات وحركة الأصناف' : 'تقرير المشتريات')
+        ? (widget.sales ? S.itemSalesMovementTitle : S.purchasesReportTitle)
         : (widget.sales
-            ? 'مبيعات ${widget.isolatedItemName ?? ''}'
-            : 'مشتريات ${widget.isolatedItemName ?? ''}');
+            ? S.salesOf(widget.isolatedItemName ?? '')
+            : S.purchasesOf(widget.isolatedItemName ?? ''));
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: Column(
@@ -2250,7 +2238,7 @@ class _MovementViewState extends State<MovementView> {
                         controller: _from,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'من (YYYY-MM-DD)',
+                            labelText: S.fromDateLabel,
                             suffixIcon:
                                 calendarPickerSuffix(context, _from)),
                       ),
@@ -2261,7 +2249,7 @@ class _MovementViewState extends State<MovementView> {
                         controller: _to,
                         keyboardType: TextInputType.datetime,
                         decoration: InputDecoration(
-                            labelText: 'إلى (YYYY-MM-DD)',
+                            labelText: S.toDateLabel,
                             suffixIcon:
                                 calendarPickerSuffix(context, _to)),
                       ),
@@ -2272,7 +2260,7 @@ class _MovementViewState extends State<MovementView> {
                 // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
                 DiqqahRangeShortcuts(from: _from, to: _to),
                 const SizedBox(height: 8),
-                FilledButton(onPressed: _run, child: const Text('عرض')),
+                FilledButton(onPressed: _run, child: const Text(S.viewButton)),
                 if (_rows != null)
                   _ReportActionsBar(
                     onPrint: () async {
@@ -2322,9 +2310,9 @@ class _MovementViewState extends State<MovementView> {
           ),
           Expanded(
             child: _rows == null
-                ? const Center(child: Text('أدخل المدى ثم اضغط «عرض»'))
+                ? const Center(child: Text(S.enterRangeThenView))
                 : _rows!.isEmpty
-                    ? _reportEmpty('لا حركة في هذا المدى')
+                    ? _reportEmpty(S.noMovementInRange)
                     : ListView(
                         // م06 (س205): الهامش التكيفي — العريض يتوسّط،
                         // وصور الصفوف القائمة باقية بعرفها (D-123).
