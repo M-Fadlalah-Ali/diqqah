@@ -86,22 +86,33 @@ void main() {
     );
   });
 
-  test('د11: مادة خاطئة واحدة = رفض صريح قبل أي بايت للقاعدة (روح F-013)',
+  test('د11: كل المواد خاطئة = رفض صريح قبل أي بايت للقاعدة (روح F-013) '
+      '— والمادة الصحيحة الواحدة تكفي فتحاً',
       () async {
+    final plain = utf8.encode('نسخة');
     final blob = await cipher.encryptVaulted(
-      utf8.encode('نسخة'),
+      plain,
       vaultRootKey: rootA,
       recoveryCode: code,
     );
+    // جذر جهاز آخر + رمز خاطئ = كل المواد خاطئة فرفض صريح.
     expect(
       () => cipher.decryptVaulted(
         blob,
-        vaultRootKey: rootA,
+        vaultRootKey: rootB,
         recoveryCode: 'WRONG-CODE-0000',
       ),
       throwsA(isA<BackupCipherException>()
           .having((e) => e.message, 'message', contains('خاطئ'))),
     );
+    // ومفتاح الخزنة الصحيح مع رمز خاطئ يفتح صامتاً — سجل الجذر كاف.
+    expect(
+        await cipher.decryptVaulted(
+          blob,
+          vaultRootKey: rootA,
+          recoveryCode: 'WRONG-CODE-0000',
+        ),
+        equals(plain));
   });
 
   test('د11: بنية الجيل — بايتة الإصدار 4 وعدّاد السجلين 2 وسجلان '
