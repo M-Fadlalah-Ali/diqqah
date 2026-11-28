@@ -559,7 +559,7 @@ def gen_catalog(sec_of):
                 params.append(m)
                 m += 1
             if params:
-                sig = ", ".join("Object p%d" % p for p in params)
+                sig = ", ".join("Object? p%d" % p for p in params)
                 val = re.sub(r"\{(\d+)\}",
                              lambda mm: "${p%s}" % mm.group(1), esc(t))
                 body.append("  static String %s(%s) => '%s';" % (

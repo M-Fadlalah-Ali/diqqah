@@ -86,7 +86,7 @@ void main() {
     ]) {
       final src = File(f).readAsStringSync();
       expect(src.contains("import 'l10n/app_strings.dart';"), isTrue,
-          reason: '$f');
+          reason: f);
       expect(src.contains('l10n/strings_ar.dart'), isFalse,
           reason: '$f: البيانات لا تُستورد مباشرة — المدخل وحده');
     }
