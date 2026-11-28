@@ -543,3 +543,48 @@ bool attachmentsReminderDue({
 /// جديدة (crypto تبعية مجال قائمة).
 String sha256HexOf(List<int> plain) =>
     sha256.convert(plain).toString();
+
+/// أقرب موعد استحقاق قادم للدورات التلقائية المفعلة (س233 — D-232،
+/// بطاقة النسخ الآلي): لكل دورة مفعلة أول لحظة تصير فيها مستحقة من
+/// آخر نجاحها وبحدود dueAutoKinds ذاتها حرفاً — والقيمة الماضية
+/// تعني مستحقة الآن (فالموعد القادم هو لحاق الدخول أو أقرب نبضة)،
+/// وnull حين لا دورة مفعلة أصلاً (المفتاح الرئيسي مطفأ أو الخانات
+/// كلها مفرغة). نقية فتُختبر بلا قنوات (نمط س204).
+DateTime? nextAutoDueUtc({
+  required DateTime nowUtc,
+  required DateTime nowLocal,
+  required Map<BackupScheduleKind, DateTime?> lastSuccess,
+  required Set<BackupScheduleKind> enabledKinds,
+}) {
+  DateTime? next;
+  void consider(DateTime? candidate) {
+    if (candidate == null) return;
+    if (next == null || candidate.isBefore(next!)) next = candidate;
+  }
+  final dayStart = startOfLocalDay(nowLocal);
+  final weekStart = startOfLocalWeekSaturday(nowLocal);
+  final monthStart = startOfLocalMonth(nowLocal);
+  if (enabledKinds.contains(BackupScheduleKind.hourly)) {
+    final last = lastSuccess[BackupScheduleKind.hourly];
+    consider(last == null ? nowUtc : last.add(const Duration(hours: 1)));
+  }
+  if (enabledKinds.contains(BackupScheduleKind.daily)) {
+    final last = lastSuccess[BackupScheduleKind.daily];
+    consider(last == null || last.isBefore(dayStart.toUtc())
+        ? nowUtc
+        : dayStart.add(const Duration(days: 1)).toUtc());
+  }
+  if (enabledKinds.contains(BackupScheduleKind.weekly)) {
+    final last = lastSuccess[BackupScheduleKind.weekly];
+    consider(last == null || last.isBefore(weekStart.toUtc())
+        ? nowUtc
+        : weekStart.add(const Duration(days: 7)).toUtc());
+  }
+  if (enabledKinds.contains(BackupScheduleKind.monthly)) {
+    final last = lastSuccess[BackupScheduleKind.monthly];
+    consider(last == null || last.isBefore(monthStart.toUtc())
+        ? nowUtc
+        : DateTime(monthStart.year, monthStart.month + 1, 1).toUtc());
+  }
+  return next;
+}

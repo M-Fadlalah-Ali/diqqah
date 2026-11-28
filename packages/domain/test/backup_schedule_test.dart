@@ -323,4 +323,106 @@ void main() {
       expect(kDefaultBackupQuotaBytes, 2 * 1024 * 1024 * 1024);
     });
   });
+
+  group('الموعد القادم (س233 — D-232: بطاقة النسخ الآلي)', () {
+    final all = {
+      BackupScheduleKind.hourly,
+      BackupScheduleKind.daily,
+      BackupScheduleKind.weekly,
+      BackupScheduleKind.monthly,
+    };
+
+    test('بلا دورات مفعلة: null (المفتاح الرئيسي مطفأ أو الخانات مفرغة)',
+        () {
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: const {},
+          enabledKinds: const {});
+      expect(next, isNull);
+    });
+
+    test('بلا تاريخ: الموعد القادم هو الآن (لحاق الدخول)', () {
+      final nowUtc = DateTime.utc(2026, 11, 28, 10);
+      final next = nextAutoDueUtc(
+          nowUtc: nowUtc,
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: const {},
+          enabledKinds: all);
+      expect(next, nowUtc);
+    });
+
+    test('الساعية: آخر نجاح قبل نصف ساعة فالموعد بعد نصف ساعة', () {
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.hourly: DateTime.utc(2026, 11, 28, 9, 30),
+            BackupScheduleKind.daily: DateTime.utc(2026, 11, 28, 1),
+            BackupScheduleKind.weekly: DateTime.utc(2026, 11, 24),
+            BackupScheduleKind.monthly: DateTime.utc(2026, 11, 2),
+          },
+          enabledKinds: {BackupScheduleKind.hourly});
+      expect(next, DateTime.utc(2026, 11, 28, 10, 30));
+    });
+
+    test('الساعية المتأخرة: القيمة ماضية فمعناها مستحقة الآن', () {
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.hourly: DateTime.utc(2026, 11, 28, 7),
+          },
+          enabledKinds: {BackupScheduleKind.hourly});
+      expect(next, DateTime.utc(2026, 11, 28, 8));
+      expect(next!.isBefore(DateTime.utc(2026, 11, 28, 10)), isTrue);
+    });
+
+    test('اليومية: آخر نجاح اليوم فالموعد بداية الغد المحلي', () {
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 9),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.daily: DateTime.utc(2026, 11, 28, 1),
+          },
+          enabledKinds: {BackupScheduleKind.daily});
+      expect(next, DateTime(2026, 11, 29).toUtc());
+    });
+
+    test('الأسبوعية: آخر نجاح بأسبوعها فالموعد السبت التالي', () {
+      // 2026-11-28 سبت؛ أسبوعه يبدأ 2026-11-28 والقادم 2026-12-05.
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.weekly: DateTime.utc(2026, 11, 28, 6),
+          },
+          enabledKinds: {BackupScheduleKind.weekly});
+      expect(next, DateTime(2026, 12, 5).toUtc());
+    });
+
+    test('الشهرية: آخر نجاح بشهرها فالموعد أول الشهر القادم', () {
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.monthly: DateTime.utc(2026, 11, 2),
+          },
+          enabledKinds: {BackupScheduleKind.monthly});
+      expect(next, DateTime(2026, 12, 1).toUtc());
+    });
+
+    test('الدورة المفرغة خارج الحساب والمعطلة لا تحسب', () {
+      // اليومية مفرغة والساعية معطلة فالموعد الشهرية وحدها.
+      final next = nextAutoDueUtc(
+          nowUtc: DateTime.utc(2026, 11, 28, 10),
+          nowLocal: DateTime(2026, 11, 28, 12),
+          lastSuccess: {
+            BackupScheduleKind.daily: DateTime.utc(2026, 11, 2),
+            BackupScheduleKind.monthly: DateTime.utc(2026, 11, 2),
+          },
+          enabledKinds: {BackupScheduleKind.monthly});
+      expect(next, DateTime(2026, 12, 1).toUtc());
+    });
+  });
 }

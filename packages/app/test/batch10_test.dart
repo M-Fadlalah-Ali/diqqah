@@ -464,6 +464,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 100));
 
+    // س233: بطاقة النسخ الآلي وبطاقة فحص الثوابت (بقسمها الجديد) أزاحتا
+    // بطاقة العرض أسفل — سحبٌ إلى مربع التضمين قبل التوقع (درس D-098).
+    await _scrollToText(tester, 'تضمين صور الأصناف');
     expect(find.text('تضمين صور الأصناف'), findsOneWidget,
         reason: 'س-129: مربع التضمين افتراضه مفعّل بحجم المجلد ظاهراً');
     expect(find.textContaining('كيلوبايت'), findsWidgets,

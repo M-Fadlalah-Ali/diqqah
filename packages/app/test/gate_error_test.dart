@@ -48,7 +48,10 @@ void main() {
         .instance.defaultBinaryMessenger
         .setMockMethodCallHandler(kPathProviderChannel, null));
 
-    await tester.pumpWidget(const DiqqahApp());
+    // س233 (D-233): شاشة البدء بحدّها الأدنى حق الإنتاج — شاشة
+    // الخطأ تُختبر بالصفر فتظهر فور فشل الافتتاح لا بعد نصف ثانية.
+    await tester.pumpWidget(
+        const DiqqahApp(splashMinimum: Duration.zero));
     await pumpUntil(tester, find.byKey(const ValueKey('gate_error_screen')));
 
     expect(find.byKey(const ValueKey('gate_error_screen')), findsOneWidget);
@@ -76,7 +79,9 @@ void main() {
         .instance.defaultBinaryMessenger
         .setMockMethodCallHandler(kPathProviderChannel, null));
 
-    await tester.pumpWidget(const DiqqahApp());
+    // س233 (D-233): حقن الصفر — شاشة البدء بحدّها الأدنى حق الإنتاج.
+    await tester.pumpWidget(
+        const DiqqahApp(splashMinimum: Duration.zero));
     await pumpUntil(tester, find.byKey(const ValueKey('gate_error_screen')));
 
     await tester.tap(find.byKey(const ValueKey('gate_retry')));

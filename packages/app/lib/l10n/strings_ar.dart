@@ -214,6 +214,20 @@ abstract final class S {
   static String appTitleWith(Object? p1) => 'دِقَّة ${p1}';
   static String appTitleWithMinor(Object? p1, Object? p2) => 'دِقَّة ${p1}.${p2}';
   static String appVersionLine(Object? p1) => 'دِقَّة v.${p1}';
+  static const String autoBackupAdvanced = 'خيارات متقدمة';
+  static const String autoBackupDaily = 'يومي';
+  static const String autoBackupDueNow = 'مستحقة الآن — لحاق الدخول';
+  static const String autoBackupFirstDailyHint = 'عند التفعيل تُنشأ أول نسخة يومية عند الدخول إلزاماً';
+  static const String autoBackupHourly = 'ساعي';
+  static String autoBackupLastSuccess(Object? p1) => 'آخر نسخة ناجحة: ${p1}';
+  static const String autoBackupMonthly = 'شهري';
+  static String autoBackupNextDue(Object? p1) => 'الموعد القادم: ${p1}';
+  static const String autoBackupOffWarning = 'النسخ الآلي متوقف — لا تُنشأ نسخ تلقائية حتى تفعيله';
+  static String autoBackupQuota(Object? p1, Object? p2) => 'الحصة: ${p1} من ${p2}';
+  static const String autoBackupTitle = 'النسخ الآلي';
+  static const String autoBackupWeekly = 'أسبوعي';
+  static const String autoBackupWorksWhileRunning = 'يعمل أثناء تشغيل التطبيق';
+  static const String autoBackupYearly = 'سنوي عند إقفال السنة';
   static const String backupContentTitle = 'محتوى النسخة';
   static String backupCreateFailed(Object? p1, Object? p2) => 'تعذر إنشاء النسخة — ${p1}${p2}';
   static const String backupCreated = 'أُنشئت النسخة الاحتياطية';
@@ -228,6 +242,7 @@ abstract final class S {
   static const String backupNoImages = 'النسخة بلا صور — مجلد الصور فارغ أو غائب';
   static const String backupPathLabel = 'مسار النسخة:';
   static String backupQuotaGb(Object? p1) => 'حصة مجلد النسخ: ${p1}GB';
+  static const String backupRestoreTitle = 'النسخ والاستعادة';
   static const String backupsCatalogTitle = 'كتالوج النسخ (تحقق/استعادة/تصدير/حذف)';
   static const String changeMyPassword = 'تغيير كلمة مروري';
   static const String changePasswordTitle = 'تغيير كلمة المرور';
@@ -311,6 +326,9 @@ abstract final class S {
   static String megabytesCount(Object? p1) => '${p1} ميغابايت';
   static String minutesCount(Object? p1) => '${p1} دقائق';
   static const String mobileBrowseHint = 'على الهاتف استخدم زر التصفح بدل الكتابة اليدوية';
+  static const String monthNamesInternational = 'دولية';
+  static const String monthNamesLabel = 'أسماء الأشهر';
+  static const String monthNamesShami = 'شامية';
   static const String newPasswordField = 'كلمة المرور الجديدة';
   static const String newPasswordRequired = 'الكلمة الجديدة إلزامية — لا فراغات';
   static const String noImagesYet = 'بلا صور بعد';
@@ -368,6 +386,7 @@ abstract final class S {
   static const String scheduledBackupBody = 'النسخ تلقائية بكل دورية تختارها، والتفصيل بالدوريات وشروطها خلف التوسعة.';
   static const String scheduledBackupPeriods = 'ساعية كل ساعة عمل، ويومية عند أول تشغيل يلي اليوم، وأسبوعية أول تشغيل يلي السبت، وشهرية أول تشغيل يلي أول الشهر — نسخة واحدة عند اللحاق بلا تعويض الفائت. الدورية بيانات فقط؛ المرفقات باليدوية والسنوية والحدثية.';
   static const String scheduledBackupTitle = 'النسخ الاحتياطي المجدول (ساعي/يومي/أسبوعي/شهري)';
+  static const String securitySessionTitle = 'الأمان والجلسة';
   static const String settingsTitle = 'الإعدادات';
   static const String showCodeAction = 'عرض الرمز';
   static const String showRecoveryCode = 'عرض رمز الاسترداد';
@@ -388,6 +407,10 @@ abstract final class S {
   static const String vaultRecoveryCodeBody = 'يفك نسخ الجيل الرابع والخامس على جهاز آخر غير هذا — والمقفلة (v3/v6) بالكلمة أو هذا الرمز: ثبّت التطبيق ثم اكتب الرمز بحقل كلمة المرور عند الاستعادة.\nاكتبه ورقياً خارج الجهاز — نسخ هذا الجهاز تُفك صامتة بلا أي رمز.';
   static const String vaultRecoverySummary = 'رمز استرداد الخزنة — يُطلب مرة واحدة عند أول تشغيل، ويعاد عرضه من هنا (يفك نسخ v4 على جهاز آخر)';
 
+  static const String weekStartLabel = 'أول الأسبوع';
+  static const String weekStartMonday = 'الاثنين';
+  static const String weekStartSaturday = 'السبت';
+  static const String weekStartSunday = 'الأحد';
   // ===== التقارير — الشاشة الكبرى الثالثة (2,359 سطراً قبل الدفعة) =====
   static const String accountLabel = 'الحساب';
   static const String activeLabel = 'نشط';
@@ -534,4 +557,21 @@ abstract final class S {
   static const String weOweThemOpen = 'نحن مدينون لهم — الفواتير المفتوحة';
   static String withEntryAndDesc(Object? p1, Object? p2, Object? p3) => '${p1} · قيد ${p2} · ${p3}';
   static const String zeroLabel = 'صفر';
+
+  // ===== شاشة البدء والرئيسية (س233 — D-233 المرحلة أ/4) =====
+  static const String homeBackupActive = 'النسخ الآلي: يعمل';
+  static const String homeBackupFailed = 'فشلت آخر نسخة آلية';
+  static const String homeBackupPaused = 'النسخ الآلي: متوقف';
+  static const String homeSyncActive = 'المزامنة: مفعلة';
+  static const String splashAppName = 'دِقَّة';
+  static const String splashStageAppDir = 'تهيئة مجلد التطبيق';
+  static const String splashStageLegacyAdopt = 'تبني قاعدة الجيل السابق';
+  static const String splashStageLogRootVault =
+      'حمل جذر السجلات وفتح الخزنة';
+  static const String splashStageOpenDatabase =
+      'فتح قاعدة البيانات وترقية المخطط — أول فتح بعد التحديث يستغرق '
+      'وقتاً أطول مرة واحدة (تحسين المخطط والفهارس)';
+  static const String splashStageSetupCheck = 'فحص التهيئة';
+  static const String splashStageUpgradeSnapshot =
+      'لقطة الأمان قبل ترقية المخطط';
 }

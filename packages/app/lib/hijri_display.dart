@@ -15,6 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
 
+import 'calendar_prefs.dart';
+
 const String _kHijriKey = 'hijri_display_enabled';
 
 /// حالة الخيار الجارية — الافتراض مطفأ (الميلادي وحده كما كان دائماً).
@@ -48,4 +50,24 @@ String displayDate(String isoDateText, {bool? hijri}) {
   final hijriText = hijriFromIsoDate(isoDateText);
   if (hijriText == null) return isoDateText;
   return '$isoDateText (هـ $hijriText)';
+}
+
+/// س233 (D-231 — المرحلة أ/2): سطر تاريخ المطبوعات — الصيغة الطويلة
+/// بأسماء الأشهر المختارة («28 تشرين الثاني 2026») والهجري بجانبه حين
+/// يُفعَّل خياره (نمط displayDate ذاته) — فخيار أسماء الأشهر يطبَّق
+/// على الطباعة بهذا المدخل حصراً، والمدخل الفاسد يعود كما كان بلا
+/// اختراع.
+String printDateLine(
+  String isoDateText, {
+  DiqqahMonthNames? names,
+  bool? hijri,
+}) {
+  final parsed = DateTime.tryParse(isoDateText);
+  if (parsed == null) return displayDate(isoDateText, hijri: hijri);
+  final long = formatDiqqahLongDate(parsed, names: names);
+  final enabled = hijri ?? hijriDisplayEnabled.value;
+  if (!enabled) return long;
+  final hijriText = hijriFromIsoDate(isoDateText);
+  if (hijriText == null) return long;
+  return '$long (هـ $hijriText)';
 }

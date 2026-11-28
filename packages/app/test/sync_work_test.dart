@@ -52,6 +52,9 @@ void main() {
     }
     expect(found, isTrue, reason: 'البند ظاهر لا مدفون');
 
+    // س233: درس السرد الكسول الثاني — الإظهار قبل الضغط (عرف D-098).
+    await tester.ensureVisible(find.text('العمل الجماعي والمزامنة'));
+    await tester.pump();
     await tester.tap(find.text('العمل الجماعي والمزامنة'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

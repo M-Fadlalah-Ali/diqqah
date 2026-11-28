@@ -10,7 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'backup_center.dart' hide kAppVersion;
 import 'adaptive.dart';
 import 'app_theme.dart' show DiqqahLane, diqqahLanesOf;
+import 'auto_backup_prefs.dart';
 import 'follow_ups_screen.dart';
+import 'l10n/app_strings.dart';
 import 'settings_screen.dart'
     show SettingsScreen, diqqahVersionLine, kAppVersion, kBuildNumber;
 import 'parties_screen.dart';
@@ -415,6 +417,9 @@ class _HomeScreenState extends State<HomeScreen> {
     _openingIntegrityCheck();
     _refreshFollowUps();
     _loadQuickAccess();
+    // س233 (D-233 — المرحلة أ/4): قراءة إعداد المزامنة لمؤشرها الصغير
+    // بالتذييل — يظهر عند وجود دفتر انضمام حصراً (صمت غير المفعلة).
+    _loadSyncConfigured();
     // س221 (ثبات نبض العمل — دفعة النسخ والاستعادة): لقطة النبض تقرأ
     // من مصدر النسخ حصراً (حصة التخزين ونسخ الطوارئ بمدخلاتها) —
     // فتغيّر صحة النسخ يجدّدها حياً كي لا تبقى البطاقة على قيمة ميتة
@@ -426,6 +431,20 @@ class _HomeScreenState extends State<HomeScreen> {
   /// س221 — صحة النسخ تغيّرت فالنبض يُجدد من مصدره.
   void _onHealthChanged() {
     _refreshFollowUps();
+  }
+
+  /// س233 (D-233): هل المزامنة مفعلة (دفتر انضمام قائم)؟ — المؤشر
+  /// الصغير بالتذييل يظهر حين true حصراً (صمت غير المفعلة).
+  bool _syncConfigured = false;
+
+  Future<void> _loadSyncConfigured() async {
+    try {
+      final book = await widget.db.joinCodeBookText();
+      if (!mounted) return;
+      setState(() => _syncConfigured = book != null);
+    } catch (_) {
+      // بلا مؤشر — لا تُسقط الرئيسية أبداً (عقد س221 عينه).
+    }
   }
 
   @override
@@ -1252,14 +1271,86 @@ class _HomeScreenState extends State<HomeScreen> {
       key: const ValueKey('home_footer'),
       padding: const EdgeInsets.fromLTRB(
           kDiqqahSpacingM, kDiqqahSpacingS, kDiqqahSpacingM, kDiqqahSpacingM),
-      child: line.isEmpty
-          ? const SizedBox.shrink()
-          : Text(
+      child: Column(
+        children: [
+          // س233 (D-233 — المرحلة أ/4): مؤشرا الحالة الصغيران — النسخ
+          // والمزامنة داخل طبقة التذييل القائمة ذاتها (لا طبقة سابعة
+          // ولا شاشة انتظار) — الست طبقات (س209) باقية ستاً.
+          _statusChips(),
+          if (line.isNotEmpty)
+            Text(
               line,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// س233 (D-233 — المرحلة أ/4): مؤشرا النسخ والمزامنة الصغيران بلغة
+  /// التذييل — النسخ: يعمل بآخر نسخة آلية سليمة / متوقف (كهرماني) /
+  /// فشلت الأخيرة (أحمر)، والمزامنة تظهر عند وجود دفتر انضمام حصراً
+  /// فلا ضجيج لغير المفعلة (عرف الصمت الهادئ س198).
+  Widget _statusChips() {
+    final lanes = diqqahLanesOf(context);
+    return Padding(
+      key: const ValueKey('home_status_chips'),
+      padding: const EdgeInsets.only(bottom: kDiqqahSpacingS),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: kDiqqahSpacingM,
+        runSpacing: 4,
+        children: [
+          ListenableBuilder(
+            // س233: النسخ — المفتاح الرئيسي بالخيارات وصحة المركز معاً
+            // فالرقاقة تتجدد لحظة تغير أيهما (المركز غائب بالاختبارات
+            // فتبقى الرقاقة على وجهها الأول بلا استثناء).
+            listenable: Listenable.merge([
+              autoBackupEnabled,
+              BackupCenter.instance?.health,
+            ]),
+            builder: (context, _) {
+              if (!autoBackupEnabled.value) {
+                return _statusChip(S.homeBackupPaused,
+                    Icons.pause_circle_outline, lanes.attention.fg);
+              }
+              if ((BackupCenter.instance?.health.value)?.hasFailure ??
+                  false) {
+                return _statusChip(S.homeBackupFailed,
+                    Icons.error_outline, lanes.negative.fg);
+              }
+              return _statusChip(
+                  S.homeBackupActive, Icons.check_circle_outline,
+                  lanes.positive.fg);
+            },
+          ),
+          if (_syncConfigured)
+            _statusChip(
+                S.homeSyncActive,
+                Icons.sync_outlined,
+                Theme.of(context).colorScheme.onSurfaceVariant),
+        ],
+      ),
+    );
+  }
+
+  /// س233: رقاقة الحالة الواحدة — أيقونة صغيرة ولسان تذييل بلون زقها.
+  Widget _statusChip(String label, IconData icon, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context)
+              .textTheme
+              .labelSmall
+              ?.copyWith(color: color),
+        ),
+      ],
     );
   }
 }

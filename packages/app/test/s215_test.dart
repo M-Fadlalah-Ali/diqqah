@@ -11,15 +11,15 @@ import 'package:diqqah_app/backup_center.dart' show kAppVersion;
 import 'package:diqqah_app/settings_screen.dart' show diqqahVersionLine;
 
 void main() {
-  test('س215 (القيمة انتقلت بس232): الترميز الموحد 0.284.0+84 — pubspec '
+  test('س215 (القيمة انتقلت بس232): الترميم الموحد 0.285.0+85 — pubspec '
       'وكتالوج الإصدار معاً حرفاً (حارس ⑤ — والتثبيت الصلب انتقل إليه '
       'من s213 بنمط انتقاله)', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final line = pubspec
         .split('\n')
         .firstWhere((l) => l.startsWith('version:'));
-    expect(line, 'version: 0.284.0+84');
-    expect(kAppVersion, '0.284.0+84');
+    expect(line, 'version: 0.285.0+85');
+    expect(kAppVersion, '0.285.0+85');
   });
 
   test('س215: سطر العرض بالبادئة المُشعرة — بنمط نسخ الإصدار الموثقة '

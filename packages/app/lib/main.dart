@@ -14,7 +14,10 @@ import 'package:path_provider/path_provider.dart';
 
 import 'aging_prefs.dart';
 import 'app_theme.dart';
+import 'auto_backup_prefs.dart';
 import 'backup_center.dart';
+import 'calendar_localizations.dart';
+import 'calendar_prefs.dart';
 import 'db_key_vault.dart';
 import 'device_gate_screen.dart';
 import 'gate_error_screen.dart';
@@ -22,11 +25,13 @@ import 'hijri_display.dart';
 import 'first_run_screen.dart';
 import 'home_screen.dart';
 import 'item_images.dart';
+import 'l10n/app_strings.dart';
 import 'native_pbkdf2.dart';
 import 'print_copies.dart';
 import 'print_image_prefs.dart';
 import 'restore_gate_screen.dart';
 import 'session_guard.dart';
+import 'splash_screen.dart';
 import 'ui_fonts.dart';
 import 'dq_log.dart';
 
@@ -46,6 +51,13 @@ Future<void> main() async {
   // الدفعة 23 (F-167/D-183): خيار عرض الهجري بجانب الميلادي — قراءته
   // عند الإقلاع بالنمط ذاته، والافتراض مطفأ فلا شيء يتغير بلا طلب.
   await loadHijriDisplayPref();
+  // س233 (D-231 — المرحلة أ/2): خيارا التقويم — أسماء الأشهر وأول
+  // الأسبوع — قراءتهما عند الإقلاع بالنمط ذاته، والافتراض سلوك القائم.
+  await loadCalendarPrefs();
+  // س233 (D-232 — المرحلة أ/3): خيارات النسخ الآلي — المفتاح الرئيسي
+  // وخانات الدورات — قراءتها عند الإقلاع فتراها مرشحة المركز من أول
+  // لحاق، والافتراض مفعّل بكل الخانات فلا يتغير سلوك بلا طلب.
+  await loadAutoBackupPrefs();
   // س182 (م05 — نظام ألوان نهاري/ليلي/نظامي بأمر المالك): قراءة
   // الوضع المحفوظ قبل الإقلاع بنمط الخطوط — والفاسد يعيد «نظام» بلا كسر.
   await loadThemeMode();
@@ -77,7 +89,17 @@ class DiqqahApp extends StatelessWidget {
   /// عدد تكرارات PBKDF2 — حقن للاختبارات، الافتراضي الإنتاجي.
   final int hasherIterations;
 
-  const DiqqahApp({super.key, this.db, this.dbPath, this.hasherIterations = PasswordHasher.secureIterations});
+  /// س233 (D-233): الحد الأدنى لشاشة البدء — الإنتاج نصف ثانية،
+  /// واختبارات فشل الافتتاح تحقن الصفر فتصل شاشة الخطأ فوراً.
+  final Duration splashMinimum;
+
+  const DiqqahApp({
+    super.key,
+    this.db,
+    this.dbPath,
+    this.hasherIterations = PasswordHasher.secureIterations,
+    this.splashMinimum = const Duration(milliseconds: 500),
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -97,26 +119,46 @@ class DiqqahApp extends StatelessWidget {
         valueListenable: appThemeMode,
         builder: (context, modeKey, _) => ValueListenableBuilder<String>(
           valueListenable: appFontChoice,
-          builder: (context, fontKey, _) => MaterialApp(
-            title: 'دِقَّة',
-            // س-135/D-129: الاتجاه العربي الموحد — القوائم والأسهم والشاشات
-            // كلها من اليمين، وتتغير نصوص عناصر الواجهة الجاهزة لعربياً.
-            locale: const Locale('ar'),
-            supportedLocales: const [Locale('ar')],
-            localizationsDelegates: const [
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            // س182 (م05): الثيمان المعتمدان بالألوان الستة وخلفيتَي
-            // #FFFFFF و#1E1E1E، والوضع من اختيار المظهر (نظام/نهاري/ليلي).
-            theme: buildLightTheme(appFontFamily(fontKey)),
-            darkTheme: buildDarkTheme(appFontFamily(fontKey)),
-            themeMode: themeModeOf(modeKey),
-            home: AppGate(
-              db: db,
-              dbPath: dbPath,
-              hasherIterations: hasherIterations,
+          builder: (context, fontKey, _) => ListenableBuilder(
+            // س233 (D-231 — المرحلة أ/2): الجذر يعاد بناؤه بتغير خيارَي
+            // التقويم — وفد الترجمة الحاكم يُبنى بقيمتيهما الجاريتين
+            // فيرى منتقي التاريخ الشهر المختار وأول الأسبوع فوراً.
+            listenable:
+                Listenable.merge([calendarMonthNames, calendarWeekStart]),
+            builder: (context, _) => MaterialApp(
+              title: 'دِقَّة',
+              // س-135/D-129: الاتجاه العربي الموحد — القوائم والأسهم والشاشات
+              // كلها من اليمين، وتتغير نصوص عناصر الواجهة الجاهزة لعربياً.
+              locale: const Locale('ar'),
+              supportedLocales: const [Locale('ar')],
+              // س233 (D-231): وفد التقويم الحاكم أولاً — المفوّضون
+              // الأوائل بالقائمة لهم الأسبقية فيرتج هذا الوفد على الجذر
+              // العالمي، فيتحكم بشهر رأس المنتقي وأول أيام أسبوعه
+              // بأسماء الأشهر واليوم المختارَين (دروس الجولة المحلية).
+              localizationsDelegates: [
+                DiqqahCalendarMaterialLocalizationsDelegate(
+                  monthNames: calendarMonthNames.value,
+                  weekStart: calendarWeekStart.value,
+                ),
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              // س182 (م05): الثيمان المعتمدان بالألوان الستة وخلفيتَي
+              // #FFFFFF و#1E1E1E، والوضع من اختيار المظهر (نظام/نهاري/ليلي).
+              theme: buildLightTheme(appFontFamily(fontKey)),
+              darkTheme: buildDarkTheme(appFontFamily(fontKey)),
+              themeMode: themeModeOf(modeKey),
+              home: AppGate(
+                db: db,
+                dbPath: dbPath,
+                hasherIterations: hasherIterations,
+                // س233 (D-233 — المرحلة أ/4): الحد الأدنى نصف ثانية
+                // بالإنتاج حصراً — والحقن الاختباري (قاعدة محقونة)
+                // يتجاوزه فلا يبطئ اختباراً واحداً.
+                splashMinimum:
+                    db == null ? splashMinimum : Duration.zero,
+              ),
             ),
           ),
         ),
@@ -132,11 +174,16 @@ class AppGate extends StatefulWidget {
   final String? dbPath;
   final int hasherIterations;
 
+  /// س233 (D-233 — المرحلة أ/4): الحد الأدنى لعرض شاشة البدء قبل أي كشف
+  /// — الإنتاج نصف ثانية (لا وميض انطلاقة)، والاختبارات حقن الصفر.
+  final Duration splashMinimum;
+
   const AppGate({
     super.key,
     this.db,
     this.dbPath,
     this.hasherIterations = PasswordHasher.secureIterations,
+    this.splashMinimum = const Duration(milliseconds: 500),
   });
 
   @override
@@ -165,6 +212,16 @@ class _AppGateState extends State<AppGate> {
   /// بخزنة الجهاز (لا هذه الراية) فلا يتكرر بكل بناء.
   bool _vaultRecoveryPromptTried = false;
 
+  /// س233 (D-233 — المرحلة أ/4): لسان المرحلة الجارية لشاشة البدء —
+  /// منبِّه قيمة لا setState (المراحل تعبر داخل _resolve قبل أول بناء
+  /// وبعده بسلام)، وكلاء الافتتاح وحدهم هنا (لا نسخ ولا مزامنة:
+  /// مؤشراهما الصغيران بتذييل الرئيسية لا شاشة انتظار).
+  final ValueNotifier<String> _splashStage =
+      ValueNotifier<String>(S.splashStageAppDir);
+
+  /// س233 (D-233): بدء العد لحساب الحد الأدنى لشاشة البدء.
+  final DateTime _bootStarted = DateTime.now();
+
   /// D-197 (دفعة التحصين الافتتاحي — س96): فشل الافتتاح المعروض بدل
   /// الدورة الأبدية — نصه الحقيقي كامل على شاشة الخطأ.
   String? _error;
@@ -185,7 +242,11 @@ class _AppGateState extends State<AppGate> {
     // (تحديث b24→b26 فشلَ ولو أظهر دورة أبدية بلا كلمة): أي رمي
     // في أي مرحلة يظهر على شاشة الخطأ برسالته الحقيقية وزرَّي
     // إعادة المحاولة والمشاركة، فلا دورة بلا كلمة بعد اليوم.
-    String stage = 'تهيئة مجلد التطبيق';
+    String stage = S.splashStageAppDir;
+    // س233 (D-233): لسان المرحلة يُحدَّث بالمنبِّه فتراه شاشة البدء
+    // حياً — والحالات المعطِّلة حصراً (فتح القاعدة وترقيتها ولقطة
+    // أمانها وفتح الخزن وفحص التهيئة) بعقد الخطة.
+    _splashStage.value = stage;
     try {
       final DiqqahDatabase db;
       final String dbPath;
@@ -200,9 +261,11 @@ class _AppGateState extends State<AppGate> {
         // الجيل السابق «heseb.db» عند أول فتح بعد التسمية (D-053).
         final dir = await getApplicationSupportDirectory();
         dbPath = p.join(dir.path, 'diqqah.db');
-        stage = 'تبني قاعدة الجيل السابق';
+        stage = S.splashStageLegacyAdopt;
+        _splashStage.value = stage;
         await adoptLegacyHesebDatabase(dbPath);
-        stage = 'لقطة الأمان قبل ترقية المخطط';
+        stage = S.splashStageUpgradeSnapshot;
+        _splashStage.value = stage;
         // D-197: أول فتح بعد ترقية يحمل ترحيلات على قاعدة حقيقية —
         // اللقطة تسبق مساسها فأي فشل لاحق يبقى قابلاً للاسترجاع.
         await snapshotBeforeUpgrade(
@@ -213,7 +276,8 @@ class _AppGateState extends State<AppGate> {
         // كتابة بعدها. فشل الخزنة = الجذر الإرثي المضمّن انخفاضاً
         // موثقاً (يُسجل بالسجل بعد الفتح لا يُسقط الافتتاح — نمط مواد
         // النسخ عينه: أمن النسخ لا يحبس الباب).
-        stage = 'حمل جذر السجلات من الخزنة';
+        stage = S.splashStageLogRootVault;
+        _splashStage.value = stage;
         Object? logRootFailure;
         List<int>? liveLogRoot;
         try {
@@ -221,7 +285,8 @@ class _AppGateState extends State<AppGate> {
         } catch (e) {
           logRootFailure = e;
         }
-        stage = 'فتح قاعدة البيانات وترقية المخطط';
+        stage = S.splashStageOpenDatabase;
+        _splashStage.value = stage;
         // F-150/D-210 P0-ب (س148): خزنة الجهاز تُمرّر للفتح — المفتاح
         // العشوائي 256-bit يُحمل/يُولد من الخزنة (Keystore/DPAPI) ويُرحَّل
         // النص الصريح للمثبتين فوق حزم سابقة عند أول فتح (لقطة preenc
@@ -268,7 +333,8 @@ class _AppGateState extends State<AppGate> {
           } catch (_) {}
         }
       }
-      stage = 'فحص التهيئة';
+      stage = S.splashStageSetupCheck;
+      _splashStage.value = stage;
       final hasAnyUser = await db.hasAnyUser();
       if (!mounted) return;
       // دفعة (10): جذر مسارات الصور هو مجلد القاعدة لا مجلد الصور نفسه —
@@ -283,6 +349,9 @@ class _AppGateState extends State<AppGate> {
       // نفسها فقراءتها هنا تحكم وجه الإقلاع كله.
       final sessionLocked = await db.sessionLocked();
       final startCenter = widget.db == null;
+      // س233 (D-233 — المرحلة أ/4): لا كشف قبل مرور الحد الأدنى لشاشة
+      // البدء — فتُرى الانطلاقة لا وميضاً يمر (والاختبار المinject صفره).
+      await _respectSplashMinimum();
       if (!mounted) return;
       setState(() {
         _db = db;
@@ -311,12 +380,33 @@ class _AppGateState extends State<AppGate> {
         }));
       }
     } catch (e) {
+      // س233 (D-233): الصدق ينتظر الحد الأدنى أيضاً — فلا وميض انطلاقة
+      // يقفز إلى شاشة الخطأ قبل أن تُرى.
+      await _respectSplashMinimum();
       if (!mounted) return;
       setState(() {
         _error = '$stage: $e${dqTag(e)}';
         _hasAnyUser = null;
       });
     }
+  }
+
+  /// س233 (D-233 — المرحلة أ/4): احترام الحد الأدنى لشاشة البدء — ما
+  /// بقي من نصف الثانية يُنتظر قبل أي كشف، والحقن الاختباري صفّره فلا
+  /// انتظار أصلاً.
+  Future<void> _respectSplashMinimum() async {
+    final elapsed = DateTime.now().difference(_bootStarted);
+    final remaining = widget.splashMinimum - elapsed;
+    if (remaining > Duration.zero) {
+      await Future<void>.delayed(remaining);
+    }
+  }
+
+  @override
+  void dispose() {
+    // س233: منبِّه المرحلة يُفك مع البوابة — لا نداء على حالة ميتة.
+    _splashStage.dispose();
+    super.dispose();
   }
 
   /// بعد استعادة ناجحة (F-013): القاعدة القديمة مغلقة والملف استُبدل —
@@ -355,35 +445,11 @@ class _AppGateState extends State<AppGate> {
     }
     final hasAnyUser = _hasAnyUser;
     if (hasAnyUser == null) {
-      // افتتاح < 3 ثوانٍ (F-016): بلا أي عمل محاسبي على هذا المسار.
-      // س216: لسان الصدق أثناء الافتتاح — أول فتح بعد تحديث يحمل
-      // ترحيلة وفهارس لمرة واحدة، فالنص يفسر أي انتظار بدل صمتٍ
-      // يوحي بالتوقف (رسالة أندرويد التي رآها المالك بالحياة b71).
-      // س229 (توحيد الانطلاقة بالعمل الفني الجديد): خلفية الانطلاقة
-      // الفحمية (30,30,30) ذاتها وأثر الهوية الفاتح — فلا وميض أبيض
-      // بين انطلاقة النظام المشغلة بالعمل الجديد وأول إطار هنا.
-      return Scaffold(
-        backgroundColor: const Color(0xFF1E1E1E),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(
-                  color: kDarkIdentityBrown),
-              const SizedBox(height: 16),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  'يُفتح قاعدة بياناتك… أول فتح بعد التحديث يستغرق '
-                  'وقتاً أطول مرة واحدة (تحسين المخطط والفهارس)',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: kDarkIdentityBrown),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+      // س233 (D-233 — المرحلة أ/4): شاشة البدء المتحركة — اسم التطبيق
+      // بحركة نبض هادئة على الانطلاقة الفحمية الموحدة (س229) ولسان
+      // المرحلة المعطِّلة الجارية حصراً (لا نسخ ولا مزامنة هنا: مؤشراهما
+      // الصغيران بتذييل الرئيسية)، وحدُّها الأدنى نصف ثانية بالإنتاج.
+      return DiqqahSplash(stageListenable: _splashStage);
     }
     final db = _db!;
     final dbPath = _dbPath ?? widget.dbPath ?? 'diqqah.db';

@@ -398,6 +398,14 @@ void main() {
     // لا حقل كلمة مرور أصلاً، والنقر على الزر يكفي.
     // س213 (D-218): إعادة تنظيم الإعدادات أزاحت البطاقة تحت أول
     // نافذة البناء — تأكيد وصول بنمط D-098 قبل النقر.
+    // س233: بطاقة النسخ الآلي أطالت القائمة فخرج الزر من نطاق البناء
+    // الكسول — سحبٌ حتى يُبنى ثم إظهار (درس D-098 والسرد الكسول).
+    for (var i = 0;
+        i < 12 && find.text('إنشاء نسخة احتياطية').evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pump();
+    }
     await tester.ensureVisible(find.text('إنشاء نسخة احتياطية'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
@@ -459,6 +467,14 @@ void main() {
     // (أ) الإلغاء الواعي: فك التشفير → تحذير صريح → تراجع أولاً لا شيء
     // (D-060: صندوق التشفير بلا أي حقل كلمة مرور بعده)
     // س213 (D-218): تأكيد وصول البطاقة بعد إعادة التنظيم بنمط D-098.
+    // س233: نفس درس السحب أعلاه — الوصول بالتمرير قبل الإظهار.
+    for (var i = 0;
+        i < 12 &&
+            find.text('تشفير النسخة بمفتاح البرنامج').evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pump();
+    }
     await tester.ensureVisible(find.text('تشفير النسخة بمفتاح البرنامج'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('تشفير النسخة بمفتاح البرنامج'));
@@ -540,7 +556,16 @@ void main() {
     // زر الإخراج يظهر في حوار نجاح النسخة — وجوده لا يستدعي أي قناة منصة
     // D-060: النسخة مشفرة بمفتاح البرنامج افتراضياً — بلا أي حقل كلمة
     // س213 (D-218): تأكيد وصول البطاقة بعد إعادة التنظيم بنمط D-098.
+    // س233: بطاقة النسخ الآلي أطالت القائمة فخرج الزر من نطاق البناء
+    // الكسول — سحبٌ حتى يُبنى ثم إظهار (درس D-098 والسرد الكسول).
+    for (var i = 0;
+        i < 12 && find.text('إنشاء نسخة احتياطية').evaluate().isEmpty;
+        i++) {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pump();
+    }
     await tester.ensureVisible(find.text('إنشاء نسخة احتياطية'));
+
     await tester.pumpAndSettle();
     await tester.tap(find.text('إنشاء نسخة احتياطية'));
     // نفس درس F-012 أعلاه: سلسلة IO حقيقية ثم دفع الحوار — حلقة توازن

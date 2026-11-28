@@ -169,6 +169,10 @@ void main() {
     }
     expect(found, isTrue, reason: 'البند ظاهر لا مدفون');
 
+    // س233: درس السرد الكسول الثاني — الموجود بنطاق الكاش قد يكون خارج
+    // الشاشة فلا يتلقى الضغطة؛ الإظهار قبل الضغط (عرف D-098).
+    await tester.ensureVisible(find.text('العملات وأسعار الصرف'));
+    await tester.pump();
     await tester.tap(find.text('العملات وأسعار الصرف'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

@@ -50,6 +50,9 @@ void main() {
 
     await scrollToText(tester, 'التشخيص ومرجع الأخطاء');
     expect(find.text('التشخيص ومرجع الأخطاء'), findsOneWidget);
+    // س233: درس السرد الكسول الثاني — الإظهار قبل الضغط (عرف D-098).
+    await tester.ensureVisible(find.text('التشخيص ومرجع الأخطاء'));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('settings_diagnostics')));
     await tester.pump();
     await tester.pump();

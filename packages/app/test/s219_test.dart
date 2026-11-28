@@ -140,7 +140,9 @@ void main() {
     final root = _repoRoot().path;
     const screens = <String>[
       'device_gate_screen.dart',
-      'settings_screen.dart',
+      // س233 (D-230): شطر ملف الإعدادات — مالك تجزئة الكلمة صار ملف
+      // الهوية (settings/identity_section.dart) فالحارس يتبعه.
+      'settings/identity_section.dart',
       'users_screen.dart',
       'first_run_screen.dart',
     ];

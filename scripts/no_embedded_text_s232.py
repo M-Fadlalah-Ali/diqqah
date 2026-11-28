@@ -53,7 +53,13 @@ BASELINE = {
     'first_run_screen.dart': 29,
     'follow_ups_screen.dart': 5,
     'gate_error_screen.dart': 7,
-    'hijri_display.dart': 1,
+    # س233 (D-231 — المرحلة أ/2): أسماء الأشهر بيانات تقويمية لا
+    # نصوص واجهة (نمط tafqit الموثق أعلاه) — محورها التقويم لا الشاشة،
+    # وتربطها المرحلة د-2 (D-236) باللغة المختارة عند تعددها.
+    'calendar_prefs.dart': 24,
+    # س233: ولاحقة الهجري الثانية لسطر تاريخ المطبوعات (printDateLine
+    # بنمط displayDate ذاته) — بنية بيانات عرض لا نص شاشة.
+    'hijri_display.dart': 2,
     'home_screen.dart': 74,
     'import_screen.dart': 118,
     'input_formatters.dart': 2,

@@ -268,7 +268,7 @@ Future<Uint8List> buildInvoicePrintoutBytes(
       title: S.deliveryNoteKeeperCopyTitle,
       headerPairs: [
         (S.documentLabel, invoiceDisplayLabel(invoice)),
-        (S.dateLabel, displayDate(invoice.invoiceDate)),
+        (S.dateLabel, printDateLine(invoice.invoiceDate)),
         (S.partyLabel, partyName ?? '—'),
         if (invoice.narration != null && invoice.narration!.isNotEmpty)
           (S.descriptionLabel, invoice.narration!),

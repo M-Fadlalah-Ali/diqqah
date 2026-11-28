@@ -339,6 +339,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       // بلا جلسة: بطاقة المجدول محجوبة بصلاحيتها والاستيراد بالمديرية
       // — فكشف بطاقة النسخ الكامل وحدها على المسرح.
+      // س233 (D-230): بطاقة فحص الثوابت بقسم الأمان الجديد أزاحت بطاقة
+      // النسخ الكامل أسفل نطاق البناء الأولي — سحبٌ إلى كشفها أولاً
+      // (درس D-098: الوصول بالتمرير لا الافتراض).
+      for (var i = 0;
+          i < 12 && find.text('كيف يعمل؟').evaluate().isEmpty;
+          i++) {
+        await tester.drag(find.byType(ListView).first,
+            const Offset(0, -300));
+        await tester.pump();
+      }
+      await tester.ensureVisible(find.text('كيف يعمل؟'));
+      await tester.pump();
       expect(find.text('كيف يعمل؟'), findsOneWidget);
       expect(find.textContaining('يُحفظ في مجلد القاعدة نفسه'), findsNothing,
           reason: 'م17: التفصيل الكثيف خلف التوسعة لا ظاهراً دائماً');

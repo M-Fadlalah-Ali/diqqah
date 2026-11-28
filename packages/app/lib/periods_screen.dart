@@ -4,6 +4,7 @@ import 'package:diqqah_domain/diqqah_domain.dart';
 import 'package:diqqah_storage/diqqah_storage.dart';
 
 import 'adaptive.dart';
+import 'auto_backup_prefs.dart';
 import 'backup_center.dart';
 import 'dq_log.dart';
 import 'app_theme.dart';
@@ -372,7 +373,10 @@ class _YearCloseScreenState extends State<YearCloseScreen> {
       });
       _reload();
       // السنوية بعد نجاح الإقفال حصراً — أرشيف السنة بمقعدها الأخير.
-      if (center != null) {
+      // س233 (D-232 — المرحلة أ/3): الخانة السنوية المتقدمة ببطاقة
+      // النسخ الآلي تحكمها وحدها (والحدثية قبل الإقفال شبكة أمان فوقها
+      // لا تُمس بهذه الخانة أبداً).
+      if (center != null && autoBackupAnnualAtClose.value) {
         final annual = await center.createAnnualBackup();
         if (annual != null && mounted) {
           await showDialog<void>(

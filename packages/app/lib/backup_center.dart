@@ -17,6 +17,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'package:flutter/foundation.dart';
 
 import 'db_key_vault.dart';
+import 'auto_backup_prefs.dart';
 import 'device_status.dart';
 import 'item_images.dart';
 
@@ -148,7 +149,14 @@ const int kHourlyBatteryFloorPercent = 20;
 /// للشاشات الثلاث الكبرى وحارس CI) — والأرقام 0.281–0.283 تجاوزت
 /// عمداً لإعادة اصطفاح minor مع عداد التشغيل (b84 = 0.284 =
 /// versionCode 2084 — درس س231) — محجوز لبناء b84 بأمر المالك حصراً.
-const String kAppVersion = '0.284.0+84';
+/// س233: الترميم الموحد 0.285.0+85 — المرحلة أ من خارطة الطريق
+/// الخماسية بجولات المالك الثلاث (D-229): الأقسام الستة للإعدادات
+/// بشطر الملف (D-230)، وخيارا أسماء الأشهر وأول الأسبوع بوفد ترجمة
+/// حاكم على منتقي التاريخ وسطر تاريخ المطبوعات الطويل (D-231)، وبطاقة
+/// النسخ الآلي بمفتاحها الرئيسي وخاناتها السبع ومرشحة المركز (D-232)،
+/// وشاشة البدء المتحركة بحدّها الأدنى نصف ثانية ومؤشرا الحالة الصغيران
+/// بالرئيسية (D-233) — محجوز لبناء b85 بأمر الخطة (versionCode 2085).
+const String kAppVersion = '0.285.0+85';
 
 class BackupCenter {
   /// النسخة الوحيدة بالعملية — تبدأ من بوابة الافتتاح بالإنتاج فقط
@@ -255,6 +263,10 @@ class BackupCenter {
 
   /// لحاق أول التشغيل: كل دورة مستحقة تُنفَّذ مرة واحدة الآن ثم تهدأ —
   /// لا نعيد كل الفائت (§8-1) مهما طال الغياب.
+  /// س233 (D-232 — المرحلة أ/3): والمرشحة تحكم كل استحقاق — المفتاح
+  /// الرئيسي مطفأ أو الخانة مفرغة فدورتها لا تجري (لا مفتاح لا دورة)،
+  /// فالإيقاف يسري من أقرب لحاق، والتفعيل يجعل أول نسخة يومية عند
+  /// الدخول إلزامية ما دامت خانتها مفعلة (عقد الخطة حرفاً).
   Future<void> runCatchUp() async {
     final due = dueAutoKinds(
       nowUtc: nowUtc(),
@@ -262,7 +274,9 @@ class BackupCenter {
       lastSuccess: store?.catalog.lastSuccess ?? {},
     );
     for (final kind in BackupScheduleKind.values) {
-      if (due.contains(kind)) await _runKind(kind);
+      if (due.contains(kind) && autoBackupKindAllowed(kind)) {
+        await _runKind(kind);
+      }
     }
   }
 
@@ -270,14 +284,17 @@ class BackupCenter {
     if (_paused || _running) return;
     // الساعية وحدها على المضرب — اليومية فما فوق حدودها التقويمية
     // يلتقطها لحاق الإقلاع، والمضرب يفحصها أيضاً للجلسة الطويلة العابرة
-    // للمنتصف (جلسة عمل 24 ساعة بلا إقلاع جديد).
+    // للمنتصف (جلسة عمل 24 ساعة بلا إقلاع جديد). س233 (D-232): والمرشحة
+    // هنا كذلك — رأي الخيارات يسري من أقرب نبضة.
     final due = dueAutoKinds(
       nowUtc: nowUtc(),
       nowLocal: nowLocal(),
       lastSuccess: store?.catalog.lastSuccess ?? {},
     );
     for (final kind in BackupScheduleKind.values) {
-      if (due.contains(kind)) await _runKind(kind);
+      if (due.contains(kind) && autoBackupKindAllowed(kind)) {
+        await _runKind(kind);
+      }
     }
   }
 
