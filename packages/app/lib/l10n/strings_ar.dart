@@ -65,6 +65,7 @@ abstract final class S {
   static const String cashLabel = 'نقدية';
   static const String cashOption = 'نقدي';
   static const String clearBarcode = 'مسح باركود';
+  static const String clearFiltersLabel = 'مسح الفلاتر';
   static const String countingBasis = 'أساس العد';
   static String creditLimitExceededBody(Object? p1, Object? p2, Object? p3, Object? p4) => 'رصيد «${p1}» بعد هذه الفاتورة ${p2} — يتجاوز الحد المسموح ${p3} بفائض ${p4}.\nالتنبيه إرشاد لا منع — القرار لك.';
   static const String creditLimitExceededTitle = 'تجاوز حد الائتمان';
@@ -115,6 +116,7 @@ abstract final class S {
   static const String itemNumberLabel = 'رقم الصنف';
   static String itemWithNumber(Object? p1) => 'صنف #${p1}';
   static const String keepAsDraft = 'تركها مسودة';
+  static const String lastMonthPreset = 'الشهر الماضي';
   static String lastPriceWithParty(Object? p1, Object? p2) => 'آخر سعر مع ${p1} — من فاتورة ${p2}';
   static const String levelLabel = 'المستوى';
   static const String lineDiscountOptional = 'خصم السطر (اختياري)';
@@ -151,6 +153,7 @@ abstract final class S {
   static String postRejectedWithReason(Object? p1, Object? p2) => 'رفض الترحيل: ${p1}${p2}';
   static const String postedLabel = 'المرحّلة';
   static String postedWithNumber(Object? p1) => 'رُحّلت برقم ${p1}';
+  static const String previousYearPreset = 'السنة السابقة';
   static const String printAction = 'طباعة';
   static const String printList = 'طباعة القائمة';
   static const String purchaseInvoiceType = 'فاتورة شراء — مشتريات';
@@ -192,6 +195,9 @@ abstract final class S {
   static String suggestionMostUsed(Object? p1) => 'اقتراح: ${p1} (الأكثر تداولاً)';
   static const String sumLabel = 'المجموع';
   static const String supplierNeedsParty = 'المورد (الآجل يطلب طرفاً)';
+  static const String thisMonthPreset = 'هذا الشهر';
+  static const String thisYearPreset = 'هذا العام';
+  static const String todayPreset = 'اليوم';
   static const String totalQuantities = 'مجموع الكميات';
   static String totalWithAmount(Object? p1, Object? p2) => 'الإجمالي ${p1} ${p2}';
   static const String typeFromEntryButton = 'النوع يُحدد من زر الدخول — لا مبدّل هنا';

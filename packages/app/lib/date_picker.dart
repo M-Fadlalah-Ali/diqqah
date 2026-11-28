@@ -61,7 +61,19 @@ Widget calendarPickerSuffix(
 ///   زر «عرض» القائم هو الذي يُدقق ويُحمّل — عرف D-077 باقٍ حرفاً
 ///   (حرس المدقق أول قبل لمس القاعدة) وعقد م02 س182 باقٍ: تحسين
 ///   طبقة الإدخال دون لمس منطق المدقق والتصفية.
-enum DiqqahRangePreset { today, thisMonth, lastMonth, thisYear }
+enum DiqqahRangePreset {
+  today,
+  thisMonth,
+  lastMonth,
+  thisYear,
+
+  /// س234 (D-234 — المرحلة ب/2 من خارطة الطريق الخماسية): السنة
+  /// السابقة كاملة — أولها إلى آخرها (سنة «كانون الأول» السابق).
+  /// الاختصار الخامس لأزرار التاريخ الجديدة بسجل الفواتير حصراً —
+  /// ورقائق DiqqahRangeShortcuts القائمة بشاشاتها الأربع كما هي
+  /// (بند مسح الشاشات الأخرى: بلا تعديل بكلمة المالك).
+  previousYear,
+}
 
 /// تواريخ الاختصار نقيةً — زوج (من، إلى) بصيغة ISO القصيرة، واليوم
 /// المرجعي قابل للحقن للاختبار فلا زمن خفٍ في القراءة.
@@ -88,6 +100,14 @@ enum DiqqahRangePreset { today, thisMonth, lastMonth, thisYear }
       );
     case DiqqahRangePreset.thisYear:
       return (day(DateTime(now.year, 1, 1)), day(now));
+    case DiqqahRangePreset.previousYear:
+      // س234: السنة السابقة كاملة — أولها إلى آخرها (وآخرها كانون
+      // الأول السابق بعينه، فالشهر السابق دائماً مفعّل بحده الصحيح
+      // ولو كانت السنة الحالية جديدة).
+      return (
+        day(DateTime(now.year - 1, 1, 1)),
+        day(DateTime(now.year - 1, 12, 31)),
+      );
   }
 }
 

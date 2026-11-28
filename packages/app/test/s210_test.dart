@@ -197,8 +197,9 @@ void main() {
       expect(find.textContaining('فاتورة شراء 26000001'), findsOneWidget,
           reason: 'الكتابة لا تُطبَّق — الجاهز لحظي والمكتوب بزر عرض');
 
-      // زر العرض يُطبّق البحث بتطبيع المجال — الأمل بلا همزة تلتقي.
-      await tester.tap(find.text('عرض'));
+      // س234 (D-234 — المرحلة ب/3): زر عرض رُفع — التطبيق الفوري
+      // بتأخير قصير: مرور نصف الثانية بعد الكتابة يطبق البحث بتطبيع
+      // المجال (الأمل بلا همزة تلتقي) بلا أي ضغطة.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump(const Duration(milliseconds: 400));
@@ -213,7 +214,7 @@ void main() {
       await tester.enterText(
           find.widgetWithText(TextField, 'بحث بالطرف أو الرقم'),
           'لا شيء بهذا الاسم');
-      await tester.tap(find.text('عرض'));
+      // س234: التطبيق الفوري — مرور التأخير القصير يطبق البحث بلا ضغطة.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       await tester.pump(const Duration(milliseconds: 400));

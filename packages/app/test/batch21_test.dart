@@ -49,9 +49,8 @@ void main() {
     await tester.tap(find.text('مكتمل الاستلام').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('عرض'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    // س234 (D-234 — المرحلة ب/3): التطبيق الفوري — زر عرض رُفع فاختيار
+    // الفلتر يطبق لحظته بلا ضغطة ثانية.
     expect(find.textContaining('فاتورة شراء'), findsNothing,
         reason: 'الشراء غير مستلم فلا يمر بفلتر مكتمل الاستلام');
     expect(find.textContaining('فاتورة بيع'), findsOneWidget);

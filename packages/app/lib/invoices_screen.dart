@@ -1,3 +1,4 @@
+import 'dart:async' show Timer;
 import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:diqqah_storage/diqqah_storage.dart';
 import 'item_images.dart';
 import 'app_theme.dart';
 import 'adaptive.dart';
+import 'calendar_prefs.dart';
 import 'dq_log.dart';
 import 'item_media.dart';
 import 'print_copies.dart';
@@ -408,6 +410,36 @@ enum InvoiceArchiveSide {
 const String kSideFilterSales = 'sales';
 const String kSideFilterPurchases = 'purchases';
 
+/// س234 (D-234 — المرحلة ب/2 من خارطة الطريق الخماسية): السطر الفعلي
+/// الصغير فوق زر اختصار التاريخ — بلا سنة قرب الشهرين (اليوم بيومه
+/// واسم شهره، والشهران باسم شهرهما حصراً بأسماء الأشهر المختارة من
+/// خيار D-231) وسنوات الزوج الأخير بأرقامها وحدها (هذا العام برقمه
+/// والسنة السابقة برقمها — سنة «كانون الأول» السابق وحده) — نقية
+/// نقية تُختبر بلا قنوات (نمط س204 عينه)، واليوم المرجعي قابل للحقن.
+String diqqahPresetSmallLine(
+  DiqqahRangePreset preset, {
+  DateTime? today,
+  DiqqahMonthNames? names,
+}) {
+  final now = today ?? DateTime.now();
+  switch (preset) {
+    case DiqqahRangePreset.today:
+      return '${now.day} ${diqqahMonthName(now.month, names: names)}';
+    case DiqqahRangePreset.thisMonth:
+      return diqqahMonthName(now.month, names: names);
+    case DiqqahRangePreset.lastMonth:
+      // آخر يوم من الشهر الماضي — قوس السنة سالك فالشهر السابق مفعّل
+      // دائماً ولو كانت السنة جديدة (يناير: كانون الأول السابق).
+      final first = DateTime(now.year, now.month, 1);
+      final lastOfPrev = first.subtract(const Duration(days: 1));
+      return diqqahMonthName(lastOfPrev.month, names: names);
+    case DiqqahRangePreset.thisYear:
+      return '${now.year}';
+    case DiqqahRangePreset.previousYear:
+      return '${now.year - 1}';
+  }
+}
+
 class InvoicesScreen extends StatefulWidget {
   final DiqqahDatabase db;
 
@@ -452,6 +484,21 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// 'posted' (المرحّلة) — لسان صاحب البوابة الذي يبحث عن مسودات
   /// الآخرين (التعليق ملغى س164).
   String? _state;
+
+  /// س234 (D-234 — المرحلة ب/2 من خارطة الطريق الخماسية): الاختصار
+  /// المختار من أزرار التاريخ الخمسة — يتلون المختار، وتحرير الحقلين
+  /// يدوياً يفرغه (فلا تلوين بلا مطابقة)، والتطبيق فوري (لا زر عرض).
+  DiqqahRangePreset? _preset;
+
+  /// س234 (المرحلة ب/3): التطبيق الفوري — زر «عرض» رُفع فالكتابة
+  /// (البحث والمدى) تُطبَّق بتأخير قصير (نصف ثانية بلا ضغط آخر حرف)
+  /// والاختيارات الجاهزة (الفلاتر والاختصارات) لحظية.
+  Timer? _applyDebounce;
+
+  /// س234: حرس الملء الآلي — تطبيق الاختصار يملا الحقلين برمجياً
+  /// فيطلق مستمعيهما؛ فالحرس يمنع الاستطالة المزدوجة (ملءٌ فورّي
+  /// وحسب، لا تطبيق بعده).
+  bool _suppressFieldListener = false;
 
   /// س101: خيارات فلتر الحالة — الثلاثية المألوفة.
   static final List<(String?, String)> _stateChoices = [
@@ -525,14 +572,88 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     };
     _reload();
     _loadSession();
+    // س234 (المرحلة ب/3): التطبيق الفوري — البحث والمدى يستمعان
+    // للكتابة فيطبقانها بتأخير قصير (لا زر عرض بعد اليوم بسجل
+    // الفواتير — عقد D-234 بلسان الخطة «التطبيق الفوري»).
+    _search.addListener(_onSearchTyped);
+    _from.addListener(_onRangeTyped);
+    _to.addListener(_onRangeTyped);
   }
 
   @override
   void dispose() {
+    _applyDebounce?.cancel();
     _from.dispose();
     _to.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  /// س234: الكتابة بالبحث — تأخير قصير ثم التحميل (الديبونس بلا ضغط).
+  void _onSearchTyped() {
+    _applyDebounce?.cancel();
+    _applyDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      _reload();
+    });
+  }
+
+  /// س234: تحرير المدى يدوياً — تأخير قصير ثم التحميل حين يصلح
+  /// الزوجان (فارغ أو تاريخ سليم — فالمدى الفاسد المؤقت بكل حرف
+  /// لا يعيد شيئاً ولا يومض أخطاء)، والتحرير يفرغ التلوين.
+  void _onRangeTyped() {
+    if (_suppressFieldListener) return;
+    _applyDebounce?.cancel();
+    _applyDebounce = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+      final f = _from.text.trim();
+      final t = _to.text.trim();
+      // الزوج كلاهما أو لا: كلاهما فارغ (بلا مدى) أو كلاهما تاريخان
+      // سليمان — والزوج الناقص أو الفاسد انتظار كتابة لا تطبيق ولا
+      // وميض أخطاء بكل حرف (حرس المدقق أول — عرف D-077).
+      final bothEmpty = f.isEmpty && t.isEmpty;
+      final fDate = f.isEmpty ? null : DateTime.tryParse(f);
+      final tDate = t.isEmpty ? null : DateTime.tryParse(t);
+      if (!bothEmpty && (fDate == null || tDate == null)) return;
+      if (_preset != null) setState(() => _preset = null);
+      _reload();
+    });
+  }
+
+  /// س234 (المرحلة ب/2): تطبيق اختصار التاريخ فوراً — يملأ الحقلين
+  /// ويتلون المختار ويحمل (المسح المزدوج محروس فوق).
+  void _applyPreset(DiqqahRangePreset preset) {
+    _applyDebounce?.cancel();
+    final (f, t) = diqqahRangeShortcutDates(preset);
+    _suppressFieldListener = true;
+    _from.text = f;
+    _to.text = t;
+    _suppressFieldListener = false;
+    setState(() => _preset = preset);
+    _reload();
+  }
+
+  /// س234 (المرحلة ب/3): مسح الفلاتر — البحث والمدى والنوع والاستلام
+  /// والحالة إلى سذاجتها الأولى (النوع بجهة الدخول إن دخل ببلاطة
+  /// جهة) ثم التحميل — فالبداية النظيفة بضغطة واحدة بلا تفكيك يدوي.
+  void _clearFilters() {
+    _applyDebounce?.cancel();
+    _suppressFieldListener = true;
+    _from.clear();
+    _to.clear();
+    _search.clear();
+    _suppressFieldListener = false;
+    setState(() {
+      _kind = switch (widget.initialSide) {
+        InvoiceArchiveSide.sales => kSideFilterSales,
+        InvoiceArchiveSide.purchases => kSideFilterPurchases,
+        null => null,
+      };
+      _receipt = null;
+      _state = null;
+      _preset = null;
+    });
+    _reload();
   }
 
   void _reload() {
@@ -838,6 +959,108 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     }
   }
 
+  /// س234 (D-234 — المرحلة ب/2): أزرار التاريخ الخمسة بسطر واحد —
+  /// فوق كل زر سطره الفعلي الصغير (اليوم والشهران بأسماء الأشهر
+  /// المختارة بلا سنة — عقد «بلا سنة قرب الشهرين» — والسنتان
+  /// بأرقامهما وحدها — «سنة كانون الأول السابق وحده»)، والمختار
+  /// معبأ بلون الثيم والبقية محددة (تلوين المحدد)، والتحرير اليدوي
+  /// للحقول يفرغ التلوين — والتمرير الأفقي عند الضيق حصراً (عريض:
+  /// صف ممتد متوازن).
+  Widget _presetButtons() {
+    final entries = <(DiqqahRangePreset, String, Key)>[
+      (
+        DiqqahRangePreset.today,
+        S.todayPreset,
+        const ValueKey('invoices_preset_today')
+      ),
+      (
+        DiqqahRangePreset.thisMonth,
+        S.thisMonthPreset,
+        const ValueKey('invoices_preset_this_month')
+      ),
+      (
+        DiqqahRangePreset.lastMonth,
+        S.lastMonthPreset,
+        const ValueKey('invoices_preset_last_month')
+      ),
+      (
+        DiqqahRangePreset.thisYear,
+        S.thisYearPreset,
+        const ValueKey('invoices_preset_this_year')
+      ),
+      (
+        DiqqahRangePreset.previousYear,
+        S.previousYearPreset,
+        const ValueKey('invoices_preset_previous_year')
+      ),
+    ];
+    Widget button(DiqqahRangePreset preset, String label, Key key) {
+      final selected = _preset == preset;
+      final buttonChild = Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+      );
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            diqqahPresetSmallLine(preset),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 2),
+          SizedBox(
+            height: 36,
+            child: selected
+                ? FilledButton(
+                    key: key,
+                    onPressed: () => _applyPreset(preset),
+                    child: buttonChild,
+                  )
+                : OutlinedButton(
+                    key: key,
+                    onPressed: () => _applyPreset(preset),
+                    child: buttonChild,
+                  ),
+          ),
+        ],
+      );
+    }
+
+    return LayoutBuilder(builder: (context, constraints) {
+      // س234: التمرير الأفقي عند الضيق حصراً — تحت 480 عرضاً تمرُّ
+      // الأزرار أفقياً بعرض ثابت مريح، وفوقه صف ممتد متوازن.
+      final narrow = constraints.maxWidth < 480;
+      if (narrow) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < entries.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                SizedBox(width: 104, child: button(entries[i].$1, entries[i].$2, entries[i].$3)),
+              ],
+            ],
+          ),
+        );
+      }
+      return Row(
+        children: [
+          for (var i = 0; i < entries.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+                child: button(entries[i].$1, entries[i].$2, entries[i].$3)),
+          ],
+        ],
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -880,16 +1103,34 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                 diqqahAdaptiveHorizontalMargin(context), 4),
             child: Column(
               children: [
-                // س210 (بحث م11): صف البحث الأول — عنوان دائم وأيقونة
-                // مسبقة وisDense بنمط بحث الأطراف س206 حرفاً.
-                TextField(
-                  controller: _search,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    labelText: S.searchPartyOrNumber,
-                    isDense: true,
-                  ),
+                // س234 (المرحلة ب/3): البحث ومسح الفلاتر بسطر واحد —
+                // البحث يطبَّق بتأخير قصير (لا زر عرض بعد اليوم) والمسح
+                // بداية نظيفة بضغطة واحدة.
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _search,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.search),
+                          labelText: S.searchPartyOrNumber,
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      key: const ValueKey('invoices_clear_filters'),
+                      onPressed: _clearFilters,
+                      icon: const Icon(Icons.filter_alt_off_outlined),
+                      label: const Text(S.clearFiltersLabel),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 8),
+                // س234 (المرحلة ب/2): أزرار التاريخ الخمسة بسطر واحد —
+                // السطر الصغير الفعلي أعلى الزر والمختار ملون.
+                _presetButtons(),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -916,14 +1157,16 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                     ),
                   ],
                 ),
-                // س204 (م02 — اختصارات المدى): ملء سريع بلا إعادة
-                // تحميل — زر العرض القائم هو الفعّال بعرف D-077.
-                DiqqahRangeShortcuts(from: _from, to: _to),
+                const SizedBox(height: 8),
+                // س234 (المرحلة ب/3): الفلاتر الثلاثة بسطر واحد —
+                // النوع والاستلام والحالة — وزر «عرض» رُفع فالتطبيق
+                // فوري بالاختيار (نمط الطلبات الموثق س208 يسري هنا).
                 Row(
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: _kind,
+                        isExpanded: true,
                         decoration:
                             const InputDecoration(labelText: S.typeLabel),
                         items: [
@@ -931,9 +1174,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             DropdownMenuItem<String>(
                                 value: value, child: Text(label)),
                         ],
-                        // س210 (القاعدة الزمنية الموحدة): الاختيار الجاهز
-                        // يعيد التحميل لحظياً — نمط الطلبات الموثق س208
-                        // (والمدى والمكتوب حصراً بزره D-077).
+                        // س234: التطبيق الفوري — الاختيار الجاهز يحمل
+                        // لحظته فلا زر عرض أصلاً (عقد D-234).
                         onChanged: (value) {
                           _kind = value;
                           _reload();
@@ -941,17 +1183,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton(onPressed: _reload, child: const Text(S.viewButton)),
-                  ],
-                ),
-                // الدفعة 21 (F-168): فلتر الاستلام سطراً مستقلاً — درس
-                // س67: لا حشر عنصر بصف فيه Expanded فتنضغط القوائم
-                // المنسدلة وتنكسر الاختبارات.
-                Row(
-                  children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: _receipt,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                             labelText: S.receiptLabel),
                         items: [
@@ -959,22 +1194,17 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             DropdownMenuItem<String>(
                                 value: value, child: Text(label)),
                         ],
-                        // س210 (القاعدة الزمنية الموحدة): لحظياً بنمط الطلبات.
                         onChanged: (value) {
                           _receipt = value;
                           _reload();
                         },
                       ),
                     ),
-                  ],
-                ),
-                // س101: فلتر الحالة سطراً مستقلاً — عرف درس س67: لا حشر
-                // عنصر بصف فيه Expanded فتنضغط القوائم المنسدلة.
-                Row(
-                  children: [
+                    const SizedBox(width: 8),
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         initialValue: _state,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                             labelText: S.statusLabel),
                         items: [
@@ -982,7 +1212,6 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             DropdownMenuItem<String>(
                                 value: value, child: Text(label)),
                         ],
-                        // س210 (القاعدة الزمنية الموحدة): لحظياً بنمط الطلبات.
                         onChanged: (value) {
                           _state = value;
                           _reload();
@@ -1049,24 +1278,14 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                     // فالعرض المطبوع والمصدّر صورة العرض ذاتها (F-166).
                     for (final row in listDisplayPage(visible,
                         limit: _displayLimit))
-                      // س207 (بند 2): قائمة السياق الموحدة — اليمين سطح
-                      // المكتب والطويل الهاتف بالقائمة ذاتها بمصدر واحد
-                      // وفعالياتها هي الفعاليات القائمة حصراً.
-                      RecordContextMenu(
-                        actions: [
-                          RecordContextAction(
-                            label: S.invoiceDetailsTitle,
-                            icon: Icons.receipt_long_outlined,
-                            onSelected: () => _openDetail(row.id),
-                          ),
-                          RecordContextAction(
-                            label: S.quickPrint,
-                            icon: Icons.print_outlined,
-                            onSelected: () => _quickPrint(context, row.id),
-                          ),
-                          copyIdAction(context, row.id),
-                        ],
-                        child: ListTile(
+                      // س234 (D-234 — المرحلة ب/1): الأزرار الثلاثة لكل
+                      // سجل بمفاتيح مستقلة — عرض وطباعة ونسخ الرقم —
+                      // والافتراضي الزر الأول (نقر الصف عرض)، والقائمة
+                      // السياقية الموروثة (س207) رُفعت من هنا بقرار
+                      // الخطة «إلغاء السلوك الموروث» (فعالياتها الثلاث
+                      // هي الأزرار الثلاثة ذاتها فلا فعل ضائع).
+                      ListTile(
+                        key: ValueKey('invoice_row_${row.id}'),
                         title: Text(row.displayLabel),
                         subtitle: Text(
                             '${displayDate(row.invoiceDate)}'
@@ -1075,33 +1294,55 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                             // الدفعة 21 (F-168): حالة الاستلام بالصف —
                             // لسان القائمة هو ذاته لسان المطبوع والCSV.
                             ' · ${row.receiptLabel}'),
-                        // س-133/D-127: زر الطباعة السريع بجانب المبلغ —
-                        // يطبع القسيمة الواحدة بلا فتح التفاصيل.
+                        // س234 (D-234 — المرحلة ب/1): أثر السجل صف
+                        // واحد مثبت بنمط الأصل — الأزرار الثلاثة مكتنزة
+                        // والمبلغ آخر الصف (فلا عمود يفيض أبداً).
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             // س164: زر الترحيل على المسودات لأصحاب
-                            // البوابة حصراً — نفس المحرك لا مسار
-                            // موازٍ (ومسودة صاحب اليد من التفاصيل
-                            // بيده — فصل الأيدي).
+                            // البوابة حصراً — نفس المحرك لا مسار موازٍ.
                             if (row.state == 'draft' && _canPostOthers)
                               IconButton(
+                                key: ValueKey('invoice_post_${row.id}'),
                                 tooltip: S.postAction,
                                 icon: const Icon(Icons.task_alt_outlined),
                                 onPressed: () => _approve(row),
                               ),
                             IconButton(
-                              tooltip: S.printAction,
+                              key: ValueKey('invoice_view_${row.id}'),
+                              tooltip: S.invoiceDetailsTitle,
+                              icon: const Icon(Icons.visibility_outlined),
+                              onPressed: () => _openDetail(row.id),
+                            ),
+                            IconButton(
+                              key: ValueKey('invoice_print_${row.id}'),
+                              tooltip: S.quickPrint,
                               icon: const Icon(Icons.print_outlined),
                               onPressed: () => _quickPrint(context, row.id),
                             ),
+                            IconButton(
+                              key: ValueKey('invoice_copy_${row.id}'),
+                              tooltip: kCopyIdLabel,
+                              icon: const Icon(kCopyIdIcon),
+                              onPressed: () async {
+                                await Clipboard.setData(
+                                    ClipboardData(text: '${row.id}'));
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context)
+                                  ..hideCurrentSnackBar()
+                                  ..showSnackBar(const SnackBar(
+                                      content: Text(kCopiedSnack)));
+                              },
+                            ),
+                            const SizedBox(width: 4),
                             Text(
                                 '${formatMinorAmount(row.totalDocMinor)}'
                                 ' ${row.currencyCode}'),
                           ],
                         ),
+                        // الافتراضي الزر الأول: نقر الصف عرض التفاصيل.
                         onTap: () => _openDetail(row.id),
-                      ),
                       ),
                     if (visible.length > _displayLimit)
                       listDisplayExpandButton(
