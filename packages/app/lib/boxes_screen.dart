@@ -1,3 +1,5 @@
+import 'l10n/app_strings.dart';
+import 'bank_recon_screen.dart';
 import 'package:flutter/material.dart';
 
 import 'package:diqqah_domain/diqqah_domain.dart';
@@ -159,7 +161,14 @@ class _BoxesScreenState extends State<BoxesScreen> {
               // ونسخ المعرّف، والرصيد والأدوات القائمة ترِد كما هي.
               Card(
                 margin: const EdgeInsets.symmetric(vertical: 4),
-                child: RecordContextMenu(
+                child: Builder(builder: (context) {
+                  // س236 (د10): بادئة البنك بمتغير محلي — فالتداخل
+                  // المضفّر بسلسلة واحدة يُتعب — والوضوح أول.
+                  final bankPrefix = row.isBank
+                      ? '${S.bankWord} ${row.bankName ?? ''}'
+                          '${row.accountNumber == null ? '' : ' — ${row.accountNumber}'} · '
+                      : '';
+                  return RecordContextMenu(
                   actions: [
                     if (row.isActive)
                       RecordContextAction(
@@ -170,9 +179,14 @@ class _BoxesScreenState extends State<BoxesScreen> {
                     copyIdAction(context, row.boxId),
                   ],
                   child: ListTile(
-                    leading: const Icon(Icons.payments_outlined),
+                    // س236 (د10): البنكي بأيقونة الحساب الجاري.
+                    leading: Icon(row.isBank
+                        ? Icons.account_balance_outlined
+                        : Icons.payments_outlined),
                     title: Text(row.name),
-                    subtitle: Text('حساب ${row.accountCode}'
+                    subtitle: Text(
+                        '$bankPrefix'
+                        'حساب ${row.accountCode}'
                         ' · ${row.currencyCode}'
                         '${row.isActive ? '' : ' — معطل'}',
                         maxLines: 1,
@@ -180,6 +194,21 @@ class _BoxesScreenState extends State<BoxesScreen> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        // س236: زر التسوية البنكية للصناديق الجارية
+                        // البنكية النشطة حصراً — مستندها بنمط تسوية
+                        // الصندوق (57) بمدخل رصيد كشف البنك.
+                        if (row.isBank && row.isActive)
+                          IconButton(
+                            tooltip: S.bankReconTitle,
+                            icon: const Icon(Icons.fact_check_outlined),
+                            onPressed: () => Navigator.of(context)
+                                .push<bool>(MaterialPageRoute<bool>(
+                                    builder: (_) => BankReconScreen(
+                                        db: widget.db, box: row)))
+                                .then((posted) {
+                              if (posted == true) _reload();
+                            }),
+                          ),
                         Text(formatMinorAmount(row.balanceBaseMinor)),
                         if (row.isActive)
                           IconButton(
@@ -190,7 +219,8 @@ class _BoxesScreenState extends State<BoxesScreen> {
                       ],
                     ),
                   ),
-                ),
+                  );
+                }),
               ),
         ],
       ),
@@ -211,6 +241,13 @@ class BoxEditScreen extends StatefulWidget {
 
 class _BoxEditScreenState extends State<BoxEditScreen> {
   final TextEditingController _name = TextEditingController();
+
+  /// س236 (د10 — النوع الجارٍ من الترحيلة v38): نقدي افتراضاً أو جارٍ
+  /// بنكي — ومع الجاري اسم البنك ورقم الحساب (بيتان بيانيان).
+  String _kind = 'cash';
+  final TextEditingController _bankName = TextEditingController();
+  final TextEditingController _accountNumber = TextEditingController();
+
   int _currencyId = 1;
   List<CurrencyRow> _currencies = [];
   List<String>? _errors;
@@ -239,6 +276,8 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _bankName.dispose();
+    _accountNumber.dispose();
     super.dispose();
   }
 
@@ -256,6 +295,9 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
       await widget.db.createCashBox(
         name: _name.text.trim(),
         currencyId: _currencyId,
+        kind: _kind,
+        bankName: _bankName.text,
+        accountNumber: _accountNumber.text,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -319,6 +361,33 @@ class _BoxEditScreenState extends State<BoxEditScreen> {
                   onChanged: (value) =>
                       setState(() => _currencyId = value ?? 1),
                 ),
+                // س236 (د10): نوع الصندوق — نقدي أو جارٍ بنكي.
+                DropdownButtonFormField<String>(
+                  initialValue: _kind,
+                  decoration: const InputDecoration(
+                      labelText: S.boxKindLabel),
+                  items: const [
+                    DropdownMenuItem<String>(
+                        value: 'cash', child: Text(S.cashOption)),
+                    DropdownMenuItem<String>(
+                        value: 'bank', child: Text(S.bankKindLabel)),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _kind = value ?? 'cash'),
+                ),
+                if (_kind == 'bank') ...[
+                  TextField(
+                    controller: _bankName,
+                    decoration: const InputDecoration(
+                        labelText: S.bankNameFieldLabel,
+                        helperText: S.bankNameFieldHelper),
+                  ),
+                  TextField(
+                    controller: _accountNumber,
+                    decoration: const InputDecoration(
+                        labelText: S.bankAccountNumberLabel),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 FilledButton(
                   onPressed: _save,

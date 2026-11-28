@@ -580,4 +580,20 @@ abstract final class S {
   static const String splashStageSetupCheck = 'فحص التهيئة';
   static const String splashStageUpgradeSnapshot =
       'لقطة الأمان قبل ترقية المخطط';
+  // ===== البنوك (س236 — د10) =====
+  static const String bankAccountNumberLabel = 'رقم الحساب (اختياري)';
+  static const String bankKindLabel = 'جارٍ بنكي';
+  static const String bankNameFieldHelper = 'بيان الصندوق البنكي بقوائمه';
+  static const String bankNameFieldLabel = 'اسم البنك';
+  static const String bankWord = 'بنك';
+  static const String boxKindLabel = 'النوع — نقدي أو جارٍ بنكي (حساب بنك)';
+  static const String bankReconTitle = 'تسوية بنكية';
+  static const String bookBalanceLabel = 'الرصيد الدفتري';
+  static const String emptyReconList = 'لا تسويات بنكية بعد لهذا الصندوق';
+  static const String postReconButton = 'حفظ وترحيل التسوية';
+  static const String reconHistoryTitle = 'تسويات سابقة';
+  static const String reconNoDifference = 'لا فرق — الصندوقان متطابقان';
+  static const String reconReasonLabel = 'سبب الفرق (إلزامي)';
+  static const String statementBalanceHelper = 'كما في كشف البنك — يقارن بالدفتري فالفرق يقيد على 57';
+  static const String statementBalanceLabel = 'رصيد كشف البنك (بوحدة صغرى)';
 }

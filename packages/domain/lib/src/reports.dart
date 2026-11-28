@@ -130,6 +130,17 @@ TrialBalanceReport buildTrialBalance(
 class CashBoxReportRow {
   final int boxId;
   final String name;
+
+  /// س236 (د10 — نوع الصندوق الجارٍ من الترحيلة v38): 'cash' نقدي
+  /// و'bank' جارٍ بنكي — والبنكي يحمل اسم بنكه ورقم حسابه (المعروضان).
+  final String kind;
+  final String? bankName;
+
+  /// س236: رقم حساب البنك — بيان ثانٍ للصندوق البنكي.
+  final String? accountNumber;
+
+  /// س236: معرف العملة — التسوية البنكية تعمل بعملة صندوقها (D-086).
+  final int currencyId;
   final String currencyCode;
   final String accountCode;
   final int balanceBaseMinor;
@@ -138,11 +149,17 @@ class CashBoxReportRow {
   const CashBoxReportRow({
     required this.boxId,
     required this.name,
+    this.kind = 'cash',
+    this.bankName,
+    this.accountNumber,
+    this.currencyId = 1,
     required this.currencyCode,
     required this.accountCode,
     required this.balanceBaseMinor,
     required this.isActive,
   });
+
+  bool get isBank => kind == 'bank';
 }
 
 // ═══════════════════════════════════════════════════════════════════

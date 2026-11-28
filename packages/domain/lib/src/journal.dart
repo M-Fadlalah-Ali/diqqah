@@ -288,6 +288,7 @@ const Map<String, String> sequenceKindLabels = {
   'stock_transfer': 'تحويل بين مستودعات',
   'stock_count': 'جلسة جرد',
   'cash_adjustment': 'تسوية صندوق',
+  'bank_reconciliation': 'تسوية بنكية',
   // س121 — طلبات البيع والشراء (07 §3.2/D-026): تسلسل لكل اتجاه
   'order_sale': 'أمر بيع',
   'order_purchase': 'أمر شراء',
